@@ -31,7 +31,7 @@ export const DISTRICTS = {
   SKW: {
     code: 'SKW',
     name: '筲箕灣區',
-    apiBase: 'https://script.google.com/macros/s/REPLACE_SKW_DEPLOYMENT_ID/exec',
+    apiBase: 'https://script.google.com/macros/s/AKfycbzag_0DKfFYzjJYAlH9Sf3ojUGGDzIpQlEpRZWI5A-BZ7irOz2OguYVxlSCu9xw5hjJsw/exec',
     status: 'live',
     note: '模板區 / 首個接入區。',
   },
