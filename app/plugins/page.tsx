@@ -75,6 +75,11 @@ export default function PluginsPage() {
               <div className="ico">{p.icon}</div>
               <h3>{p.title}</h3>
               <div className="desc">{p.description}</div>
+              <div style={{ marginTop: 6 }}>
+                {p.needsDistrictBackend
+                  ? <span className="ver" style={{ background: '#fff3e0', color: '#e65100' }}>需自建後台</span>
+                  : <span className="ver" style={{ background: '#e8f5e9', color: '#2e7d32' }}>即插即用</span>}
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
                 {p.version && <span className="ver">v{p.version}</span>}
                 {p.embed && <span className="ver">無感</span>}

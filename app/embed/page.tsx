@@ -9,7 +9,7 @@ import type { UserSession, CardDef } from '@/lib/types';
 function EmbedInner() {
   const router = useRouter();
   const params = useSearchParams();
-  const { withDistrict } = useDistrict();
+  const { withDistrict, districtCode } = useDistrict();
   const cardId = params.get('card') || '';
   const [session, setSession] = useState<UserSession | null>(null);
   const [card, setCard] = useState<CardDef | null>(null);
@@ -31,9 +31,17 @@ function EmbedInner() {
     })();
   }, [router, cardId, withDistrict]);
 
-  const target = card && session
-    ? `${card.url}${card.url.includes('?') ? '&' : '?'}role=${encodeURIComponent(session.role)}&from=portal&embed=1`
-    : '';
+  function buildTarget(): string {
+    if (!card || !session) return '';
+    const sep = card.url.includes('?') ? '&' : '?';
+    const p = new URLSearchParams();
+    p.set('role', session.role);
+    p.set('from', 'portal');
+    p.set('embed', '1');
+    if (districtCode) p.set('d', districtCode); // 帶區碼進子系統
+    return `${card.url}${sep}${p.toString()}`;
+  }
+  const target = buildTarget();
 
   return (
     <div className="embed-shell">

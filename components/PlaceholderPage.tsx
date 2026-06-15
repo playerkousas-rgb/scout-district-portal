@@ -27,7 +27,7 @@ export default function PlaceholderPage({
       <p className="page-sub">{description}</p>
       <div className="placeholder-box">
         <div className="big">{icon}</div>
-        <p style={{ fontWeight: 700, color: '#5b2a86', marginBottom: 14 }}>此模組規劃中（佔位）</p>
+        <p style={{ fontWeight: 700, color: '#003366', marginBottom: 14 }}>此模組規劃中（佔位）</p>
         <div style={{ textAlign: 'left', maxWidth: 520, margin: '0 auto' }}>
           <p style={{ fontSize: 13, marginBottom: 8 }}>預計功能：</p>
           <ul style={{ fontSize: 13, lineHeight: 2, paddingLeft: 20 }}>

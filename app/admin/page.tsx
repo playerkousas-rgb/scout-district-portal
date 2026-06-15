@@ -139,7 +139,7 @@ export default function AdminPage() {
                 </div>
               </div>
             ))}
-            <div className="role-row" style={{ background: '#faf5ff' }}>
+            <div className="role-row" style={{ background: '#f0f6ff' }}>
               <input placeholder="角色碼（如 LIBRARIAN）" value={newCode} onChange={e => setNewCode(e.target.value)} style={{ width: 180 }} />
               <input placeholder="顯示名稱（如 圖書管理員）" value={newLabel} onChange={e => setNewLabel(e.target.value)} style={{ width: 200 }} />
               <div className="ractions">

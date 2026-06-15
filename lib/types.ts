@@ -61,6 +61,7 @@ export interface PluginItem {
   embed: boolean;
   type: CardType;
   installed: boolean;
+  needsDistrictBackend?: boolean; // true=複雜(各區需自建後台) false=簡單(即插即用共用)
 }
 
 export interface RegistryBundle {

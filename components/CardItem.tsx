@@ -7,8 +7,19 @@ const typeLabel: Record<string, string> = { builtin: '內建', jump: '跳轉', r
 
 export default function CardItem({ card, role }: { card: CardDef; role: string }) {
   const router = useRouter();
-  const { withDistrict } = useDistrict();
+  const { withDistrict, districtCode } = useDistrict();
   const isView = card.access === 'view';
+
+  /** 組出帶區碼 + 角色的外部網址 */
+  function buildExternalUrl(): string {
+    const sep = card.url.includes('?') ? '&' : '?';
+    const params = new URLSearchParams();
+    params.set('role', role);
+    params.set('from', 'portal');
+    // 自動把目前所選區碼帶給子系統（無感跳轉的關鍵）
+    if (districtCode) params.set('d', districtCode);
+    return `${card.url}${sep}${params.toString()}`;
+  }
 
   function handleClick() {
     if (card.type === 'builtin') {
@@ -16,8 +27,7 @@ export default function CardItem({ card, role }: { card: CardDef; role: string }
     } else if (card.embed) {
       router.push(withDistrict(`/embed?card=${encodeURIComponent(card.cardId)}`));
     } else {
-      const sep = card.url.includes('?') ? '&' : '?';
-      window.open(`${card.url}${sep}role=${encodeURIComponent(role)}&from=portal`, '_blank', 'noopener');
+      window.open(buildExternalUrl(), '_blank', 'noopener');
     }
   }
 
