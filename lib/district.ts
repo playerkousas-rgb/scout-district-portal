@@ -26,14 +26,22 @@ export interface DistrictInfo {
   maintenanceMessage?: string;
 }
 
-// ★ 區目錄：接新區在此加一筆（區碼大寫）
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║  新區接入 — 你要做 2 件事：                                      ║
+// ║  1. 在下面 DISTRICTS 加入新區（code, name, apiBase, status）       ║
+// ║  2. 在 Vercel Dashboard → Settings → Environment Variables 加：   ║
+// ║     PORTAL_{區碼}_APIKEY = 區方提交的 API Key                     ║
+// ║     例如區碼 CHW → 設 PORTAL_CHW_APIKEY=ak_xxxxxxxx             ║
+// ║  3. git push → Vercel 自動部署                                    ║
+// ╚══════════════════════════════════════════════════════════════════╝
+
 export const DISTRICTS = {
   SKW: {
     code: 'SKW',
     name: '筲箕灣區',
     apiBase: 'https://script.google.com/macros/s/AKfycbzag_0DKfFYzjJYAlH9Sf3ojUGGDzIpQlEpRZWI5A-BZ7irOz2OguYVxlSCu9xw5hjJsw/exec',
     status: 'live',
-    note: '模板區 / 首個接入區。',
+    note: '模板區 / 首個接入區。Vercel env: PORTAL_SKW_APIKEY',
   },
   // 範例：接入柴灣區時打開並填入該區自己的 exec 網址
   // CHW: {

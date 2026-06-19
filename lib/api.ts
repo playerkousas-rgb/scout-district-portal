@@ -1,30 +1,52 @@
 /**
- * API 封裝：呼叫「目前所選區」的 Apps Script Web App。
- * API_BASE 不再寫死，改用 district.ts 的 getApiBase()（多區）。
+ * API 封裝：所有請求經 /api/proxy 轉發，API Key 不經前端。
+ * 區碼從 localStorage 讀取（同 DBS 3.0 模式）。
  */
-import { getApiBase } from './district';
+
+import { DISTRICT_STORAGE_KEY } from './district';
 import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
   SystemState, RegistryBundle, PluginItem, RoleDef,
 } from './types';
 
-async function callGet(action: string, params: Record<string, string> = {}) {
-  const API_BASE = getApiBase();
-  const url = new URL(API_BASE);
-  url.searchParams.set('action', action);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const res = await fetch(url.toString());
-  return res.json();
+function getDistrictCode(): string {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem(DISTRICT_STORAGE_KEY) || '';
 }
 
-async function callPost(action: string, body: Record<string, unknown> = {}) {
-  const API_BASE = getApiBase();
-  const res = await fetch(API_BASE, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, ...body }),
-  });
-  return res.json();
+async function callGet<T = any>(action: string, params: Record<string, string> = {}): Promise<ApiResult<T>> {
+  const districtCode = getDistrictCode();
+  const url = new URL('/api/proxy', window.location.origin);
+  url.searchParams.set('districtCode', districtCode);
+  url.searchParams.set('action', action);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+
+  try {
+    const res = await fetch(url.toString(), { cache: 'no-store' });
+    const data = await res.json();
+    return data;
+  } catch (error) {
+    console.error('GET Error:', error);
+    return { ok: false, error: '連線失敗：請確認該區後台已部署且 API Key 已設定。' };
+  }
+}
+
+async function callPost<T = any>(action: string, body: Record<string, unknown> = {}): Promise<ApiResult<T>> {
+  const districtCode = getDistrictCode();
+  const postBody = { districtCode, action, ...body };
+
+  try {
+    const res = await fetch('/api/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(postBody),
+    });
+    const data = await res.json();
+    return data;
+  } catch (error) {
+    console.error('POST Error:', error);
+    return { ok: false, error: '連線失敗：請確認該區後台已部署且 API Key 已設定。' };
+  }
 }
 
 export const api = {
