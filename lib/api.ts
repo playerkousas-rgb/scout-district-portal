@@ -6,7 +6,7 @@
 import { DISTRICT_STORAGE_KEY } from './district';
 import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
-  SystemState, RegistryBundle, PluginItem, RoleDef,
+  SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
 } from './types';
 
 function getDistrictCode(): string {
@@ -78,6 +78,12 @@ export const api = {
     callPost('updateRole', { token, role, label }),
   deleteRole: (token: string, role: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteRole', { token, role }),
+
+  // 前端帳戶管理
+  getUsers: (token: string): Promise<ApiResult<PortalUser[]>> => callGet('getUsers', { token }),
+  batchCreateUsers: (token: string, users: BatchUserInput[]): Promise<ApiResult<{ created: number; skipped: number; rejected: { row: number; email: string; reason: string }[] }>> => callPost('batchCreateUsers', { token, users }),
+  updateUser: (token: string, email: string, patch: Partial<PortalUser> & { password?: string }): Promise<ApiResult<{ saved: boolean }>> => callPost('updateUser', { token, email, patch }),
+  deleteUser: (token: string, email: string): Promise<ApiResult<{ deleted: boolean }>> => callPost('deleteUser', { token, email }),
 
   // 系統鎖定
   getSystem: (): Promise<ApiResult<SystemState>> => callGet('getSystem'),

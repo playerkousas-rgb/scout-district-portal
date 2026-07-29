@@ -40,6 +40,22 @@ export interface UserSession {
   token: string;
 }
 
+export interface PortalUser {
+  email: string;
+  displayName: string;
+  role: string;
+  scopes: string;
+  active: boolean;
+}
+
+export interface BatchUserInput {
+  email: string;
+  displayName: string;
+  role: string;
+  password: string;
+  scopes?: string;
+}
+
 export interface DistrictConfig {
   districtName: string;
   theme?: string;

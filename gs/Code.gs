@@ -60,6 +60,7 @@ function doGet(e) {
       case 'getCards':       return json(getCards_(p.token));
       case 'verify':         return json(verify_(p.token));
       case 'getPerms':       return json(getPerms_(p.token));
+      case 'getUsers':       return json(getUsers_(p.token));
       case 'getSystem':      return json(ok(getSystemState_()));
       case 'getRegistry':    return json(getRegistry_(p.token));
       default:               return json(err('未知的 action: ' + action));
@@ -88,6 +89,9 @@ function doPost(e) {
       case 'updateRole':      return json(updateRole_(body.token, body.role, body.label));
       case 'deleteRole':      return json(deleteRole_(body.token, body.role));
       case 'setLock':         return json(setLock_(body.token, body.locked, body.message));
+      case 'batchCreateUsers': return json(batchCreateUsers_(body.token, body.users));
+      case 'updateUser':      return json(updateUser_(body.token, body.email, body.patch));
+      case 'deleteUser':      return json(deleteUser_(body.token, body.email));
       case 'installPlugin':   return json(installPlugin_(body.token, body.plugin));
       case 'uninstallPlugin': return json(uninstallPlugin_(body.token, body.cardId));
       default:                return json(err('未知的 action: ' + action));
@@ -427,6 +431,92 @@ function deleteRole_(token, role) {
     var header = psh.getRange(1, 1, 1, psh.getLastColumn()).getValues()[0];
     for (var c = header.length - 1; c >= 1; c--) if (String(header[c]).trim() === role) psh.deleteColumn(c + 1);
   }
+  return ok({ deleted: true });
+}
+
+// ===================== 前端帳戶管理 =====================
+
+function requireAdmin_(token) {
+  var t = checkToken_(token);
+  if (!t.valid) return { error: '登入已過期' };
+  if (!isAdminRole_(t.role)) return { error: '沒有權限' };
+  return t;
+}
+function isProtectedRole_(role) { var r = getRoleObj_(String(role).trim()); return !!r && String(r.protected).toUpperCase() === 'TRUE'; }
+function userRowIndex_(email) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
+  if (!sh) return -1;
+  var v = sh.getDataRange().getValues();
+  for (var i = 1; i < v.length; i++) if (String(v[i][0]).trim().toLowerCase() === String(email).trim().toLowerCase()) return i + 1;
+  return -1;
+}
+function getUsers_(token) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  // 絕不回傳 passwordHash / salt
+  var users = readSheet_(SHEET.USERS).filter(function (u) { return u.email; }).map(function (u) {
+    return { email: String(u.email).trim(), displayName: u.displayName || '', role: u.role || '', scopes: u.scopes || '', active: String(u.active).toUpperCase() !== 'FALSE' };
+  });
+  return ok(users);
+}
+function batchCreateUsers_(token, users) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!Array.isArray(users) || !users.length) return err('沒有帳戶資料');
+  if (users.length > 300) return err('每次最多開立 300 個帳戶');
+  var roles = readSheet_(SHEET.ROLES).map(function (r) { return String(r.role).trim(); });
+  var existing = {};
+  readSheet_(SHEET.USERS).forEach(function (u) { existing[String(u.email).trim().toLowerCase()] = true; });
+  var rows = [], rejected = [], seen = {};
+  users.forEach(function (u, i) {
+    var email = String((u || {}).email || '').trim().toLowerCase();
+    var name = String((u || {}).displayName || '').trim();
+    var role = String((u || {}).role || '').trim().toUpperCase();
+    var password = String((u || {}).password || '');
+    var scopes = String((u || {}).scopes || '').trim();
+    var reason = '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) reason = '電郵格式不正確';
+    else if (!name) reason = '顯示名稱必填';
+    else if (roles.indexOf(role) < 0) reason = '角色不存在';
+    else if (isProtectedRole_(role) && t.role !== DC_ROLE) reason = '只有區總監可開立受保護角色帳戶';
+    else if (password.length < 8) reason = '初始密碼最少 8 個字元';
+    else if (existing[email] || seen[email]) reason = '電郵已存在或重複';
+    if (reason) { rejected.push({ row: i + 1, email: email, reason: reason }); return; }
+    var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+    rows.push([email, sha256_(password + salt), salt, role, name, scopes, 'TRUE']);
+    seen[email] = true;
+  });
+  if (rows.length) {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
+    sh.getRange(sh.getLastRow() + 1, 1, rows.length, 7).setValues(rows);
+  }
+  return ok({ created: rows.length, rejected: rejected, skipped: rejected.length });
+}
+function updateUser_(token, email, patch) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  var row = userRowIndex_(email); if (row < 0) return err('找不到帳戶');
+  var current = readSheet_(SHEET.USERS).filter(function (u) { return String(u.email).trim().toLowerCase() === String(email).trim().toLowerCase(); })[0];
+  patch = patch || {};
+  if ((current && isProtectedRole_(current.role) || (patch.role && isProtectedRole_(patch.role))) && t.role !== DC_ROLE) return err('只有區總監可修改受保護角色帳戶');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
+  var roles = readSheet_(SHEET.ROLES).map(function (r) { return String(r.role).trim(); });
+  if (patch.role && roles.indexOf(String(patch.role).trim()) < 0) return err('角色不存在');
+  if (patch.displayName != null) sh.getRange(row, 5).setValue(String(patch.displayName).trim());
+  if (patch.role) sh.getRange(row, 4).setValue(String(patch.role).trim());
+  if (patch.scopes != null) sh.getRange(row, 6).setValue(String(patch.scopes).trim());
+  if (patch.active != null) sh.getRange(row, 7).setValue(patch.active ? 'TRUE' : 'FALSE');
+  if (patch.password != null && String(patch.password).length) {
+    if (String(patch.password).length < 8) return err('新密碼最少 8 個字元');
+    var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+    sh.getRange(row, 2, 1, 2).setValues([[sha256_(String(patch.password) + salt), salt]]);
+  }
+  return ok({ saved: true });
+}
+function deleteUser_(token, email) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  var row = userRowIndex_(email); if (row < 0) return err('找不到帳戶');
+  var current = readSheet_(SHEET.USERS).filter(function (u) { return String(u.email).trim().toLowerCase() === String(email).trim().toLowerCase(); })[0];
+  if (current && isProtectedRole_(current.role) && t.role !== DC_ROLE) return err('只有區總監可刪除受保護角色帳戶');
+  if (String(email).trim().toLowerCase() === String(t.email).trim().toLowerCase()) return err('不可刪除目前登入帳戶');
+  SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS).deleteRow(row);
   return ok({ deleted: true });
 }
 
