@@ -97,6 +97,7 @@ export default function HomePage() {
           </p>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {session.isAdmin && <button className="admin-btn" onClick={() => router.push(withDistrict('/users'))}>👥 帳戶管理</button>}
           {session.isAdmin && <button className="admin-btn" onClick={() => router.push(withDistrict('/plugins'))}>🧩 外掛市集</button>}
           {session.isAdmin && <button className="admin-btn" onClick={() => router.push(withDistrict('/admin'))}>⚙️ 權限/角色</button>}
           <button className="admin-btn" onClick={logout}>登出</button>
