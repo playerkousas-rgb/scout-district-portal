@@ -148,7 +148,10 @@ export interface VenueBooking {
   status?: string;
   reviewer?: string;
   reviewedAt?: string;
-  passcode?: string; // 批准後自動生成並電郵俾申請人嘅入場密碼
+  passcode?: string; // 批准後自動生成並電郵俾申請人嘅入場密碼（v4.0）
+  pwdRef?: string; // 電子鎖密碼記錄 ID（v4.0）
+  teamupEventId?: string; // 申請人經 Teamup 建立嘅 pending 事件（v4.0）
+  agreeRules?: string; // 已同意借用守則（v4.0）
 }
 export interface StockItem {
   itemId: string;

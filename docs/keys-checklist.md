@@ -1,7 +1,10 @@
-# 🔑 借場一條龍 — API Key 找回 + 驗證 Checklist
+# 🔑 借場一條龍 — API Key 找回 + 驗證 Checklist（統一後台 v4.0）
 
 > 你唔記得啲 Key 邊度嚟，好正常 — 因為佢哋收埋喺 **Vercel**（booking 專案）嘅環境變數，
 > 同你 **booking 系統 code** 入面嘅預設值。以下教你逐個倒返出嚟 + 驗證，唔使靠記憶。
+>
+> v4.0 統一後台 Config 主用 **`TEAMUP_*`** 欄名；舊欄名（`teamupApiKey` 等）仍然讀到（自動 fallback），
+> 舊 Config 冇搬都照行。
 
 ## 邊度搵 Key（3 個來源）
 1. **Vercel**：`skw-booking` 專案 → **Settings → Environment Variables**（大部分 Key 喺度）
@@ -11,13 +14,13 @@
 ---
 
 ## A. Teamup（共 3 條）
-| # | Config 欄位 | 係咩 | 去邊度攞 | 點驗證 |
-|---|---|---|---|---|
-| A1 | `teamupApiKey` | Teamup API Token | `get-ids.js` 預設值：`4032acf1e6d917809aeb334a16dd0bca82297e8f0f65cd6ec32e0d92bc37bbd2`（你話冇改過，可直接重用） | 見下面「驗證 Teamup」 |
-| A2 | `teamupCalendarId` | 日曆金鑰 `ks...` | Vercel env `TEAMUP_CALENDAR_ID` | 見下面「驗證 Teamup」 |
-| A3 | `teamupApprovedSubId` | 「確認借用區總部」子日曆 ID | Vercel env `TEAMUP_APPROVED_SUB_ID` | 用 `get-ids.js` 列出子日曆核對 |
+| # | Config 欄位（v4.0） | 舊欄名（仍兼容） | 係咩 | 去邊度攞 | 點驗證 |
+|---|---|---|---|---|---|
+| A1 | `TEAMUP_API_KEY` | `teamupApiKey` | Teamup API Token | `get-ids.js` 預設值：`4032acf1e6d917809aeb334a16dd0bca82297e8f0f65cd6ec32e0d92bc37bbd2`（你話冇改過，可直接重用） | 見下面「驗證 Teamup」 |
+| A2 | `TEAMUP_CALENDAR_KEY` | `teamupCalendarId` | 日曆金鑰 `ks...` | Vercel env `TEAMUP_CALENDAR_ID` | 見下面「驗證 Teamup」 |
+| A3 | `TEAMUP_APPROVED_SUBCAL_ID` | `teamupApprovedSubId` | 「確認借用區總部」子日曆 ID | Vercel env `TEAMUP_APPROVED_SUB_ID` | 用 `get-ids.js` 列出子日曆核對 |
 
-> A4 `teamupRejectedSubId`（拒絕子日曆）— **可選**，冇都行。
+> A4 `TEAMUP_REJECTED_SUBCAL_ID`（舊 `teamupRejectedSubId`，拒絕子日曆）— **可選**，冇都行。
 
 ### 驗證 Teamup
 ```bash
@@ -61,10 +64,10 @@ node get-lock-id.js
 ---
 
 ## 填咗點知 Work？
-1. 後台 Apps Script 貼上新 `gs/Code.gs` → 執行一次 `setupSheets()`。
+1. 後台 Apps Script 貼上新 `gs/Code.gs`（v4.0）→ 執行一次 `setupSheets()`（補建唔清空）。
 2. 喺 **Config** 頁填晒 A1–A3、B1–B5。
 3. `Venues` 表加一個場地。
-4. 成員系統申請 → 審批頁批核 → 如果 Teamup 出現「確認借用」事件、申請人收到密碼電郵，就代表全部 Key 啱。
+4. 成員系統申請 → 審批頁「✅ 批准」（`approveVenueBooking`）→ 如果 Teamup 出現「確認借用」事件、申請人收到密碼電郵，就代表全部 Key 啱。
 
 ## 最緊要：唔好喺 Chat 貼 Key
 呢啲係你系統秘密，唔好貼喺對話度。自己喺 Config 頁填就得，程式已經自動讀取。

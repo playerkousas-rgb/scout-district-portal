@@ -101,18 +101,18 @@ master GS 檔（已附標準 Script，只有區會存）
 ## 四、安全注意
 - 逐區改：`MASTER_EMAIL / MASTER_PW`（後門）、`TOKEN_SECRET='CHANGE_ME_*'` 一定要改每區不同，或移除後門。
 - API Key：每區自動隨機生成，存 Vercel env，唔出現喺前端。
-- 受保護工作表：Config / Users / CourseLinks（含每班 key）。
+- 受保護工作表：Config / Users / Staff / CourseLinks（含每班 key）。
 
 ---
 
 ## 五、檔案對照
 | 檔案 | 用途 |
 |---|---|
-| `gs/Code.gs` | 主後台（登入/角色/權限/一次性服務/訓練班目錄/批核轉發） |
+| `gs/Code.gs` | 主後台（統一後台 v4.0：登入/角色/權限/一次性服務/訓練班目錄/批核轉發/借場一條龍） |
 | `gs/Code.gs.course.js` | 每班標準收表 Script（表格回應/Input/Print 多分頁） |
 | `app/training` | 訓練班管理頁 |
 | `app/course-regs` | 訓練班報名審批頁 |
-| `app/venue-regs` | 場地借用審批頁（批准→自動生成密碼＋電郵） |
+| `app/venue-regs` | 場地借用審批頁（批准→approveVenueBooking：TTLock 密碼＋Teamup 轉色＋電郵） |
 | `app/stock-regs` | 物資借用審批頁 |
 | `app/activity-notices` | 活動知會頁 |
 | `docs/venue-booking-flow.md` | 借場一條龍流程（申請→審批→TTLock+Teamup+電郵） |

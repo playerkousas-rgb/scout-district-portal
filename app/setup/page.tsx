@@ -27,6 +27,7 @@ export default function SetupPage() {
           <li>部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：所有人）。</li>
           <li>複製 <code>/exec</code> 網址。</li>
           <li>把「區碼 + 區名 + /exec 網址 + API Key」交給平台管理員登記。</li>
+          <li>★ 統一後台：同一個後台同時服務<b>管理系統</b>同<b>成員系統（member-portal）</b>。同一個 API Key 會設定去兩個 Vercel 環境變數：<code>PORTAL_{'{'}區碼{'}'}_APIKEY</code> 同 <code>MEMBER_{'{'}區碼{'}'}_APIKEY</code>。</li>
         </ol>
       </div>
 
