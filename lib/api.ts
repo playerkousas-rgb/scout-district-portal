@@ -7,6 +7,7 @@ import { DISTRICT_STORAGE_KEY } from './district';
 import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
+  CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice,
 } from './types';
 
 function getDistrictCode(): string {
@@ -70,6 +71,15 @@ export const api = {
   savePerms: (token: string, matrix: Record<string, Record<string, AccessLevel>>):
     Promise<ApiResult<{ saved: boolean }>> =>
     callPost('savePerms', { token, matrix }),
+  setCardEnabled: (token: string, cardId: string, enabled: boolean):
+    Promise<ApiResult<{ saved: boolean; cardId: string; enabled: boolean }>> =>
+    callPost('setCardEnabled', { token, cardId, enabled }),
+  changePassword: (token: string, oldPassword: string, newPassword: string):
+    Promise<ApiResult<{ changed: boolean }>> =>
+    callPost('changePassword', { token, oldPassword, newPassword }),
+  setCategoryEnabled: (token: string, category: string, enabled: boolean):
+    Promise<ApiResult<{ saved: boolean; category: string; enabled: boolean; count: number }>> =>
+    callPost('setCategoryEnabled', { token, category, enabled }),
 
   // 角色管理（DC / SYSADMIN）
   addRole: (token: string, role: string, label: string): Promise<ApiResult<{ saved: boolean }>> =>
@@ -97,4 +107,40 @@ export const api = {
     callPost('installPlugin', { token, plugin }),
   uninstallPlugin: (token: string, cardId: string): Promise<ApiResult<{ uninstalled: boolean }>> =>
     callPost('uninstallPlugin', { token, cardId }),
+
+  // 訓練班（CourseLinks + 報名審批）
+  getCourseLinks: (token: string): Promise<ApiResult<CourseLink[]>> =>
+    callGet('getCourseLinks', { token }),
+  saveCourseLink: (token: string, link: CourseLink): Promise<ApiResult<{ saved: boolean; courseId: string }>> =>
+    callPost('saveCourseLink', { token, link }),
+  deleteCourseLink: (token: string, courseId: string): Promise<ApiResult<{ deleted: boolean }>> =>
+    callPost('deleteCourseLink', { token, courseId }),
+
+  // 借場
+  listVenues: (): Promise<ApiResult<Venue[]>> => callGet('listVenues'),
+  getVenueBookings: (token: string): Promise<ApiResult<VenueBooking[]>> => callGet('getVenueBookings', { token }),
+  setVenueBookingStatus: (token: string, id: string, status: string): Promise<ApiResult<{ saved: boolean }>> =>
+    callPost('setVenueBookingStatus', { token, id, status }),
+  saveVenue: (token: string, venue: Venue): Promise<ApiResult<{ saved: boolean }>> =>
+    callPost('saveVenue', { token, venue }),
+  deleteVenue: (token: string, venueId: string): Promise<ApiResult<{ deleted: boolean }>> =>
+    callPost('deleteVenue', { token, venueId }),
+
+  // 借物資
+  listItems: (): Promise<ApiResult<StockItem[]>> => callGet('listItems'),
+  getStockRequests: (token: string): Promise<ApiResult<StockRequest[]>> => callGet('getStockRequests', { token }),
+  setStockRequestStatus: (token: string, id: string, status: string): Promise<ApiResult<{ saved: boolean }>> =>
+    callPost('setStockRequestStatus', { token, id, status }),
+  saveItem: (token: string, item: StockItem): Promise<ApiResult<{ saved: boolean }>> =>
+    callPost('saveItem', { token, item }),
+  deleteItem: (token: string, itemId: string): Promise<ApiResult<{ deleted: boolean }>> =>
+    callPost('deleteItem', { token, itemId }),
+
+  // 知會
+  listActivityNotices: (params: Record<string, string> = {}): Promise<ApiResult<ActivityNotice[]>> =>
+    callGet('listActivityNotices', params),
+  submitActivityNotice: (data: Record<string, string>): Promise<ApiResult<{ refCode: string }>> =>
+    callPost('submitActivityNotice', data),
+  deleteActivityNotice: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
+    callPost('deleteActivityNotice', { token, id }),
 };

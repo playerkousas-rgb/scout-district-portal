@@ -100,6 +100,31 @@ export default function AdminPage() {
     } catch { setError('連線失敗'); } finally { setRoleBusy(''); }
   }
 
+  // 卡片開關（DC / SYSADMIN 超管可控制）
+  async function toggleCard(cardId: string, enabled: boolean) {
+    if (!session) return;
+    setRoleBusy('card:' + cardId); setError(''); setMsg('');
+    try {
+      const r = await api.setCardEnabled(session.token, cardId, enabled);
+      if (r.ok) { setMsg(`已${enabled ? '開啟' : '關閉'}卡片 ✓`); reload(session.token); }
+      else setError(r.error || '操作失敗');
+    } catch { setError('連線失敗'); } finally { setRoleBusy(''); }
+  }
+
+  // 一鍵開/關分類（done 已實作 / todo 加入中）
+  async function toggleCategory(category: string, enabled: boolean) {
+    if (!session) return;
+    const label = category === 'todo' ? '加入中' : '已實作';
+    if (enabled && !confirm(`確定一次過開啟全部「${label}」卡片？`)) return;
+    if (!enabled && !confirm(`確定一次過隱藏全部「${label}」卡片？`)) return;
+    setRoleBusy('cat:' + category); setError(''); setMsg('');
+    try {
+      const r = await api.setCategoryEnabled(session.token, category, enabled);
+      if (r.ok) { setMsg(`已${enabled ? '開啟' : '隱藏'} ${r.data?.count ?? 0} 張「${label}」卡片 ✓`); reload(session.token); }
+      else setError(r.error || '操作失敗');
+    } catch { setError('連線失敗'); } finally { setRoleBusy(''); }
+  }
+
   if (!session) return <div className="center"><div className="spinner" /></div>;
 
   return (
@@ -116,6 +141,16 @@ export default function AdminPage() {
           <button className="lock-btn danger" disabled={locking} onClick={() => toggleLock(true)}>鎖定系統</button>
           <button className="lock-btn" disabled={locking} onClick={() => toggleLock(false)}>解除鎖定</button>
           {lockMsg && <span className="ok-msg">{lockMsg}</span>}
+        </div>
+      </div>
+
+      {/* 卡片分類一鍵開關 */}
+      <div className="lock-panel" style={{ marginTop: 12 }}>
+        <b>📂 卡片分類</b>
+        <span> — 已實作（借場/借物資/知會/訓練班）vs 加入中。可一鍵全部隱藏加入中嘅卡片。</span>
+        <div className="lock-actions" style={{ gap: 8 }}>
+          <button className="lock-btn" disabled={roleBusy === 'cat:todo'} onClick={() => toggleCategory('todo', false)}>🙈 一鍵隱藏全部「加入中」</button>
+          <button className="lock-btn" disabled={roleBusy === 'cat:todo'} onClick={() => toggleCategory('todo', true)}>👁 一鍵顯示全部「加入中」</button>
         </div>
       </div>
 
@@ -160,6 +195,7 @@ export default function AdminPage() {
                   <th className="sticky-col">卡片＼角色</th>
                   {bundle.roles.map(r => <th key={r.role} title={r.role}>{r.label}{r.protected ? ' 🔒' : ''}</th>)}
                   <th>整列</th>
+                  <th>開關</th>
                 </tr>
               </thead>
               <tbody>
@@ -177,6 +213,16 @@ export default function AdminPage() {
                       <button className="mini-btn" onClick={() => setRow(c.cardId, 'view')}>👁</button>{' '}
                       <button className="mini-btn" onClick={() => setRow(c.cardId, 'edit')}>✏️</button>{' '}
                       <button className="mini-btn danger" onClick={() => setRow(c.cardId, '')}>✕</button>
+                    </td>
+                    <td>
+                      <button
+                        className={`mini-btn ${c.enabled ? '' : 'danger'}`}
+                        disabled={roleBusy === 'card:' + c.cardId}
+                        onClick={() => toggleCard(c.cardId, !c.enabled)}
+                        title={c.enabled ? '點擊關閉此卡片' : '點擊開啟此卡片'}
+                      >
+                        {c.enabled ? '🟢 開' : '⚪ 關'}
+                      </button>
                     </td>
                   </tr>
                 ))}

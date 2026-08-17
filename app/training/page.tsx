@@ -1,0 +1,141 @@
+'use client';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { api } from '@/lib/api';
+import { useRequireCard } from '@/lib/cardAccess';
+import { useDistrict } from '@/lib/useDistrict';
+import type { CourseLink, UserSession } from '@/lib/types';
+
+const EMPTY: CourseLink = {
+  courseId: '', title: '', badgeName: '', section: '', courseNo: '', sessionsText: '',
+  eligibility: '', fee: '', originalFee: '', subsidyNote: '', deadline: '', quota: '',
+  filled: '', venue: '', noticeUrl: '', contact: '', scriptExecUrl: '', scriptApiKey: '',
+  driveFolderId: '', active: 'TRUE', createdAt: '',
+};
+
+export default function TrainingPage() {
+  const router = useRouter();
+  const { withDistrict } = useDistrict();
+  const session = useRequireCard('training');
+  const [links, setLinks] = useState<CourseLink[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [msg, setMsg] = useState('');
+  const [draft, setDraft] = useState<CourseLink>(EMPTY);
+  const [editingId, setEditingId] = useState('');
+
+  async function load(s: UserSession) {
+    setLoading(true); setError('');
+    const r = await api.getCourseLinks(s.token);
+    if (r.ok && r.data) setLinks(r.data);
+    else setError(r.error || '無法載入訓練班');
+    setLoading(false);
+  }
+  useEffect(() => { if (session) { load(session); } }, [session]);
+
+  function startEdit(l: CourseLink) {
+    setEditingId(l.courseId);
+    setDraft({ ...EMPTY, ...l });
+    setMsg('');
+  }
+  function reset() { setEditingId(''); setDraft(EMPTY); setMsg(''); }
+  function set(k: keyof CourseLink, v: string) { setDraft(d => ({ ...d, [k]: v })); }
+
+  async function save() {
+    if (!session) return;
+    setError(''); setMsg('');
+    if (!draft.courseId.trim() || !draft.title.trim()) { setError('課程代碼與名稱必填'); return; }
+    const r = await api.saveCourseLink(session.token, draft);
+    if (r.ok) { setMsg('已儲存 ✓'); reset(); await load(session); }
+    else setError(r.error || '儲存失敗');
+  }
+  async function remove(l: CourseLink) {
+    if (!session) return;
+    if (!confirm(`確定刪除課程「${l.title}」？`)) return;
+    setError(''); setMsg('');
+    const r = await api.deleteCourseLink(session.token, l.courseId);
+    if (r.ok) { setMsg('已刪除 ✓'); reset(); await load(session); }
+    else setError(r.error || '刪除失敗');
+  }
+
+  if (!session) return <div className="center"><div className="spinner" /></div>;
+
+  return (
+    <>
+      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <h1 className="page-title">🎓 訓練班管理</h1>
+      <p className="page-sub">開班登記：每班 1 張專屬 Sheet + 1 份標準收表 Script + 1 個 Drive 資料夾。公開端只做報名寫入。</p>
+      {error && <div className="err">{error}</div>}
+      {msg && <div className="success">✓ {msg}</div>}
+
+      {/* 開班 / 編輯表單 */}
+      <section className="info-card">
+        <div className="section-head">
+          <div><h3>{editingId ? `編輯：${draft.title}` : '＋ 開新訓練班'}</h3></div>
+          {editingId && <button className="mini-btn" onClick={reset}>取消編輯</button>}
+        </div>
+        <div className="account-form" style={{ flexWrap: 'wrap', display: 'flex', gap: 8 }}>
+          <input placeholder="課程代碼 courseId *" value={draft.courseId} onChange={e => set('courseId', e.target.value)} disabled={!!editingId} style={{ width: 150 }} />
+          <input placeholder="課程名稱 *" value={draft.title} onChange={e => set('title', e.target.value)} style={{ width: 220 }} />
+          <input placeholder="徽章名稱 badgeName" value={draft.badgeName || ''} onChange={e => set('badgeName', e.target.value)} style={{ width: 150 }} />
+          <input placeholder="支部 section（童軍/幼童軍…）" value={draft.section || ''} onChange={e => set('section', e.target.value)} style={{ width: 170 }} />
+          <input placeholder="課程編號 courseNo" value={draft.courseNo || ''} onChange={e => set('courseNo', e.target.value)} style={{ width: 130 }} />
+          <input placeholder="費用 fee" value={draft.fee || ''} onChange={e => set('fee', e.target.value)} style={{ width: 100 }} />
+          <input placeholder="原價 originalFee" value={draft.originalFee || ''} onChange={e => set('originalFee', e.target.value)} style={{ width: 100 }} />
+          <input placeholder="截止 deadline" value={draft.deadline || ''} onChange={e => set('deadline', e.target.value)} style={{ width: 150 }} />
+          <input placeholder="名額 quota" value={draft.quota || ''} onChange={e => set('quota', e.target.value)} style={{ width: 100 }} />
+          <input placeholder="場地 venue" value={draft.venue || ''} onChange={e => set('venue', e.target.value)} style={{ width: 150 }} />
+          <input placeholder="通告連結 noticeUrl" value={draft.noticeUrl || ''} onChange={e => set('noticeUrl', e.target.value)} style={{ width: 300 }} />
+          <input placeholder="聯絡 contact" value={draft.contact || ''} onChange={e => set('contact', e.target.value)} style={{ width: 200 }} />
+        </div>
+        <div className="account-form" style={{ flexWrap: 'wrap', display: 'flex', gap: 8, marginTop: 8 }}>
+          <input placeholder="收表 Script /exec 網址 *" value={draft.scriptExecUrl || ''} onChange={e => set('scriptExecUrl', e.target.value)} style={{ width: 360 }} />
+          <input placeholder="該班 API Key（開班時顯示一次）" value={draft.scriptApiKey || ''} onChange={e => set('scriptApiKey', e.target.value)} style={{ width: 220 }} />
+          <input placeholder="入數紙 Drive 資料夾 ID" value={draft.driveFolderId || ''} onChange={e => set('driveFolderId', e.target.value)} style={{ width: 220 }} />
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={String(draft.active).toUpperCase() !== 'FALSE'} onChange={e => set('active', e.target.checked ? 'TRUE' : 'FALSE')} />
+            啟用
+          </label>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <button className="btn-sm" onClick={save}>{editingId ? '💾 儲存變更' : '＋ 開班登記'}</button>
+        </div>
+      </section>
+
+      {/* 課程列表 */}
+      <section className="info-card">
+        <div className="section-head"><div><h3>現有訓練班 <small>({links.length})</small></h3></div></div>
+        {loading ? <div className="small-loading">載入中…</div> : links.length === 0 ? (
+          <p className="empty">尚未有訓練班。用上方表單開班登記。</p>
+        ) : (
+          <table className="mtx-scroll" style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <thead>
+              <tr style={{ textAlign: 'left', fontSize: 13 }}>
+                <th>課程</th><th>支部</th><th>費用</th><th>截止</th><th>Script</th><th>Drive</th><th>狀態</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {links.map(l => (
+                <tr key={l.courseId} style={{ borderBottom: '1px solid #eee', fontSize: 13 }}>
+                  <td><b>{l.title}</b><br /><small className="rcode">{l.courseId}</small></td>
+                  <td>{l.section || '—'}</td>
+                  <td>{l.fee || '—'}</td>
+                  <td>{l.deadline || '—'}</td>
+                  <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {l.scriptExecUrl ? '✅ 已設定' : '⚠️ 未設定'}
+                  </td>
+                  <td>{l.driveFolderId ? '✅' : '⚠️'}</td>
+                  <td>{String(l.active).toUpperCase() !== 'FALSE' ? <span className="state on">啟用</span> : <span className="state off">停用</span>}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    <button className="mini-btn" onClick={() => startEdit(l)}>編輯</button>{' '}
+                    <button className="mini-btn danger" onClick={() => remove(l)}>刪除</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </>
+  );
+}

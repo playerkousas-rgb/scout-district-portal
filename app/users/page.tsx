@@ -7,7 +7,7 @@ import { loadSession } from '@/lib/session';
 import { useDistrict } from '@/lib/useDistrict';
 import type { BatchUserInput, PortalUser, RoleDef, UserSession } from '@/lib/types';
 
-const TEMPLATE = 'displayName,email,role,password,scopes\n王小明,member@example.com,ADC_SCOUT,ChangeMe2026,section:scout\n陳大文,leader@example.com,DDC_ADMIN,ChangeMe2026,admin\n';
+const TEMPLATE = 'displayName,email,role,password,scopes,cards\n王小明,member@example.com,ADC_SCOUT,ChangeMe2026,section:scout,\n陳大文,leader@example.com,DDC_ADMIN,ChangeMe2026,admin,\n';
 
 function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = []; let row: string[] = []; let field = ''; let quoted = false;
@@ -30,7 +30,10 @@ export default function UsersPage() {
   const [session, setSession] = useState<UserSession | null>(null); const [roles, setRoles] = useState<RoleDef[]>([]);
   const [users, setUsers] = useState<PortalUser[]>([]); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
   const [error, setError] = useState(''); const [message, setMessage] = useState(''); const [search, setSearch] = useState('');
-  const [draft, setDraft] = useState<BatchUserInput>({ displayName: '', email: '', role: '', password: '', scopes: '' });
+  const [draft, setDraft] = useState<BatchUserInput>({ displayName: '', email: '', role: '', password: '', scopes: '', cards: '' });
+  // 卡片範圍 (scope) 編輯器
+  const [editingCards, setEditingCards] = useState(''); // email
+  const [cardsDraft, setCardsDraft] = useState('');
   const [csvRows, setCsvRows] = useState<BatchUserInput[]>([]); const [csvName, setCsvName] = useState('');
 
   async function load(s: UserSession) {
@@ -43,10 +46,19 @@ export default function UsersPage() {
   useEffect(() => { const s = loadSession(); if (!s?.isAdmin) { router.replace(withDistrict('/')); return; } setSession(s); load(s); }, [router, withDistrict]);
   const filtered = useMemo(() => users.filter(u => `${u.displayName} ${u.email} ${u.role}`.toLowerCase().includes(search.toLowerCase())), [users, search]);
   function downloadTemplate() { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\uFEFF' + TEMPLATE], { type: 'text/csv;charset=utf-8' })); a.download = 'district-accounts-template.csv'; a.click(); URL.revokeObjectURL(a.href); }
-  function readFile(e: ChangeEvent<HTMLInputElement>) { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => { const data = parseCsv(String(r.result)); const mapped = data.map(x => ({ displayName: x.displayName || x.name || x['姓名'] || '', email: x.email || x['電郵'] || '', role: (x.role || x['角色'] || '').toUpperCase(), password: x.password || x['密碼'] || '', scopes: x.scopes || x['範圍'] || '' })); setCsvRows(mapped); setCsvName(f.name); setError(mapped.length ? '' : '找不到資料列；請使用下載的 CSV 範本。'); }; r.readAsText(f, 'utf-8'); }
-  async function submit(rows: BatchUserInput[]) { if (!session || !rows.length) return; setBusy(true); setError(''); setMessage(''); const r = await api.batchCreateUsers(session.token, rows); setBusy(false); if (!r.ok || !r.data) { setError(r.error || '開戶失敗'); return; } const rejected = r.data.rejected; setMessage(`已開立 ${r.data.created} 個帳戶${rejected.length ? `；${rejected.length} 列略過` : ''}。`); if (rejected.length) setError(rejected.map(x => `第 ${x.row} 列${x.email ? `（${x.email}）` : ''}：${x.reason}`).join('；')); setCsvRows([]); setCsvName(''); setDraft({ displayName: '', email: '', role: roles[0]?.role || '', password: '', scopes: '' }); await load(session); }
+  function readFile(e: ChangeEvent<HTMLInputElement>) { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => { const data = parseCsv(String(r.result)); const mapped = data.map(x => ({ displayName: x.displayName || x.name || x['姓名'] || '', email: x.email || x['電郵'] || '', role: (x.role || x['角色'] || '').toUpperCase(), password: x.password || x['密碼'] || '', scopes: x.scopes || x['範圍'] || '', cards: x.cards || x['卡片範圍'] || '' })); setCsvRows(mapped); setCsvName(f.name); setError(mapped.length ? '' : '找不到資料列；請使用下載的 CSV 範本。'); }; r.readAsText(f, 'utf-8'); }
+  async function submit(rows: BatchUserInput[]) { if (!session || !rows.length) return; setBusy(true); setError(''); setMessage(''); const r = await api.batchCreateUsers(session.token, rows); setBusy(false); if (!r.ok || !r.data) { setError(r.error || '開戶失敗'); return; } const rejected = r.data.rejected; setMessage(`已開立 ${r.data.created} 個帳戶${rejected.length ? `；${rejected.length} 列略過` : ''}。`); if (rejected.length) setError(rejected.map(x => `第 ${x.row} 列${x.email ? `（${x.email}）` : ''}：${x.reason}`).join('；')); setCsvRows([]); setCsvName(''); setDraft({ displayName: '', email: '', role: roles[0]?.role || '', password: '', scopes: '', cards: '' }); await load(session); }
   async function toggleUser(u: PortalUser) { if (!session) return; setBusy(true); const r = await api.updateUser(session.token, u.email, { active: !u.active }); setBusy(false); if (!r.ok) setError(r.error || '更新失敗'); else load(session); }
   async function removeUser(u: PortalUser) { if (!session || !confirm(`確定永久刪除「${u.displayName || u.email}」？`)) return; setBusy(true); const r = await api.deleteUser(session.token, u.email); setBusy(false); if (!r.ok) setError(r.error || '刪除失敗'); else { setMessage('帳戶已刪除。'); load(session); } }
+  async function saveCards(u: PortalUser) {
+    if (!session) return;
+    setBusy(true); setError(''); setMessage('');
+    const r = await api.updateUser(session.token, u.email, { cards: cardsDraft });
+    setBusy(false);
+    if (r.ok) { setMessage(`已更新 ${u.displayName || u.email} 嘅卡片範圍 ✓`); setEditingCards(''); await load(session); }
+    else setError(r.error || '更新失敗');
+  }
+  function startEditCards(u: PortalUser) { setEditingCards(u.email); setCardsDraft(u.cards || ''); }
   if (!session) return <div className="center"><div className="spinner" /></div>;
   return <>
     <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
@@ -60,6 +72,7 @@ export default function UsersPage() {
         <select value={draft.role} onChange={e => setDraft({ ...draft, role: e.target.value })}>{roles.map(r => <option key={r.role} value={r.role}>{r.label}（{r.role}）</option>)}</select>
         <input type="password" placeholder="初始密碼（最少 8 字元）*" value={draft.password} onChange={e => setDraft({ ...draft, password: e.target.value })}/>
         <input placeholder="範圍／scopes（選填）" value={draft.scopes} onChange={e => setDraft({ ...draft, scopes: e.target.value })}/>
+        <input placeholder="卡片範圍（選填，cardId 逗號分隔；留空=角色矩陣）" value={draft.cards || ''} onChange={e => setDraft({ ...draft, cards: e.target.value })}/>
         <button className="btn-sm" disabled={busy} onClick={() => submit([draft])}>＋ 開立帳戶</button>
       </div>
     </section>
@@ -69,7 +82,25 @@ export default function UsersPage() {
       {csvRows.length > 0 && <div className="batch-preview"><b>準備開立 {csvRows.length} 個帳戶</b><span>預覽：{csvRows.slice(0, 3).map(x => x.displayName || x.email).join('、')}{csvRows.length > 3 ? '…' : ''}</span><button className="btn-sm" disabled={busy} onClick={() => submit(csvRows)}>{busy ? '處理中…' : '🚀 確認批量開戶'}</button></div>}
     </section>
     <section className="info-card"><div className="section-head"><div><h3>現有帳戶 <small>({users.length})</small></h3></div><input className="search-input" placeholder="搜尋姓名、電郵或角色" value={search} onChange={e => setSearch(e.target.value)}/></div>
-      {loading ? <div className="small-loading">載入中…</div> : <div className="user-list">{filtered.map(u => <article className="user-row" key={u.email}><div className="user-identity"><b>{u.displayName || '未命名'}</b><span>{u.email}</span></div><div><span className="role-chip">{u.role}</span><span className={u.active ? 'state on' : 'state off'}>{u.active ? '啟用中' : '已停用'}</span></div><div className="user-actions"><button className="mini-btn" disabled={busy} onClick={() => toggleUser(u)}>{u.active ? '停用' : '啟用'}</button><button className="mini-btn danger" disabled={busy || u.email === session.email} onClick={() => removeUser(u)}>刪除</button></div></article>)}{!filtered.length && <p className="empty">沒有符合的帳戶。</p>}</div>}
+      {loading ? <div className="small-loading">載入中…</div> : <div className="user-list">{filtered.map(u => (
+        <article className="user-row" key={u.email}>
+          <div className="user-identity"><b>{u.displayName || '未命名'}</b><span>{u.email}</span></div>
+          <div><span className="role-chip">{u.role}</span><span className={u.active ? 'state on' : 'state off'}>{u.active ? '啟用中' : '已停用'}</span></div>
+          <div className="user-actions" style={{ flexWrap: 'wrap', gap: 6 }}>
+            <button className="mini-btn" disabled={busy} onClick={() => toggleUser(u)}>{u.active ? '停用' : '啟用'}</button>
+            <button className="mini-btn" disabled={busy || u.email === session.email} onClick={() => startEditCards(u)}>🎯 卡片範圍</button>
+            <button className="mini-btn danger" disabled={busy || u.email === session.email} onClick={() => removeUser(u)}>刪除</button>
+          </div>
+          {editingCards === u.email && (
+            <div style={{ flexBasis: '100%', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: '#f0f6ff', padding: 8, borderRadius: 8 }}>
+              <span style={{ fontSize: 12 }}>卡片範圍（cardId 逗號分隔；留空 = 用角色矩陣）：</span>
+              <input value={cardsDraft} onChange={e => setCardsDraft(e.target.value)} placeholder="例如 stockReg,venueReg,notices" style={{ flex: 1, minWidth: 200 }} />
+              <button className="btn-sm" disabled={busy} onClick={() => saveCards(u)}>儲存範圍</button>
+              <button className="mini-btn" onClick={() => setEditingCards('')}>取消</button>
+            </div>
+          )}
+        </article>
+      ))}{!filtered.length && <p className="empty">沒有符合的帳戶。</p>}</div>}
     </section>
   </>;
 }
