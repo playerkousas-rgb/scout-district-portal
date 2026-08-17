@@ -148,6 +148,7 @@ export interface VenueBooking {
   status?: string;
   reviewer?: string;
   reviewedAt?: string;
+  passcode?: string; // 批准後自動生成並電郵俾申請人嘅入場密碼
 }
 export interface StockItem {
   itemId: string;

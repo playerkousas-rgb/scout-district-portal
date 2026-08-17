@@ -57,7 +57,9 @@ export default function VenueRegsPage() {
     <>
       <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
       <h1 className="page-title">🏛 場地借用審批</h1>
-      <p className="page-sub">批核借場申請；場地清單每區開一次即可。</p>
+      <p className="page-sub">
+        批核借場申請（申請人於 member-portal 填表）；<b>批准後自動：設定 TTLock 限時密碼 → Teamup 轉色 → 電郵申請人</b>。
+      </p>
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}
 
@@ -74,6 +76,9 @@ export default function VenueRegsPage() {
               <span className="rcode">{b.refCode}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              {b.status === 'approved' && b.passcode && (
+                <span className="state on" style={{ letterSpacing: 1 }}>🔑 密碼 {b.passcode}</span>
+              )}
               <span className={`state ${b.status === 'approved' ? 'on' : b.status === 'pending' ? '' : 'off'}`}>{STATUS[b.status || 'pending'] || b.status}</span>
               <div className="user-actions" style={{ display: 'inline-flex', gap: 6 }}>
                 <button className="mini-btn" disabled={busy} onClick={() => setStatus(b, 'approved')}>✅ 批准</button>

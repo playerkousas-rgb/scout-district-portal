@@ -116,7 +116,7 @@ export const api = {
   deleteCourseLink: (token: string, courseId: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteCourseLink', { token, courseId }),
 
-  // 借場
+  // 借場（申請由 member-portal 公開端提交；呢度只做批核）
   listVenues: (): Promise<ApiResult<Venue[]>> => callGet('listVenues'),
   getVenueBookings: (token: string): Promise<ApiResult<VenueBooking[]>> => callGet('getVenueBookings', { token }),
   setVenueBookingStatus: (token: string, id: string, status: string): Promise<ApiResult<{ saved: boolean }>> =>

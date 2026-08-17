@@ -74,7 +74,7 @@ master GS 檔（已附標準 Script，只有區會存）
 ### 卡片對照
 | 卡片 | 路徑 | 用途 | 開一次? |
 |---|---|---|---|
-| 場地借用審批 | `/venue-regs` | 借場申請批核＋場地清單 | ✅ |
+| 區總部借場 | `/venue-regs` | 借場申請批核；**批准自動 TTLock 密碼 + Teamup 轉色 + 電郵申請人**（申請人喺 member-portal 填表） | ✅ |
 | 物資借用審批 | `/stock-regs` | 借物資批核＋庫存管理 | ✅ |
 | 活動知會 | `/activity-notices` | 知會記錄＋查閱（可排序/篩選） | ✅ |
 | 訓練班管理 | `/training` | 開班登記（Script/Drive/通告） | 每班 |
@@ -112,7 +112,11 @@ master GS 檔（已附標準 Script，只有區會存）
 | `gs/Code.gs.course.js` | 每班標準收表 Script（表格回應/Input/Print 多分頁） |
 | `app/training` | 訓練班管理頁 |
 | `app/course-regs` | 訓練班報名審批頁 |
-| `app/venue-regs` | 場地借用審批頁 |
+| `app/venue-regs` | 場地借用審批頁（批准→自動生成密碼＋電郵） |
 | `app/stock-regs` | 物資借用審批頁 |
 | `app/activity-notices` | 活動知會頁 |
+| `docs/venue-booking-flow.md` | 借場一條龍流程（申請→審批→TTLock+Teamup+電郵） |
+| `docs/keys-checklist.md` | **找回＋驗證 Teamup/TTLock API Key 嘅 checklist** |
+| `services/skw-booking/` | 選用：實體門鎖 TTLock 自動化（可選，非必要） |
+| `docs/skw-booking-setup.md` | 選用：實體門鎖整合參考 |
 | `docs/card-permission-plan.md` | 卡片＋角色權限矩陣規劃 |
