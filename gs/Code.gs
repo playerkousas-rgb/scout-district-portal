@@ -125,6 +125,7 @@ function doPost(e) {
       case 'deleteActivityNotice': return json(deleteActivityNotice_(body.token, body.id));
       case 'saveNotice':      return json(saveNotice_(body.token, body.notice));
       case 'deleteNotice':    return json(deleteNotice_(body.token, body.id));
+      case 'setCardEnabled':  return json(setCardEnabled_(body.token, body.cardId, body.enabled));
       default:                return json(err('未知的 action: ' + action));
     }
   } catch (ex) { return json(err('伺服器錯誤：' + ex)); }
@@ -473,6 +474,35 @@ function requireAdmin_(token) {
   if (!isAdminRole_(t.role)) return { error: '沒有權限' };
   return t;
 }
+
+/**
+ * 按「卡片」級權限檢查：該角色喺 Perms matrix 對該 card 有無 edit。
+ * 用嚟做到「A 管借場、B 管借物資，各自唔可以掂對方嗰樣」嘅硬權限。
+ */
+function requireCardEdit_(token, cardId) {
+  var t = checkToken_(token);
+  if (!t.valid) return { error: '登入已過期' };
+  var perms = readPerms_();
+  var access = ((perms[cardId] || {})[t.role] || '').toString();
+  if (access !== 'edit') return { error: '沒有權限' };
+  return t;
+}
+
+/**
+ * 卡片開關（DC / SYSADMIN 超管可控制）：
+ * 關閉後該卡片喺前端主控台唔再顯示（但 Perms matrix 仍保留，重開即可）。
+ */
+function setCardEnabled_(token, cardId, enabled) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  cardId = String(cardId || '').trim();
+  if (!cardId) return err('cardId 必填');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.CARDS);
+  var idx = rowIndexByCol_(sh, 'cardId', cardId);
+  if (idx < 0) return err('找不到該卡片');
+  setCellByHeader_(sh, idx, 'enabled', enabled ? 'TRUE' : 'FALSE');
+  return ok({ saved: true, cardId: cardId, enabled: !!enabled });
+}
 function isProtectedRole_(role) { var r = getRoleObj_(String(role).trim()); return !!r && String(r.protected).toUpperCase() === 'TRUE'; }
 function userRowIndex_(email) {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
@@ -724,8 +754,7 @@ function getCourseLinks_(token) {
 }
 
 function saveCourseLink_(token, link) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canManageCourses_(t.role)) return err('沒有權限管理訓練班');
+  var t = requireCardEdit_(token, 'training'); if (t.error) return err(t.error);
   link = link || {};
   var courseId = String(link.courseId || '').trim();
   var title = String(link.title || '').trim();
@@ -749,8 +778,7 @@ function saveCourseLink_(token, link) {
 }
 
 function deleteCourseLink_(token, courseId) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canManageCourses_(t.role)) return err('沒有權限管理訓練班');
+  var t = requireCardEdit_(token, 'training'); if (t.error) return err(t.error);
   courseId = String(courseId || '').trim();
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSE_LINKS), courseId);
   return ok({ deleted: true });
@@ -774,14 +802,14 @@ function forwardCourse_(link, payload) {
 }
 
 function listCourseRegs_(token, courseId) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  var t = requireCardEdit_(token, 'courseRegs'); if (t.error) return err(t.error);
   var link = getCourseLinkByCourseId_(courseId);
   if (!link) return err('找不到課程');
   return forwardCourse_(link, { action: 'listRegs', courseId: courseId });
 }
 
 function setCourseRegStatus_(token, courseId, id, status) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  var t = requireCardEdit_(token, 'courseRegs'); if (t.error) return err(t.error);
   var link = getCourseLinkByCourseId_(courseId);
   if (!link) return err('找不到課程');
   if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(String(status).toLowerCase()) < 0) return err('狀態不正確');
@@ -815,8 +843,7 @@ function listVenues_() {
   });
 }
 function saveVenue_(token, venue) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requireCardEdit_(token, 'venueReg'); if (t.error) return err(t.error);
   venue = venue || {};
   var venueId = String(venue.venueId || '').trim();
   var name = String(venue.name || '').trim();
@@ -831,8 +858,7 @@ function saveVenue_(token, venue) {
   return ok({ saved: true });
 }
 function deleteVenue_(token, venueId) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requireCardEdit_(token, 'venueReg'); if (t.error) return err(t.error);
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUES), String(venueId).trim());
   return ok({ deleted: true });
 }
@@ -855,13 +881,11 @@ function submitVenueRequest_(b) {
   return { ok: true, refCode: row.refCode };
 }
 function getVenueBookings_(token) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requireCardEdit_(token, 'venueReg'); if (t.error) return err(t.error);
   return ok(readSheet_(SHEET.VENUE_REQ).reverse());
 }
 function setVenueBookingStatus_(token, id, status) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requireCardEdit_(token, 'venueReg'); if (t.error) return err(t.error);
   if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(String(status).toLowerCase()) < 0) return err('狀態不正確');
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
   var idx = rowIndexByCol_(sh, 'id', String(id).trim());
@@ -879,8 +903,7 @@ function listItems_() {
   });
 }
 function saveItem_(token, item) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requireCardEdit_(token, 'stockReg'); if (t.error) return err(t.error);
   item = item || {};
   var itemId = String(item.itemId || '').trim();
   var name = String(item.name || '').trim();
@@ -895,8 +918,7 @@ function saveItem_(token, item) {
   return ok({ saved: true });
 }
 function deleteItem_(token, itemId) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requireCardEdit_(token, 'stockReg'); if (t.error) return err(t.error);
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ITEMS), String(itemId).trim());
   return ok({ deleted: true });
 }
@@ -923,13 +945,11 @@ function submitStockRequest_(b) {
   return { ok: true, refCode: row.refCode };
 }
 function getStockRequests_(token) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requireCardEdit_(token, 'stockReg'); if (t.error) return err(t.error);
   return ok(readSheet_(SHEET.STOCK_REQ).reverse());
 }
 function setStockRequestStatus_(token, id, status) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requireCardEdit_(token, 'stockReg'); if (t.error) return err(t.error);
   if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(String(status).toLowerCase()) < 0) return err('狀態不正確');
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName(SHEET.STOCK_REQ);
@@ -992,8 +1012,7 @@ function listActivityNotices_(p) {
   });
 }
 function deleteActivityNotice_(token, id) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requireCardEdit_(token, 'activity'); if (t.error) return err(t.error);
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ACTIVITY_REQ), String(id).trim());
   return ok({ deleted: true });
 }
@@ -1012,8 +1031,7 @@ function listNotices_(p) {
   });
 }
 function saveNotice_(token, notice) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requireCardEdit_(token, 'notices'); if (t.error) return err(t.error);
   notice = notice || {};
   var title = String(notice.title || '').trim();
   if (!title) return err('通告標題必填');
@@ -1033,8 +1051,7 @@ function saveNotice_(token, notice) {
   return ok({ saved: true, id: id });
 }
 function deleteNotice_(token, id) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requireCardEdit_(token, 'notices'); if (t.error) return err(t.error);
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NOTICES), String(id).trim());
   return ok({ deleted: true });
 }
@@ -1100,13 +1117,13 @@ function setupSheets() {
     ['awards','獎勵提名','🎖','builtin','/awards','讀獲獎名單 · 推下一級','3','TRUE','FALSE','core'],
     ['annual','週年會議文件','📂','builtin','/annual-docs','議程 · 紀錄 · 6月前籌備','4','TRUE','FALSE','core'],
     ['budget','區年度預算','📑','builtin','/budget','年度預算編列與追蹤','5','TRUE','FALSE','core'],
-    ['meeting','會議行事曆','📅','jump','https://REPLACE_TEAMUP_URL','幹部/執委/週年會議','6','TRUE','TRUE','core'],
-    ['committee','委任系統','🗂','jump','https://REPLACE_APPOINTMENT_URL','委任 · 續任 · R02','7','TRUE','TRUE','core'],
-    ['unit','旅團管理系統','🧭','jump','https://REPLACE_UNIT_URL','旅名冊 · 人數統計','8','TRUE','TRUE','core'],
+    ['meeting','會議行事曆','📅','builtin','/meeting','幹部/執委/週年會議','6','TRUE','FALSE','core'],
+    ['committee','委任系統','🗂','builtin','/committee','委任 · 續任 · R02','7','TRUE','FALSE','core'],
+    ['unit','旅團管理系統','🧭','builtin','/unit','旅名冊 · 人數統計','8','TRUE','FALSE','core'],
     ['venueReg','場地借用審批','🏛','builtin','/venue-regs','借場申請批核 · 場地清單','9','TRUE','FALSE','core'],
     ['stockReg','物資借用審批','📦','builtin','/stock-regs','借物資批核 · 庫存管理','10','TRUE','FALSE','core'],
     ['activity','活動知會','🗓','builtin','/activity-notices','旅團活動知會記錄 · 查閱','11','TRUE','FALSE','core'],
-    ['incident','意外 / 應變','🚨','resource','https://www.scout.org.hk','通報 · 惡劣天氣','12','TRUE','FALSE','core'],
+    ['incident','意外 / 應變','🚨','builtin','/incident','通報 · 惡劣天氣','12','TRUE','FALSE','core'],
     ['training','訓練班管理','🎓','builtin','/training','開班登記 · Script/Drive/通告','13','TRUE','FALSE','core'],
     ['courseRegs','訓練班報名審批','📝','builtin','/course-regs','檢視名單 · 批核 status','14','TRUE','FALSE','core'],
     ['notices','通告庫','📢','builtin','/notices','發佈及管理通告','15','TRUE','FALSE','core'],

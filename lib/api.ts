@@ -71,6 +71,9 @@ export const api = {
   savePerms: (token: string, matrix: Record<string, Record<string, AccessLevel>>):
     Promise<ApiResult<{ saved: boolean }>> =>
     callPost('savePerms', { token, matrix }),
+  setCardEnabled: (token: string, cardId: string, enabled: boolean):
+    Promise<ApiResult<{ saved: boolean; cardId: string; enabled: boolean }>> =>
+    callPost('setCardEnabled', { token, cardId, enabled }),
 
   // 角色管理（DC / SYSADMIN）
   addRole: (token: string, role: string, label: string): Promise<ApiResult<{ saved: boolean }>> =>

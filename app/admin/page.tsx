@@ -100,6 +100,17 @@ export default function AdminPage() {
     } catch { setError('連線失敗'); } finally { setRoleBusy(''); }
   }
 
+  // 卡片開關（DC / SYSADMIN 超管可控制）
+  async function toggleCard(cardId: string, enabled: boolean) {
+    if (!session) return;
+    setRoleBusy('card:' + cardId); setError(''); setMsg('');
+    try {
+      const r = await api.setCardEnabled(session.token, cardId, enabled);
+      if (r.ok) { setMsg(`已${enabled ? '開啟' : '關閉'}卡片 ✓`); reload(session.token); }
+      else setError(r.error || '操作失敗');
+    } catch { setError('連線失敗'); } finally { setRoleBusy(''); }
+  }
+
   if (!session) return <div className="center"><div className="spinner" /></div>;
 
   return (
@@ -160,6 +171,7 @@ export default function AdminPage() {
                   <th className="sticky-col">卡片＼角色</th>
                   {bundle.roles.map(r => <th key={r.role} title={r.role}>{r.label}{r.protected ? ' 🔒' : ''}</th>)}
                   <th>整列</th>
+                  <th>開關</th>
                 </tr>
               </thead>
               <tbody>
@@ -177,6 +189,16 @@ export default function AdminPage() {
                       <button className="mini-btn" onClick={() => setRow(c.cardId, 'view')}>👁</button>{' '}
                       <button className="mini-btn" onClick={() => setRow(c.cardId, 'edit')}>✏️</button>{' '}
                       <button className="mini-btn danger" onClick={() => setRow(c.cardId, '')}>✕</button>
+                    </td>
+                    <td>
+                      <button
+                        className={`mini-btn ${c.enabled ? '' : 'danger'}`}
+                        disabled={roleBusy === 'card:' + c.cardId}
+                        onClick={() => toggleCard(c.cardId, !c.enabled)}
+                        title={c.enabled ? '點擊關閉此卡片' : '點擊開啟此卡片'}
+                      >
+                        {c.enabled ? '🟢 開' : '⚪ 關'}
+                      </button>
                     </td>
                   </tr>
                 ))}
