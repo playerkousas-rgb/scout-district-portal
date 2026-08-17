@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { loadSession } from '@/lib/session';
+import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { ActivityNotice, UserSession } from '@/lib/types';
 
@@ -15,7 +15,7 @@ const EMPTY = { troop: '', activityName: '', section: '', nature: '', year: '', 
 export default function ActivityNoticesPage() {
   const router = useRouter();
   const { withDistrict } = useDistrict();
-  const [session, setSession] = useState<UserSession | null>(null);
+  const session = useRequireCard('activity');
   const [notices, setNotices] = useState<ActivityNotice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -37,11 +37,7 @@ export default function ActivityNoticesPage() {
     else setError(r.error || '無法載入知會');
     setLoading(false);
   }
-  useEffect(() => {
-    const s = loadSession();
-    if (!s) { router.replace(withDistrict('/')); return; }
-    setSession(s); load();
-  }, [router, withDistrict]);
+  useEffect(() => { if (session) { load(); } }, [session]);
 
   const years = useMemo(() => Array.from(new Set(notices.map(n => n.year).filter(Boolean))) as string[], [notices]);
   const isOps = !!session && OPS_ROLES.includes(session.role);

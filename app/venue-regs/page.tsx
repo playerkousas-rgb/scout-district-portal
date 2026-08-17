@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { loadSession } from '@/lib/session';
+import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession, Venue, VenueBooking } from '@/lib/types';
 
@@ -11,7 +11,7 @@ const STATUS: Record<string, string> = { pending: '待批', approved: '已批', 
 export default function VenueRegsPage() {
   const router = useRouter();
   const { withDistrict } = useDistrict();
-  const [session, setSession] = useState<UserSession | null>(null);
+  const session = useRequireCard('venueReg');
   const [bookings, setBookings] = useState<VenueBooking[]>([]);
   const [venues, setVenues] = useState<Venue[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,11 +27,7 @@ export default function VenueRegsPage() {
     if (v.ok && v.data) setVenues(v.data);
     setLoading(false);
   }
-  useEffect(() => {
-    const s = loadSession();
-    if (!s) { router.replace(withDistrict('/')); return; }
-    setSession(s); load(s);
-  }, [router, withDistrict]);
+  useEffect(() => { if (session) { load(session); } }, [session]);
 
   async function setStatus(b: VenueBooking, status: string) {
     if (!session) return;

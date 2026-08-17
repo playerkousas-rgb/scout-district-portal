@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { loadSession } from '@/lib/session';
+import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { CourseLink, UserSession } from '@/lib/types';
 
@@ -16,7 +16,7 @@ const EMPTY: CourseLink = {
 export default function TrainingPage() {
   const router = useRouter();
   const { withDistrict } = useDistrict();
-  const [session, setSession] = useState<UserSession | null>(null);
+  const session = useRequireCard('training');
   const [links, setLinks] = useState<CourseLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -31,11 +31,7 @@ export default function TrainingPage() {
     else setError(r.error || '無法載入訓練班');
     setLoading(false);
   }
-  useEffect(() => {
-    const s = loadSession();
-    if (!s) { router.replace(withDistrict('/')); return; }
-    setSession(s); load(s);
-  }, [router, withDistrict]);
+  useEffect(() => { if (session) { load(session); } }, [session]);
 
   function startEdit(l: CourseLink) {
     setEditingId(l.courseId);

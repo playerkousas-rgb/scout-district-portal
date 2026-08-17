@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { loadSession } from '@/lib/session';
+import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { CourseLink, CourseReg, UserSession } from '@/lib/types';
 
@@ -13,7 +13,7 @@ const STATUS_LABEL: Record<string, string> = {
 export default function CourseRegsPage() {
   const router = useRouter();
   const { withDistrict } = useDistrict();
-  const [session, setSession] = useState<UserSession | null>(null);
+  const session = useRequireCard('courseRegs');
   const [links, setLinks] = useState<CourseLink[]>([]);
   const [courseId, setCourseId] = useState('');
   const [regs, setRegs] = useState<CourseReg[]>([]);
@@ -27,11 +27,7 @@ export default function CourseRegsPage() {
     if (r.ok && r.data) setLinks(r.data);
     else setError(r.error || '無法載入訓練班');
   }
-  useEffect(() => {
-    const s = loadSession();
-    if (!s) { router.replace(withDistrict('/')); return; }
-    setSession(s); loadCourses(s); setLoading(false);
-  }, [router, withDistrict]);
+  useEffect(() => { if (session) { loadCourses(session); setLoading(false); } }, [session]);
 
   async function loadRegs(cid: string) {
     if (!session || !cid) return;

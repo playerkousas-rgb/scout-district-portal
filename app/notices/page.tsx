@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { loadSession } from '@/lib/session';
+import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { Notice, UserSession } from '@/lib/types';
 
@@ -12,7 +12,7 @@ const EMPTY = { title: '', category: '', url: '', body: '', active: true };
 export default function NoticesPage() {
   const router = useRouter();
   const { withDistrict } = useDistrict();
-  const [session, setSession] = useState<UserSession | null>(null);
+  const session = useRequireCard('notices');
   const [notices, setNotices] = useState<Notice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -27,11 +27,7 @@ export default function NoticesPage() {
     if (r.ok && r.data) setNotices(r.data); else setError(r.error || '無法載入通告');
     setLoading(false);
   }
-  useEffect(() => {
-    const s = loadSession();
-    if (!s) { router.replace(withDistrict('/')); return; }
-    setSession(s); load();
-  }, [router, withDistrict]);
+  useEffect(() => { if (session) { load(); } }, [session]);
 
   const isOps = !!session && OPS_ROLES.includes(session.role);
 

@@ -476,19 +476,6 @@ function requireAdmin_(token) {
 }
 
 /**
- * 按「卡片」級權限檢查：該角色喺 Perms matrix 對該 card 有無 edit。
- * 用嚟做到「A 管借場、B 管借物資，各自唔可以掂對方嗰樣」嘅硬權限。
- */
-function requireCardEdit_(token, cardId) {
-  var t = checkToken_(token);
-  if (!t.valid) return { error: '登入已過期' };
-  var perms = readPerms_();
-  var access = ((perms[cardId] || {})[t.role] || '').toString();
-  if (access !== 'edit') return { error: '沒有權限' };
-  return t;
-}
-
-/**
  * 卡片開關（DC / SYSADMIN 超管可控制）：
  * 關閉後該卡片喺前端主控台唔再顯示（但 Perms matrix 仍保留，重開即可）。
  */
@@ -754,7 +741,8 @@ function getCourseLinks_(token) {
 }
 
 function saveCourseLink_(token, link) {
-  var t = requireCardEdit_(token, 'training'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canManageCourses_(t.role)) return err('沒有權限管理訓練班');
   link = link || {};
   var courseId = String(link.courseId || '').trim();
   var title = String(link.title || '').trim();
@@ -778,7 +766,8 @@ function saveCourseLink_(token, link) {
 }
 
 function deleteCourseLink_(token, courseId) {
-  var t = requireCardEdit_(token, 'training'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canManageCourses_(t.role)) return err('沒有權限管理訓練班');
   courseId = String(courseId || '').trim();
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSE_LINKS), courseId);
   return ok({ deleted: true });
@@ -802,14 +791,14 @@ function forwardCourse_(link, payload) {
 }
 
 function listCourseRegs_(token, courseId) {
-  var t = requireCardEdit_(token, 'courseRegs'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
   var link = getCourseLinkByCourseId_(courseId);
   if (!link) return err('找不到課程');
   return forwardCourse_(link, { action: 'listRegs', courseId: courseId });
 }
 
 function setCourseRegStatus_(token, courseId, id, status) {
-  var t = requireCardEdit_(token, 'courseRegs'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
   var link = getCourseLinkByCourseId_(courseId);
   if (!link) return err('找不到課程');
   if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(String(status).toLowerCase()) < 0) return err('狀態不正確');
@@ -843,7 +832,8 @@ function listVenues_() {
   });
 }
 function saveVenue_(token, venue) {
-  var t = requireCardEdit_(token, 'venueReg'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
   venue = venue || {};
   var venueId = String(venue.venueId || '').trim();
   var name = String(venue.name || '').trim();
@@ -858,7 +848,8 @@ function saveVenue_(token, venue) {
   return ok({ saved: true });
 }
 function deleteVenue_(token, venueId) {
-  var t = requireCardEdit_(token, 'venueReg'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUES), String(venueId).trim());
   return ok({ deleted: true });
 }
@@ -881,11 +872,13 @@ function submitVenueRequest_(b) {
   return { ok: true, refCode: row.refCode };
 }
 function getVenueBookings_(token) {
-  var t = requireCardEdit_(token, 'venueReg'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
   return ok(readSheet_(SHEET.VENUE_REQ).reverse());
 }
 function setVenueBookingStatus_(token, id, status) {
-  var t = requireCardEdit_(token, 'venueReg'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
   if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(String(status).toLowerCase()) < 0) return err('狀態不正確');
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
   var idx = rowIndexByCol_(sh, 'id', String(id).trim());
@@ -903,7 +896,8 @@ function listItems_() {
   });
 }
 function saveItem_(token, item) {
-  var t = requireCardEdit_(token, 'stockReg'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
   item = item || {};
   var itemId = String(item.itemId || '').trim();
   var name = String(item.name || '').trim();
@@ -918,7 +912,8 @@ function saveItem_(token, item) {
   return ok({ saved: true });
 }
 function deleteItem_(token, itemId) {
-  var t = requireCardEdit_(token, 'stockReg'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ITEMS), String(itemId).trim());
   return ok({ deleted: true });
 }
@@ -945,11 +940,13 @@ function submitStockRequest_(b) {
   return { ok: true, refCode: row.refCode };
 }
 function getStockRequests_(token) {
-  var t = requireCardEdit_(token, 'stockReg'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
   return ok(readSheet_(SHEET.STOCK_REQ).reverse());
 }
 function setStockRequestStatus_(token, id, status) {
-  var t = requireCardEdit_(token, 'stockReg'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
   if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(String(status).toLowerCase()) < 0) return err('狀態不正確');
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName(SHEET.STOCK_REQ);
@@ -1012,7 +1009,8 @@ function listActivityNotices_(p) {
   });
 }
 function deleteActivityNotice_(token, id) {
-  var t = requireCardEdit_(token, 'activity'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ACTIVITY_REQ), String(id).trim());
   return ok({ deleted: true });
 }
@@ -1031,7 +1029,8 @@ function listNotices_(p) {
   });
 }
 function saveNotice_(token, notice) {
-  var t = requireCardEdit_(token, 'notices'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
   notice = notice || {};
   var title = String(notice.title || '').trim();
   if (!title) return err('通告標題必填');
@@ -1051,7 +1050,8 @@ function saveNotice_(token, notice) {
   return ok({ saved: true, id: id });
 }
 function deleteNotice_(token, id) {
-  var t = requireCardEdit_(token, 'notices'); if (t.error) return err(t.error);
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NOTICES), String(id).trim());
   return ok({ deleted: true });
 }

@@ -122,13 +122,15 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
 
 ---
 
-## 3.3 卡片開關 + 按卡片權限（新增）
+## 3.3 卡片開關 + 卡片門禁（最終定案）
 
 - **卡片開關**（DC / SYSADMIN 超管可控）：`setCardEnabled` 改 `Cards.enabled`，
   關閉後前端主控台唔顯示（Perms 保留，重開即恢復）。admin 頁權限矩陣最右「開關」欄。
-- **按卡片權限（硬權限）**：`requireCardEdit_(token, cardId)` 檢查 Perms matrix 該卡嘅 edit，
-  用喺所有寫入/批核動作（借場 venueReg、借物資 stockReg、知會 activity、通告 notices、
-  訓練班 training / 報名審批 courseRegs）。做到「A 管借場、B 管借物資，各自唔可以掂對方嗰樣」。
+- **權限控制模型（跟用戶其他系統一致）**：靠「帳戶睇到邊張卡」嚟控制。
+  Perms 矩陣決定每個角色對每張卡有冇 view/edit；後台寫入仍用角色（`canManageCourses_`/`canOps_`）粗粒度檢查，
+  唔再另加卡片寫入權限層。
+- **前端卡片門禁**：`lib/cardAccess.ts` 提供 `useRequireCard(cardId)`，每個功能頁 check 該角色對該卡有冇 access；
+  就算直接打 URL，睇唔到張卡都會 redirect 返主控台 → 真正做到「睇唔到 = 做唔到」。
 - 所有計劃中卡片（meeting/committee/unit/incident）已設為 builtin 佔位頁 + 可開關。
 
 ## 4. 對接所需要嘅改造（兩邊）
