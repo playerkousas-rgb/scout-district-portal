@@ -32,6 +32,16 @@ export default function VenueRegsPage() {
   async function setStatus(b: VenueBooking, status: string) {
     if (!session) return;
     setBusy(true); setError(''); setMsg('');
+    if (status === 'approved') {
+      // v4.0 統一後台：批准走完整鏈（TTLock 限時密碼 → Teamup 轉色 → 電郵申請人）
+      const r = await api.approveVenueBooking(session.token, b.id);
+      setBusy(false);
+      if (r.ok && r.data) {
+        setMsg(`已批准 ✓ 🔑 入場密碼 ${r.data.password}` + (r.data.warn ? `（提示：${r.data.warn}）` : ''));
+        await load(session);
+      } else setError(r.error || '批核失敗');
+      return;
+    }
     const r = await api.setVenueBookingStatus(session.token, b.id, status);
     setBusy(false);
     if (r.ok) { setMsg(`已標為「${STATUS[status]}」✓`); await load(session); }
@@ -58,7 +68,7 @@ export default function VenueRegsPage() {
       <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
       <h1 className="page-title">🏛 場地借用審批</h1>
       <p className="page-sub">
-        批核借場申請（申請人於 member-portal 填表）；<b>批准後自動：設定 TTLock 限時密碼 → Teamup 轉色 → 電郵申請人</b>。
+        批核借場申請（申請人於 member-portal 填表）；<b>批准後自動：設定 TTLock 限時密碼 → Teamup 轉色 → 電郵申請人</b>（統一後台 v4.0）。
       </p>
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}

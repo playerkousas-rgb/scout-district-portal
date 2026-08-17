@@ -1,284 +1,395 @@
 /**
- * 童軍區管理平台 — Apps Script 後端（Google Sheet 當資料庫）v3.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.0
  * ================================================================
- * 多區模式：每區各自一份此 Sheet + Script。前端用區目錄指向各區的 /exec。
+ * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
- * 部署：擴充功能 → Apps Script → 貼上本檔 → 執行一次 setupSheets()
- *       → 部署為網頁應用程式（執行身分：我自己；存取：所有人）
- *       → 把 /exec 網址和 API Key 一起交平台管理員登記到前端 lib/district.ts
+ *   管理系統 scout-district-portal（需登入）→ /api/proxy → 本檔
+ *   成員系統 member-portal（完全公開）      → /api/proxy → 本檔
  *
- * 🔑 API Key 安全架構：
- *   - Setup 時自動生成 API Key（只顯示一次）
- *   - Config 只存 SHA-256 雜湊值（API_KEY_HASH），無法還原
- *   - 前端經 /api/proxy 呼叫，API Key 存在 Vercel 環境變數（不出現在前端）
- *   - 環境變數命名：PORTAL_{區碼}_APIKEY（例如 PORTAL_SKW_APIKEY）
- *   - 忘記 API Key？選單 → 🔑 重新生成 API Key
+ * Vercel 環境變數（兩個名，同一個 Key 值）：
+ *   PORTAL_{區碼}_APIKEY   例：PORTAL_SKW_APIKEY
+ *   MEMBER_{區碼}_APIKEY   例：MEMBER_SKW_APIKEY
  *
- * 角色階級：
- *   DC（區總監）最高，可改動 SYSADMIN。
- *   SYSADMIN（系統管理員）接近 DC，但不能改動 DC，也不能改/刪「受保護角色」。
- *   受保護角色 = DC + 8 個真實角色（內建，protected=TRUE），SYSADMIN 只能新增/刪除自訂角色。
+ * ── 合併重點 ──────────────────────────────────────────────
+ * 1. 表頭取「聯集」：兩邊欄位並存，各自寫各自嘅，互不覆蓋
+ * 2. 庫存只扣一次：★ 批准時先扣（提交只記錄 pending）
+ * 3. CourseLinks 欄名統一用管理系統嗰套：
+ *      scriptExecUrl / scriptApiKey / driveFolderId
+ *    （並保留 apiBase / apiKey 作為讀取時嘅相容別名）
+ * 4. 狀態統一：pending / approved / rejected / returned / cancelled
+ * 5. 雙登入並存：
+ *      login       → Users 表（角色制 DC/SYSADMIN/…）供管理系統用
+ *      staffLogin  → Staff 表（canVenue/canStock/…）供舊 /staff 頁用
+ *    兩者發出嘅 token 互通，權限各自檢查
+ * 6. setupSheets() 改為「補建唔清空」，唔會夾死已有資料
+ *
+ * ── 借場一條龍（本版：通通鎖 TTLock）─────────────────────
+ * 批准（approveVenueBooking）自動：
+ *   ① TTLock 設定限時密碼（撞碼自動重試；ttlockDisabled=TRUE → 隨機密碼照跑）
+ *   ② Teamup 轉色：有 pending 事件（teamupEventId）就搬去「確認借用」子日曆；
+ *      冇就喺「確認借用」子日曆新建事件
+ *   ③ 電郵「已批准 + 入場密碼」俾申請人
+ * 拒絕/取消：Teamup 建「拒絕」事件（選填子日曆）+ 電郵通知。
+ * Teamup Config 金鑰主用 TEAMUP_*，同時兼容舊欄名 teamup*。
+ *
+ * ── 部署 ──────────────────────────────────────────────────
+ * 擴充功能 → Apps Script → 貼上本檔 → 執行 setupSheets()
+ * → 部署為網頁應用程式（執行身分：我自己；存取：任何人）
+ * → 複製 /exec + API Key
  */
 
+// ===================== 分頁名 =====================
+
 var SHEET = {
-  USERS: 'Users', ROLES: 'Roles', CARDS: 'Cards',
-  PERMS: 'Perms', CONFIG: 'Config', SYSTEM: 'System',
-  COURSE_LINKS: 'CourseLinks', // 訓練班目錄（登記每班 Script/Drive/通告）— 單一資料來源
-  // 一次性服務（每區開一次）：借場 / 借物資 / 知會
+  // 共用
+  CONFIG: 'Config', SYSTEM: 'System',
+  // 管理系統（角色權限）
+  USERS: 'Users', ROLES: 'Roles', CARDS: 'Cards', PERMS: 'Perms',
+  // 成員系統（舊職員表，保留相容）
+  STAFF: 'Staff',
+  // 業務資料（兩邊共用）
   VENUES: 'Venues', VENUE_REQ: 'VenueBookings',
   ITEMS: 'Items', STOCK_REQ: 'StockRequests',
   ACTIVITY_REQ: 'ActivityNotices',
+  COURSE_LINKS: 'CourseLinks',   // 訓練班目錄（單一資料來源）
+  COURSES: 'Courses',            // 舊版內建課程（保留相容）
+  COURSE_REQ: 'CourseRegs',      // 舊版報名（保留相容）
+  COURSE_PARAMS: 'CourseParams', // 下拉參數（支部／地域／區會／徽章）
+  ALL_RECORDS: 'AllRecords',     // 綜合記錄流水帳
 };
 
-var TOKEN_SECRET = 'CHANGE_ME_DISTRICT_SECRET';
+// ===================== 安全設定（★ 部署前必改）=====================
+
+var TOKEN_SECRET = 'CHANGE_ME_DISTRICT_SECRET_' + '請改成長亂碼';
 var TOKEN_TTL_HOURS = 12;
+
 var DC_ROLE = 'DC';
 var SYSADMIN_ROLE = 'SYSADMIN';
-// 可進管理頁的角色
 function isAdminRole_(role) { return role === DC_ROLE || role === SYSADMIN_ROLE; }
 
-// 維護用最高存取（改成只有你知道的值；勿沿用示範值）
+// 維護用最高存取（★ 改成只有你知道嘅值；勿沿用示範值）
 var MASTER_EMAIL = 'CHANGE_ME_MAINTAINER_ID';
 var MASTER_PW    = 'CHANGE_ME_MAINTAINER_PW';
-var MASTER_ROLE  = 'DC'; // 對外偽裝成 DC
 
 // 外掛清單（轉駁器）
 var REGISTRY_URL = 'https://YOUR-HUB.vercel.app/api/registry.json';
 
+// 初始化預設密碼
+var DEFAULT_PASSWORD = 'scout1234';
+
+// 服務開關（逐個上線用）
+var FEATURE = { stock: true, course: true, venue: true, activity: true };
+function isFeature_(f) { return FEATURE[f] === true; }
+
+// ★ 庫存扣減時機：'approve' = 批准時扣（建議）／'submit' = 提交即扣
+var STOCK_DEDUCT_ON = 'approve';
+
+// ===================== 借用規定預設文字 =====================
+
+var DEFAULT_VENUE_RULES =
+  '1. 用途：區總部只作會議、訓練或活動用途。\n' +
+  '2. 時間：每日 08:00–23:00（區會開放時間除外）。\n' +
+  '3. 申請：最少提前 7 日遞交，經批核後方可使用。\n' +
+  '4. 清潔：使用後須回復原狀，垃圾自行帶走。\n' +
+  '5. 損壞：如有損壞須照價賠償。\n' +
+  '6. 禁止：嚴禁吸煙、飲酒及攜帶寵物入內。\n' +
+  '7. 保安：場地設有閉路電視，進出請關好門窗及熄燈。';
+
+var DEFAULT_STOCK_RULES =
+  '1. 借用資格：物資供本區童軍單位借用；區開辦之訓練班及活動可獲優先。\n' +
+  '2. 申請：最少提前 7 日遞交申請。\n' +
+  '3. 領取／歸還：須依約定時間辦理，逾期須預先通知。\n' +
+  '4. 保養：借用期間如有損壞或遺失，須照價賠償。\n' +
+  '5. 清潔：歸還前須清潔及晾乾（尤其帳篷、營具）。\n' +
+  '6. 轉借：不得轉借第三者。';
+
+var DEFAULT_TROOP_LIST = '';
+
 // ===================== HTTP 入口 =====================
 
 function doGet(e) {
-  var p = e.parameter, action = (p.action || '').toString();
+  e = e || {};
+  var p = e.parameter || {};
+  var action = String(p.action || '');
+
+  // 健康檢查免 API Key（部署後即刻可驗證）
+  if (action === 'getHealthCheck') {
+    return json(ok({
+      ok: true,
+      version: '4.0',
+      districtName: getConfigValue_('districtName') || '',
+      districtCode: getConfigValue_('districtCode') || '',
+      apiKeySet: !!getConfigValue_('API_KEY_HASH'),
+    }));
+  }
 
   // ★ API Key 認證
-  var requiredApiKeyHash = getConfigValue_('API_KEY_HASH');
-  if (requiredApiKeyHash) {
-    if (sha256_(p.apiKey || '') !== requiredApiKeyHash) {
-      return json(err('Unauthorized: invalid or missing apiKey'));
-    }
+  var hash = getConfigValue_('API_KEY_HASH');
+  if (hash && sha256_(String(p.apiKey || '').trim()) !== hash) {
+    return json(err('Unauthorized: invalid or missing apiKey'));
   }
 
   try {
     switch (action) {
-      case 'getHealthCheck': return json(ok(getHealthCheck_()));
-      case 'getConfig':      return json(ok(getConfig_()));
-      case 'getCards':       return json(getCards_(p.token));
-      case 'verify':         return json(verify_(p.token));
-      case 'getPerms':       return json(getPerms_(p.token));
-      case 'getUsers':       return json(getUsers_(p.token));
-      case 'getSystem':      return json(ok(getSystemState_()));
-      case 'getRegistry':    return json(getRegistry_(p.token));
-      case 'getCourseLinks': return json(getCourseLinks_(p.token));
-      // 公開訓練班目錄（只回傳公開欄位，絕不包含 Script URL / Key / Drive ID）
-      case 'listCourseLinks': return json(ok(listCourseLinks_()));
-      // 一次性服務
-      case 'listVenues':        return json(ok(listVenues_()));
-      case 'listItems':         return json(ok(listItems_()));
+
+      // ---------- 公開（成員系統，唔使登入） ----------
+      case 'getPublicInfo':       return json(ok(getPublicInfo_()));
+      case 'getConfig':           return json(ok(getConfig_()));
+      case 'getSystem':           return json(ok(getSystemState_()));
+      case 'listVenues':          return json(ok(listVenues_()));
+      case 'listItems':           return json(ok(listItems_()));
+      case 'listCourseLinks':     return json(ok(listCourseLinks_()));
+      case 'listCourses':         return json(ok(listCourses_()));
+      case 'listAllCourses':      return json(ok(listCourseLinks_()));
+      case 'listCourseParams':    return json(ok(listCourseParams_()));
       case 'listActivityNotices': return json(ok(listActivityNotices_(p)));
-      case 'getVenueBookings':  return json(getVenueBookings_(p.token));
-      case 'getStockRequests':  return json(getStockRequests_(p.token));
-      default:               return json(err('未知的 action: ' + action));
+
+      // ---------- 管理系統（角色制） ----------
+      case 'verify':              return json(verify_(p.token));
+      case 'getCards':            return json(getCards_(p.token));
+      case 'getPerms':            return json(getPerms_(p.token));
+      case 'getUsers':            return json(getUsers_(p.token));
+      case 'getRegistry':         return json(getRegistry_(p.token));
+      case 'getCourseLinks':      return json(getCourseLinks_(p.token));
+      case 'getVenueBookings':    return json(getVenueBookings_(p.token));
+      case 'getStockRequests':    return json(getStockRequests_(p.token));
+      case 'getActivityNotices':  return json(getActivityNotices_(p.token));
+      case 'getAllRecords':       return json(getAllRecords_(p.token));
+
+      // ---------- 成員系統 /staff 舊介面 ----------
+      case 'staffVerify':         return json(staffVerify_(p.token));
+      case 'getStaffList':        return json(getStaffList_(p.token));
+      case 'getVenues':           return json(getVenues_(p.token));
+      case 'getItems':            return json(getItems_(p.token));
+      case 'getCourses':          return json(getCourses_(p.token));
+      case 'getCourseRegs':       return json(getCourseRegs_(p.token, p.courseId));
+
+      default: return json(err('未知的 action: ' + action));
     }
   } catch (ex) { return json(err('伺服器錯誤：' + ex)); }
 }
 
 function doPost(e) {
-  var body = {};
-  try { body = JSON.parse(e.postData.contents); } catch (x) {}
-  var action = (body.action || '').toString();
+  var b = {};
+  try { b = JSON.parse(e.postData.contents); } catch (x) {}
+  var action = String(b.action || '');
 
   // ★ API Key 認證
-  var requiredApiKeyHash = getConfigValue_('API_KEY_HASH');
-  if (requiredApiKeyHash) {
-    if (sha256_(body.apiKey || '') !== requiredApiKeyHash) {
-      return json(err('Unauthorized: invalid or missing apiKey'));
-    }
+  var hash = getConfigValue_('API_KEY_HASH');
+  if (hash && sha256_(String(b.apiKey || '').trim()) !== hash) {
+    return json(err('Unauthorized: invalid or missing apiKey'));
   }
 
   try {
     switch (action) {
-      case 'login':           return json(login_(body.email, body.password));
-      case 'savePerms':       return json(savePerms_(body.token, body.matrix));
-      case 'addRole':         return json(addRole_(body.token, body.role, body.label));
-      case 'updateRole':      return json(updateRole_(body.token, body.role, body.label));
-      case 'deleteRole':      return json(deleteRole_(body.token, body.role));
-      case 'setLock':         return json(setLock_(body.token, body.locked, body.message));
-      case 'batchCreateUsers': return json(batchCreateUsers_(body.token, body.users));
-      case 'updateUser':      return json(updateUser_(body.token, body.email, body.patch));
-      case 'deleteUser':      return json(deleteUser_(body.token, body.email));
-      case 'installPlugin':   return json(installPlugin_(body.token, body.plugin));
-      case 'uninstallPlugin': return json(uninstallPlugin_(body.token, body.cardId));
-      case 'saveCourseLink':  return json(saveCourseLink_(body.token, body.link));
-      case 'deleteCourseLink':return json(deleteCourseLink_(body.token, body.courseId));
-      // 公開提交（intake）
-      case 'submitCourseReg':     return json(submitCourseReg_(body));
-      case 'submitVenueRequest':  return json(submitVenueRequest_(body));
-      case 'submitStockRequest':  return json(submitStockRequest_(body));
-      case 'submitActivityNotice': return json(submitActivityNotice_(body));
-      // 一次性服務 — 管理（批核 / 場地物資維運）
-      case 'setVenueBookingStatus': return json(setVenueBookingStatus_(body.token, body.id, body.status));
-      case 'setStockRequestStatus': return json(setStockRequestStatus_(body.token, body.id, body.status));
-      case 'saveVenue':       return json(saveVenue_(body.token, body.venue));
-      case 'deleteVenue':     return json(deleteVenue_(body.token, body.venueId));
-      case 'saveItem':        return json(saveItem_(body.token, body.item));
-      case 'deleteItem':      return json(deleteItem_(body.token, body.itemId));
-      case 'deleteActivityNotice': return json(deleteActivityNotice_(body.token, body.id));
-      case 'setCardEnabled':  return json(setCardEnabled_(body.token, body.cardId, body.enabled));
-      case 'changePassword':  return json(changePassword_(body.token, body.oldPassword, body.newPassword));
-      case 'setCategoryEnabled': return json(setCategoryEnabled_(body.token, body.category, body.enabled));
-      default:                return json(err('未知的 action: ' + action));
+
+      // ---------- 公開提交（成員系統，唔使登入） ----------
+      case 'submitVenueRequest':   return json(submitVenueRequest_(b));
+      case 'submitStockRequest':   return json(submitStockRequest_(b));
+      case 'submitActivityNotice': return json(submitActivityNotice_(b));
+      case 'submitCourseReg':      return json(submitCourseReg_(b));
+
+      // ---------- 登入 ----------
+      case 'login':                return json(login_(b.email, b.password));
+      case 'staffLogin':           return json(staffLogin_(b.email, b.password));
+      case 'changePassword':       return json(changePassword_(b.token, b.oldPassword, b.newPassword));
+      case 'changeStaffPassword':  return json(changeStaffPassword_(b.token, b.oldPassword, b.newPassword));
+
+      // ---------- 批核（管理系統） ----------
+      case 'setVenueBookingStatus': return json(setVenueBookingStatus_(b.token, b.id, b.status));
+      case 'setStockRequestStatus': return json(setStockRequestStatus_(b.token, b.id, b.status));
+      case 'approveVenueBooking':   return json(approveVenueBooking_(b.token, b.id));
+      case 'rejectVenueBooking':    return json(rejectVenueBooking_(b.token, b.id));
+      case 'setCourseRegStatus':    return json(setCourseRegStatus_(b.token, b.courseId, b.id, b.status));
+      case 'setRegFeePaid':         return json(setRegFeePaid_(b.token, b.courseId, b.id, b.paid));
+
+      // ---------- 場地／物資維運 ----------
+      case 'saveVenue':            return json(saveVenue_(b.token, b.venue));
+      case 'deleteVenue':          return json(deleteVenue_(b.token, b.venueId));
+      case 'saveItem':             return json(saveItem_(b.token, b.item));
+      case 'deleteItem':           return json(deleteItem_(b.token, b.itemId));
+      case 'deleteActivityNotice': return json(deleteActivityNotice_(b.token, b.id));
+
+      // ---------- 訓練班目錄 ----------
+      case 'saveCourseLink':       return json(saveCourseLink_(b.token, b.link));
+      case 'deleteCourseLink':     return json(deleteCourseLink_(b.token, b.courseId));
+      case 'saveCourse':           return json(saveCourse_(b.token, b.course));
+      case 'deleteCourse':         return json(deleteCourse_(b.token, b.courseId));
+
+      // ---------- 角色／權限／帳戶（管理系統） ----------
+      case 'savePerms':            return json(savePerms_(b.token, b.matrix));
+      case 'addRole':              return json(addRole_(b.token, b.role, b.label));
+      case 'updateRole':           return json(updateRole_(b.token, b.role, b.label));
+      case 'deleteRole':           return json(deleteRole_(b.token, b.role));
+      case 'setLock':              return json(setLock_(b.token, b.locked, b.message));
+      case 'batchCreateUsers':     return json(batchCreateUsers_(b.token, b.users));
+      case 'updateUser':           return json(updateUser_(b.token, b.email, b.patch));
+      case 'deleteUser':           return json(deleteUser_(b.token, b.email));
+      case 'setCardEnabled':       return json(setCardEnabled_(b.token, b.cardId, b.enabled));
+      case 'setCategoryEnabled':   return json(setCategoryEnabled_(b.token, b.category, b.enabled));
+      case 'installPlugin':        return json(installPlugin_(b.token, b.plugin));
+      case 'uninstallPlugin':      return json(uninstallPlugin_(b.token, b.cardId));
+
+      // ---------- Staff 表（舊介面） ----------
+      case 'saveStaff':            return json(saveStaff_(b.token, b.staff));
+      case 'deleteStaff':          return json(deleteStaff_(b.token, b.email));
+
+      default: return json(err('未知的 action: ' + action));
     }
   } catch (ex) { return json(err('伺服器錯誤：' + ex)); }
 }
 
-// ===================== Config 讀取工具 =====================
+// ===================== 基礎工具 =====================
 
-/** 讀取 Config 單一值 */
+function ok(data)  { return { ok: true, data: data }; }
+function err(msg)  { return { ok: false, error: msg }; }
+function json(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
+
+function sha256_(str) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, str, Utilities.Charset.UTF_8)
+    .map(function (b) { var v = (b < 0 ? b + 256 : b).toString(16); return v.length === 1 ? '0' + v : v; }).join('');
+}
+function isTrue_(v) { var s = String(v).trim().toUpperCase(); return s === 'TRUE' || s === '1' || s === 'YES' || s === '是'; }
+function genId_(prefix) { return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function genRef_(prefix) {
+  return prefix + '-' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd') + '-' + Math.floor(Math.random() * 9000 + 1000);
+}
+function splitList_(s) {
+  if (!s) return [];
+  return String(s).split(/[,，\s]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+}
+
+function readSheet_(name) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+  if (!sh) return [];
+  var values = sh.getDataRange().getValues();
+  if (values.length < 2) return [];
+  var headers = values[0].map(function (h) { return String(h).trim(); });
+  var out = [];
+  for (var i = 1; i < values.length; i++) {
+    var row = values[i];
+    if (row.join('') === '') continue;
+    var obj = {};
+    headers.forEach(function (h, j) { obj[h] = row[j]; });
+    out.push(obj);
+  }
+  return out;
+}
+function sheetHeadersBySheet_(sh) {
+  if (!sh || sh.getLastRow() < 1) return [];
+  return sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim(); });
+}
+function colIdxByHeader_(sh, header) {
+  return sheetHeadersBySheet_(sh).indexOf(header) + 1;
+}
+function setCellByHeader_(sh, rowIdx, header, value) {
+  var ci = colIdxByHeader_(sh, header);
+  if (ci > 0) sh.getRange(rowIdx, ci).setValue(value);
+}
+function appendRowObj_(sh, obj) {
+  var headers = sheetHeadersBySheet_(sh);
+  sh.appendRow(headers.map(function (h) { return obj[h] !== undefined ? obj[h] : ''; }));
+}
+function findRowByFirstCol_(sh, value) {
+  if (!sh) return -1;
+  var v = sh.getDataRange().getValues();
+  for (var i = 1; i < v.length; i++) if (String(v[i][0]).trim() === String(value).trim()) return i + 1;
+  return -1;
+}
+function rowIndexByCol_(sh, header, value) {
+  if (!sh) return -1;
+  var v = sh.getDataRange().getValues();
+  if (v.length < 2) return -1;
+  var ci = v[0].map(function (h) { return String(h).trim(); }).indexOf(header);
+  if (ci < 0) return -1;
+  for (var i = 1; i < v.length; i++) if (String(v[i][ci]).trim() === String(value).trim()) return i + 1;
+  return -1;
+}
+function removeRowByFirstCol_(sh, value) {
+  if (!sh) return;
+  var v = sh.getDataRange().getValues();
+  for (var i = v.length - 1; i >= 1; i--) if (String(v[i][0]).trim() === String(value).trim()) sh.deleteRow(i + 1);
+}
+
+// ===================== Config =====================
+
 function getConfigValue_(key) {
   var cfg = {};
   readSheet_(SHEET.CONFIG).forEach(function (r) { if (r.key) cfg[String(r.key).trim()] = r.value; });
   return cfg[key] || '';
 }
-
-/** 設定 Config 單一值（不存在則新增） */
 function setConfigValue_(key, value) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(SHEET.CONFIG);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.CONFIG);
   if (!sh) return;
   var v = sh.getDataRange().getValues();
   for (var i = 1; i < v.length; i++) {
     if (String(v[i][0]).trim() === key) { sh.getRange(i + 1, 2).setValue(value); return; }
   }
-  sh.appendRow([key, value]);
+  sh.appendRow([key, value, '']);
 }
-
-/** 確保 Config 表有指定行（舊版 Sheet 升級用） */
 function ensureConfigRow_(sh, key, defaultValue, description) {
-  var values = sh.getDataRange().getValues();
-  for (var i = 1; i < values.length; i++) {
-    if (String(values[i][0] || '').trim() === key) return false; // 已存在
-  }
+  if (!sh) return false;
+  var v = sh.getDataRange().getValues();
+  for (var i = 1; i < v.length; i++) if (String(v[i][0] || '').trim() === key) return false;
   sh.appendRow([key, defaultValue, description || '']);
-  return true; // 新增了
+  return true;
+}
+function districtCode_() { return getConfigValue_('districtCode') || 'SKW'; }
+
+function getConfig_() {
+  return {
+    districtName: getConfigValue_('districtName') || '童軍區',
+    districtCode: districtCode_(),
+    theme: getConfigValue_('theme') || '',
+    logoText: getConfigValue_('logoText') || '🧭',
+  };
 }
 
-// ===================== API Key 管理 =====================
-
-/** 生成 API Key（只存 hash 到 Config） */
-function generateApiKey_(ss) {
-  var sh = ss.getSheetByName(SHEET.CONFIG);
-  if (!sh) return '';
-  // ★ 確保 API_KEY_HASH 行存在（舊版 Sheet 可能無呢行）
-  ensureConfigRow_(sh, 'API_KEY_HASH', '', 'setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。');
-  // 重新讀取（ensureConfigRow_ 可能新增了行）
-  var values = sh.getDataRange().getValues();
-  var generatedKey = '';
-  for (var i = 1; i < values.length; i++) {
-    var key = String(values[i][0] || '').trim();
-    if (key === 'API_KEY_HASH' && !values[i][1]) {
-      generatedKey = 'ak_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-      sh.getRange(i + 1, 2).setValue(sha256_(generatedKey));
-      sh.getRange(i + 1, 3).setValue('setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。');
-    }
-  }
-  return generatedKey;
+function getTroopList_() {
+  var raw = getConfigValue_('TROOP_LIST') || DEFAULT_TROOP_LIST;
+  return splitList_(raw);
 }
 
-/** 重新生成 API Key（忘記或懷疑洩漏時用） */
-function regenerateApiKeyMenu() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(SHEET.CONFIG);
-  if (!sh) { SpreadsheetApp.getUi().alert('錯誤', '找不到 Config 工作表。'); return; }
-  // ★ 確保 API_KEY_HASH 行存在（舊版 Sheet 升級用）
-  ensureConfigRow_(sh, 'API_KEY_HASH', '', 'setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。');
-  // 重新讀取（ensureConfigRow_ 可能新增了行）
-  var values = sh.getDataRange().getValues();
-  for (var i = 1; i < values.length; i++) {
-    var key = String(values[i][0] || '').trim();
-    if (key === 'API_KEY_HASH') {
-      var newKey = 'ak_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-      sh.getRange(i + 1, 2).setValue(sha256_(newKey));
-      sh.getRange(i + 1, 3).setValue('重新生成於 ' + new Date().toISOString() + '；API_KEY 的 SHA-256 雜湊值。');
-      SpreadsheetApp.getUi().alert(
-        '🔑 新 API Key 已生成',
-        '新 API Key（只顯示一次，請即複製）：\n'
-        + '───────────────────────\n'
-        + newKey
-        + '\n───────────────────────\n\n'
-        + '⚠️ 複製時只取上下橫線之間的文字，不要包含空格或換行！\n\n'
-        + '舊 Key 即刻失效！請把新 Key 交給平台管理員更新。',
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
-      return;
-    }
-  }
-  SpreadsheetApp.getUi().alert('錯誤', '找不到 API_KEY_HASH 設定行。');
+/** 成員系統首頁／表單需要嘅公開設定 */
+function getPublicInfo_() {
+  return {
+    districtName: getConfigValue_('districtName') || '成員服務',
+    districtCode: districtCode_(),
+    logoText: getConfigValue_('logoText') || '🧭',
+    locked: getSystemState_().locked,
+    lockMessage: getSystemState_().lockMessage,
+    teamupBookingUrl: getConfigValue_('TEAMUP_BOOKING_URL') || '',
+    fpsAccountName: getConfigValue_('FPS_ACCOUNT_NAME') || '',
+    fpsAccountNumber: getConfigValue_('FPS_ACCOUNT_NUMBER') || '',
+    venueRules: getConfigValue_('VENUE_RULES') || DEFAULT_VENUE_RULES,
+    venueRulesUrl: getConfigValue_('VENUE_RULES_URL') || '',
+    venueTermsUrl: getConfigValue_('VENUE_TERMS_URL') || '',
+    cctvUrl: getConfigValue_('CCTV_URL') || '',
+    stockRules: getConfigValue_('STOCK_RULES') || DEFAULT_STOCK_RULES,
+    stockRulesUrl: getConfigValue_('STOCK_RULES_URL') || '',
+    troopList: getTroopList_(),
+    features: FEATURE,
+  };
 }
 
-/** 保護含有敏感資料的工作表，只允許 owner 編輯 */
-function protectSensitiveSheets_(ss) {
-  var me = Session.getActiveUser().getEmail();
-  ['Config', 'Users', 'CourseLinks'].forEach(function (name) {
-    var sh = ss.getSheetByName(name);
-    if (!sh) return;
-    var prot = sh.protect().setDescription('童軍區管理平台：保護敏感設定（API_KEY_HASH / 密碼雜湊）');
-    var meFound = false;
-    prot.getEditors().forEach(function (e) { if (e.getEmail() === me) meFound = true; });
-    if (!meFound && me) prot.addEditor(me);
-    prot.removeEditors(prot.getEditors().filter(function (e) { return e.getEmail() !== me; }));
-  });
-}
-
-// ===================== 健康檢查（增強版）=====================
-
-function getHealthCheck_() {
-  var result = { ok: true };
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    result.districtName = getConfigValue_('districtName') || '';
-    result.apiKeySet = !!getConfigValue_('API_KEY_HASH');
-    result.sheetId = ss.getId();
-  } catch (e) {
-    result.error = e.toString();
-  }
-  return result;
-}
-
-// ===================== 選單 =====================
-
-function onOpen() {
-  SpreadsheetApp.getUi().createMenu('🧭 區管理平台')
-    .addItem('🔑 重新生成 API Key', 'regenerateApiKeyMenu')
-    .addSeparator()
-    .addItem('🔄 重新執行初始化提示', 'showSetupReminder')
-    .addToUi();
-}
-
-function showSetupReminder() {
-  SpreadsheetApp.getUi().alert(
-    '區管理平台設定步驟',
-    '1. 填 Config：區名、logoText\n'
-    + '2. 填 Users：設定帳號密碼\n'
-    + '3. Deploy 為 Web App（執行身分：我自己；存取：所有人）\n'
-    + '4. 複製 /exec 網址\n'
-    + '5. 🔑 如果還沒複製 API Key，到選單 → 重新生成 API Key\n'
-    + '6. 把「區碼 + 區名 + /exec 網址 + API Key」交給平台管理員',
-    SpreadsheetApp.getUi().ButtonSet.OK
-  );
-}
-
-// ===================== 系統狀態 =====================
+// ===================== System（維護鎖定） =====================
 
 function getSystemState_() {
   var sys = {};
   readSheet_(SHEET.SYSTEM).forEach(function (r) { if (r.key) sys[String(r.key).trim()] = r.value; });
-  return { locked: String(sys.locked).toUpperCase() === 'TRUE', lockMessage: sys.lockMessage || '系統維護中，請稍候再試。' };
+  return {
+    locked: String(sys.locked).toUpperCase() === 'TRUE',
+    lockMessage: sys.lockMessage || '系統維護中，請稍候再試。',
+  };
 }
 function setSystemValue_(key, value) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName(SHEET.SYSTEM) || ss.insertSheet(SHEET.SYSTEM);
   var v = sh.getDataRange().getValues();
-  if (v.length === 0) { sh.getRange(1, 1, 1, 2).setValues([['key', 'value']]); v = [['key', 'value']]; }
+  if (v.length === 0 || String(v[0][0]).trim() !== 'key') {
+    sh.getRange(1, 1, 1, 2).setValues([['key', 'value']]);
+    v = sh.getDataRange().getValues();
+  }
   for (var i = 1; i < v.length; i++) if (String(v[i][0]).trim() === key) { sh.getRange(i + 1, 2).setValue(value); return; }
   sh.appendRow([key, value]);
 }
@@ -290,17 +401,43 @@ function setLock_(token, locked, message) {
   if (message != null) setSystemValue_('lockMessage', String(message));
   return ok({ locked: !!locked });
 }
+/** 公開提交前檢查：系統鎖定時唔畀交表 */
+function guardLocked_() {
+  var s = getSystemState_();
+  return s.locked ? err(s.lockMessage) : null;
+}
 
-// ===================== 登入 =====================
+// ===================== Token（兩套登入共用） =====================
 
+function makeToken_(email, role) {
+  var exp = Date.now() + TOKEN_TTL_HOURS * 3600 * 1000;
+  var payload = email + '|' + role + '|' + exp;
+  return Utilities.base64EncodeWebSafe(payload + '|' + sha256_(payload + TOKEN_SECRET).slice(0, 16));
+}
+function checkToken_(token) {
+  if (!token) return { valid: false };
+  try {
+    var raw = Utilities.newBlob(Utilities.base64DecodeWebSafe(token)).getDataAsString();
+    var p = raw.split('|'), email = p[0], role = p[1], exp = Number(p[2]), sig = p[3];
+    if (Date.now() > exp) return { valid: false };
+    if (sig !== sha256_(email + '|' + role + '|' + exp + TOKEN_SECRET).slice(0, 16)) return { valid: false };
+    return { valid: true, email: email, role: role };
+  } catch (e) { return { valid: false }; }
+}
+
+// ===================== 登入（雙軌） =====================
+
+/** 管理系統：Users 表（角色制） */
 function login_(email, password) {
   if (!email || !password) return err('請輸入帳號及密碼');
   email = String(email).trim();
 
-  // 維護用最高存取（偽裝成 DC，鎖定時仍可進）
+  // 維護用最高存取（鎖定時仍可進）
   if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase() && String(password) === MASTER_PW) {
-    return ok({ email: email, displayName: '區總監', role: DC_ROLE, roleLabel: '區總監',
-      isAdmin: true, isDC: true, scopes: ['all'], token: makeToken_(email, DC_ROLE) });
+    return ok({
+      email: email, displayName: '區總監', role: DC_ROLE, roleLabel: '區總監',
+      isAdmin: true, isDC: true, scopes: ['all'], token: makeToken_(email, DC_ROLE),
+    });
   }
 
   if (getSystemState_().locked) return err('系統維護中，暫停登入。');
@@ -321,728 +458,264 @@ function login_(email, password) {
   });
 }
 
-// ===================== 取卡片 =====================
-
-function getCards_(token) {
+function verify_(token) {
   var t = checkToken_(token);
-  if (!t.valid) return err('登入已過期，請重新登入');
-  var perms = readPerms_();
-  // 每帳戶 scope 覆寫（cards 欄，逗號分隔嘅 cardId；留空 = 用角色矩陣）
-  var u = readSheet_(SHEET.USERS).filter(function (x) {
-    return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
-  })[0];
-  var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
-  var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).filter(function (c) {
-    if (!c.enabled) return false;
-    // 若有用戶 scope 覆寫，只畀佢睇 scope 內嘅卡
-    if (scopeOverride && scopeOverride.indexOf(c.cardId) < 0) return false;
-    var access = (perms[c.cardId] || {})[t.role] || '';
-    c.access = access;
-    return access === 'edit' || access === 'view';
-  });
-  return ok(cards);
-}
-function normalizeCard_(c) {
-  return {
-    cardId: String(c.cardId).trim(), title: c.title, icon: c.icon, type: c.type, url: c.url,
-    description: c.description, order: Number(c.order) || 0,
-    enabled: String(c.enabled).toUpperCase() !== 'FALSE',
-    embed: String(c.embed).toUpperCase() === 'TRUE', source: c.source || 'core',
-    category: String(c.category || 'done').trim() === 'todo' ? 'todo' : 'done',
-  };
+  if (!t.valid) return err('token 無效或已過期');
+  return ok({ email: t.email, role: t.role });
 }
 
-// ===================== 權限管理 =====================
+/** 成員系統 /staff 舊介面：Staff 表（canVenue/canStock/…） */
+function staffLogin_(email, password) {
+  if (!email || !password) return err('請輸入帳號及密碼');
+  email = String(email).trim();
 
-function getPerms_(token) {
-  var t = checkToken_(token);
-  if (!t.valid) return err('登入已過期');
-  if (!isAdminRole_(t.role)) return err('沒有權限');
-  var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).sort(function (a, b) { return a.order - b.order; });
-  var roles = readSheet_(SHEET.ROLES).map(function (r) {
-    return { role: String(r.role).trim(), label: r.label || r.role, protected: String(r.protected).toUpperCase() === 'TRUE' };
-  });
-  return ok({ cards: cards, roles: roles, matrix: readPerms_() });
-}
-function savePerms_(token, matrix) {
-  var t = checkToken_(token);
-  if (!t.valid) return err('登入已過期');
-  if (!isAdminRole_(t.role)) return err('沒有權限');
-  if (!matrix) return err('沒有資料');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var roles = readSheet_(SHEET.ROLES).map(function (r) { return String(r.role).trim(); });
-  var cards = readSheet_(SHEET.CARDS).map(function (c) { return String(c.cardId).trim(); });
-  var header = ['cardId'].concat(roles);
-  var rows = [header];
-  cards.forEach(function (cid) {
-    var row = [cid];
-    roles.forEach(function (role) {
-      var v = ((matrix[cid] || {})[role] || '').toString().toLowerCase();
-      row.push(v === 'edit' || v === 'view' ? v : '');
+  // 維護帳號亦可用呢邊登入
+  if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase() && String(password) === MASTER_PW) {
+    return ok({
+      email: email, name: '系統維護', role: DC_ROLE, token: makeToken_(email, DC_ROLE),
+      canVenue: true, canStock: true, canCourse: true, canStaff: true,
     });
-    rows.push(row);
-  });
-  var sh = ss.getSheetByName(SHEET.PERMS) || ss.insertSheet(SHEET.PERMS);
-  sh.clear();
-  sh.getRange(1, 1, rows.length, header.length).setValues(rows);
-  sh.getRange(1, 1, 1, header.length).setFontWeight('bold').setBackground('#ede9fe');
-  sh.setFrozenRows(1); sh.setFrozenColumns(1);
-  return ok({ saved: true });
-}
-function readPerms_() {
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.PERMS);
-  if (!sh) return {};
-  var v = sh.getDataRange().getValues();
-  if (v.length < 2) return {};
-  var roles = v[0].slice(1).map(function (x) { return String(x).trim(); });
-  var out = {};
-  for (var i = 1; i < v.length; i++) {
-    var cid = String(v[i][0]).trim(); if (!cid) continue;
-    out[cid] = {};
-    for (var j = 0; j < roles.length; j++) {
-      var val = String(v[i][j + 1] || '').trim().toLowerCase();
-      if (val === 'edit' || val === 'view') out[cid][roles[j]] = val;
-    }
   }
-  return out;
-}
 
-// ===================== 角色管理（DC / SYSADMIN）=====================
+  if (getSystemState_().locked) return err('系統維護中，暫停登入。');
 
-function roleRowIndex_(role) {
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ROLES);
-  var v = sh.getDataRange().getValues();
-  for (var i = 1; i < v.length; i++) if (String(v[i][0]).trim() === role) return i + 1;
-  return -1;
-}
-function getRoleObj_(role) {
-  return readSheet_(SHEET.ROLES).filter(function (r) { return String(r.role).trim() === role; })[0] || null;
-}
-
-function addRole_(token, role, label) {
-  var t = checkToken_(token);
-  if (!t.valid) return err('登入已過期');
-  if (!isAdminRole_(t.role)) return err('沒有權限');
-  role = String(role || '').trim().toUpperCase();
-  label = String(label || '').trim();
-  if (!role || !label) return err('角色碼與名稱必填');
-  if (getRoleObj_(role)) return err('角色已存在');
-  if (role === DC_ROLE || role === SYSADMIN_ROLE) return err('保留角色碼，不可使用');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  ss.getSheetByName(SHEET.ROLES).appendRow([role, label, 'FALSE']); // 新角色非受保護
-  // Perms 加一欄（在最右）
-  var psh = ss.getSheetByName(SHEET.PERMS);
-  if (psh) psh.getRange(1, psh.getLastColumn() + 1).setValue(role);
-  return ok({ saved: true });
-}
-
-function updateRole_(token, role, label) {
-  var t = checkToken_(token);
-  if (!t.valid) return err('登入已過期');
-  if (!isAdminRole_(t.role)) return err('沒有權限');
-  role = String(role || '').trim();
-  var obj = getRoleObj_(role);
-  if (!obj) return err('角色不存在');
-  // 受保護角色：只有 DC 能改；SYSADMIN 不可改受保護
-  var isProtected = String(obj.protected).toUpperCase() === 'TRUE';
-  if (isProtected && t.role !== DC_ROLE) return err('受保護角色只有區總監可修改');
-  if (role === DC_ROLE && t.role !== DC_ROLE) return err('不可修改區總監');
-  var idx = roleRowIndex_(role);
-  if (idx > 0) SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ROLES).getRange(idx, 2).setValue(String(label || obj.label));
-  return ok({ saved: true });
-}
-
-function deleteRole_(token, role) {
-  var t = checkToken_(token);
-  if (!t.valid) return err('登入已過期');
-  if (!isAdminRole_(t.role)) return err('沒有權限');
-  role = String(role || '').trim();
-  var obj = getRoleObj_(role);
-  if (!obj) return err('角色不存在');
-  if (String(obj.protected).toUpperCase() === 'TRUE') return err('受保護角色不可刪除');
-  if (role === DC_ROLE || role === SYSADMIN_ROLE) return err('不可刪除');
-  // 刪 Roles 列
-  var idx = roleRowIndex_(role);
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (idx > 0) ss.getSheetByName(SHEET.ROLES).deleteRow(idx);
-  // 刪 Perms 該欄
-  var psh = ss.getSheetByName(SHEET.PERMS);
-  if (psh) {
-    var header = psh.getRange(1, 1, 1, psh.getLastColumn()).getValues()[0];
-    for (var c = header.length - 1; c >= 1; c--) if (String(header[c]).trim() === role) psh.deleteColumn(c + 1);
+  // 先試 Staff 表
+  var s = readSheet_(SHEET.STAFF).filter(function (x) {
+    return String(x.email).trim().toLowerCase() === email.toLowerCase() && String(x.active).toUpperCase() !== 'FALSE';
+  })[0];
+  if (s && sha256_(String(password) + (s.salt || '')) === String(s.passwordHash).trim()) {
+    var role = s.role || 'STAFF';
+    return ok({
+      email: String(s.email).trim(), name: s.name || s.email, role: role,
+      token: makeToken_(String(s.email).trim(), role),
+      canVenue: isTrue_(s.canVenue), canStock: isTrue_(s.canStock),
+      canCourse: isTrue_(s.canCourse), canStaff: isTrue_(s.canStaff),
+    });
   }
-  return ok({ deleted: true });
+
+  // 再試 Users 表（管理系統帳號都可以登入 /staff）
+  var r = login_(email, password);
+  if (r.ok) {
+    var p = permsByRole_(r.data.role);
+    return ok({
+      email: r.data.email, name: r.data.displayName, role: r.data.role, token: r.data.token,
+      canVenue: p.canVenue, canStock: p.canStock, canCourse: p.canCourse, canStaff: p.canStaff,
+    });
+  }
+  return err('帳號或密碼不正確');
 }
 
-// ===================== 前端帳戶管理 =====================
+function staffVerify_(token) {
+  var t = checkToken_(token);
+  if (!t.valid) return err('登入已過期');
+  var p = staffPerms_(t.email, t.role);
+  return ok({ email: t.email, role: t.role, canVenue: p.canVenue, canStock: p.canStock, canCourse: p.canCourse, canStaff: p.canStaff });
+}
 
+// ===================== 權限判斷（統一） =====================
+
+/** 由角色推導四項操作權限（管理系統角色制 → 成員系統 canXxx） */
+function permsByRole_(role) {
+  role = String(role || '').trim();
+  if (isAdminRole_(role)) return { canVenue: true, canStock: true, canCourse: true, canStaff: true };
+  if (role === 'DDC_ADMIN')    return { canVenue: true, canStock: true, canCourse: true, canStaff: false };
+  if (role === 'DDC_TRAINING') return { canVenue: true, canStock: true, canCourse: true, canStaff: false };
+  if (role === 'STAFF')        return { canVenue: true, canStock: true, canCourse: false, canStaff: false };
+  return { canVenue: false, canStock: false, canCourse: false, canStaff: false };
+}
+
+/** 實時讀取某帳號嘅權限：Staff 表優先，冇就用 Users 角色推導 */
+function staffPerms_(email, role) {
+  if (String(email).toLowerCase() === String(MASTER_EMAIL).toLowerCase()) {
+    return { canVenue: true, canStock: true, canCourse: true, canStaff: true };
+  }
+  var s = readSheet_(SHEET.STAFF).filter(function (x) {
+    return String(x.email).trim().toLowerCase() === String(email).trim().toLowerCase()
+      && String(x.active).toUpperCase() !== 'FALSE';
+  })[0];
+  if (s) {
+    return {
+      canVenue: isTrue_(s.canVenue), canStock: isTrue_(s.canStock),
+      canCourse: isTrue_(s.canCourse), canStaff: isTrue_(s.canStaff),
+    };
+  }
+  var u = readSheet_(SHEET.USERS).filter(function (x) {
+    return String(x.email).trim().toLowerCase() === String(email).trim().toLowerCase()
+      && String(x.active).toUpperCase() !== 'FALSE';
+  })[0];
+  return permsByRole_(u ? u.role : role);
+}
+
+/** 只需登入 */
+function requireLogin_(token) {
+  var t = checkToken_(token);
+  if (!t.valid) return { error: '登入已過期' };
+  return t;
+}
+/** 需要管理員（DC / SYSADMIN） */
 function requireAdmin_(token) {
   var t = checkToken_(token);
   if (!t.valid) return { error: '登入已過期' };
   if (!isAdminRole_(t.role)) return { error: '沒有權限' };
   return t;
 }
-
-/**
- * 卡片開關（DC / SYSADMIN 超管可控制）：
- * 關閉後該卡片喺前端主控台唔再顯示（但 Perms matrix 仍保留，重開即可）。
- */
-function setCardEnabled_(token, cardId, enabled) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  cardId = String(cardId || '').trim();
-  if (!cardId) return err('cardId 必填');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(SHEET.CARDS);
-  var idx = rowIndexByCol_(sh, 'cardId', cardId);
-  if (idx < 0) return err('找不到該卡片');
-  setCellByHeader_(sh, idx, 'enabled', enabled ? 'TRUE' : 'FALSE');
-  return ok({ saved: true, cardId: cardId, enabled: !!enabled });
-}
-
-/**
- * 一鍵開/關某分類（category）嘅所有卡片。
- * category: 'done'（已實作） / 'todo'（加入中）
- */
-function setCategoryEnabled_(token, category, enabled) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  category = String(category || '').trim();
-  if (category !== 'done' && category !== 'todo') return err('分類不正確');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(SHEET.CARDS);
-  var v = sh.getDataRange().getValues();
-  if (v.length < 2) return err('沒有卡片');
-  var head = v[0].map(function (h) { return String(h).trim(); });
-  var cCat = head.indexOf('category'), cEn = head.indexOf('enabled');
-  var count = 0;
-  for (var i = 1; i < v.length; i++) {
-    var cat = String(v[i][cCat] || '').trim();
-    if (cat === category) { sh.getRange(i + 1, cEn + 1).setValue(enabled ? 'TRUE' : 'FALSE'); count++; }
-  }
-  return ok({ saved: true, category: category, enabled: !!enabled, count: count });
-}
-function isProtectedRole_(role) { var r = getRoleObj_(String(role).trim()); return !!r && String(r.protected).toUpperCase() === 'TRUE'; }
-function userRowIndex_(email) {
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
-  if (!sh) return -1;
-  var v = sh.getDataRange().getValues();
-  for (var i = 1; i < v.length; i++) if (String(v[i][0]).trim().toLowerCase() === String(email).trim().toLowerCase()) return i + 1;
-  return -1;
-}
-function getUsers_(token) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  // 絕不回傳 passwordHash / salt
-  var users = readSheet_(SHEET.USERS).filter(function (u) { return u.email; }).map(function (u) {
-    return { email: String(u.email).trim(), displayName: u.displayName || '', role: u.role || '', scopes: u.scopes || '', cards: u.cards || '', active: String(u.active).toUpperCase() !== 'FALSE' };
-  });
-  return ok(users);
-}
-function batchCreateUsers_(token, users) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!Array.isArray(users) || !users.length) return err('沒有帳戶資料');
-  if (users.length > 300) return err('每次最多開立 300 個帳戶');
-  var roles = readSheet_(SHEET.ROLES).map(function (r) { return String(r.role).trim(); });
-  var existing = {};
-  readSheet_(SHEET.USERS).forEach(function (u) { existing[String(u.email).trim().toLowerCase()] = true; });
-  var rows = [], rejected = [], seen = {};
-  users.forEach(function (u, i) {
-    var email = String((u || {}).email || '').trim().toLowerCase();
-    var name = String((u || {}).displayName || '').trim();
-    var role = String((u || {}).role || '').trim().toUpperCase();
-    var password = String((u || {}).password || '');
-    var scopes = String((u || {}).scopes || '').trim();
-    var cards = String((u || {}).cards || '').trim();
-    var reason = '';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) reason = '電郵格式不正確';
-    else if (!name) reason = '顯示名稱必填';
-    else if (roles.indexOf(role) < 0) reason = '角色不存在';
-    else if (isProtectedRole_(role) && t.role !== DC_ROLE) reason = '只有區總監可開立受保護角色帳戶';
-    else if (password.length < 8) reason = '初始密碼最少 8 個字元';
-    else if (existing[email] || seen[email]) reason = '電郵已存在或重複';
-    if (reason) { rejected.push({ row: i + 1, email: email, reason: reason }); return; }
-    var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
-    rows.push([email, sha256_(password + salt), salt, role, name, scopes, cards, 'TRUE']);
-    seen[email] = true;
-  });
-  if (rows.length) {
-    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
-    sh.getRange(sh.getLastRow() + 1, 1, rows.length, 8).setValues(rows);
-  }
-  return ok({ created: rows.length, rejected: rejected, skipped: rejected.length });
-}
-function updateUser_(token, email, patch) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  var row = userRowIndex_(email); if (row < 0) return err('找不到帳戶');
-  var current = readSheet_(SHEET.USERS).filter(function (u) { return String(u.email).trim().toLowerCase() === String(email).trim().toLowerCase(); })[0];
-  patch = patch || {};
-  if ((current && isProtectedRole_(current.role) || (patch.role && isProtectedRole_(patch.role))) && t.role !== DC_ROLE) return err('只有區總監可修改受保護角色帳戶');
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
-  var roles = readSheet_(SHEET.ROLES).map(function (r) { return String(r.role).trim(); });
-  if (patch.role && roles.indexOf(String(patch.role).trim()) < 0) return err('角色不存在');
-  if (patch.displayName != null) sh.getRange(row, 5).setValue(String(patch.displayName).trim());
-  if (patch.role) sh.getRange(row, 4).setValue(String(patch.role).trim());
-  if (patch.scopes != null) sh.getRange(row, 6).setValue(String(patch.scopes).trim());
-  if (patch.cards != null) sh.getRange(row, 7).setValue(String(patch.cards).trim());
-  if (patch.active != null) sh.getRange(row, 8).setValue(patch.active ? 'TRUE' : 'FALSE');
-  if (patch.password != null && String(patch.password).length) {
-    if (String(patch.password).length < 8) return err('新密碼最少 8 個字元');
-    var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
-    sh.getRange(row, 2, 1, 2).setValues([[sha256_(String(patch.password) + salt), salt]]);
-  }
-  return ok({ saved: true });
-}
-/**
- * 前端登入後改自己密碼（需提供舊密碼）。
- * 後台（DC/SYS/超管）則用 updateUser 直接改（唔使知舊密碼）。
- */
-function changePassword_(token, oldPassword, newPassword) {
+/** 需要指定操作權限：perm = canVenue | canStock | canCourse | canStaff */
+function requirePerm_(token, perm) {
   var t = checkToken_(token);
-  if (!t.valid) return err('登入已過期');
-  if (!oldPassword || !newPassword) return err('請輸入舊密碼及新密碼');
-  if (String(newPassword).length < 8) return err('新密碼最少 8 個字元');
-  var row = userRowIndex_(t.email);
-  if (row < 0) return err('找不到帳戶');
-  var current = readSheet_(SHEET.USERS).filter(function (u) {
-    return String(u.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
-  })[0];
-  if (!current) return err('找不到帳戶');
-  // 驗證舊密碼
-  if (sha256_(String(oldPassword) + (current.salt || '')) !== String(current.passwordHash).trim()) return err('舊密碼不正確');
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
-  var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
-  sh.getRange(row, 2, 1, 2).setValues([[sha256_(String(newPassword) + salt), salt]]);
-  return ok({ changed: true });
+  if (!t.valid) return { error: '登入已過期' };
+  var p = staffPerms_(t.email, t.role);
+  if (!p[perm]) return { error: '你沒有此功能嘅權限' };
+  return { ok: true, email: t.email, role: t.role };
 }
 
-function deleteUser_(token, email) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  var row = userRowIndex_(email); if (row < 0) return err('找不到帳戶');
-  var current = readSheet_(SHEET.USERS).filter(function (u) { return String(u.email).trim().toLowerCase() === String(email).trim().toLowerCase(); })[0];
-  if (current && isProtectedRole_(current.role) && t.role !== DC_ROLE) return err('只有區總監可刪除受保護角色帳戶');
-  if (String(email).trim().toLowerCase() === String(t.email).trim().toLowerCase()) return err('不可刪除目前登入帳戶');
-  SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS).deleteRow(row);
-  return ok({ deleted: true });
-}
+// ===================== 綜合記錄（AllRecords） =====================
 
-// ===================== 其他 =====================
-
-function getConfig_() {
-  var cfg = {};
-  readSheet_(SHEET.CONFIG).forEach(function (r) { if (r.key) cfg[String(r.key).trim()] = r.value; });
-  return { districtName: cfg.districtName || '童軍區', theme: cfg.theme || '', logoText: cfg.logoText || '🧭' };
-}
-function verify_(token) {
-  var t = checkToken_(token);
-  if (!t.valid) return err('token 無效或已過期');
-  return ok({ email: t.email, role: t.role });
-}
-function getRole_(role) {
-  var r = getRoleObj_(String(role).trim());
-  return r ? { role: r.role, label: r.label || r.role } : { role: role, label: role };
-}
-
-// ===================== Plugin Registry =====================
-
-function getRegistry_(token) {
-  var t = checkToken_(token);
-  if (!t.valid) return err('登入已過期');
-  if (!isAdminRole_(t.role)) return err('沒有權限');
-  var remote = [];
+function appendRecord_(type, id, refCode, title, requester, phone, troop, status, detail) {
   try {
-    var resp = UrlFetchApp.fetch(REGISTRY_URL, { muteHttpExceptions: true });
-    if (resp.getResponseCode() === 200) {
-      var parsed = JSON.parse(resp.getContentText());
-      remote = Array.isArray(parsed) ? parsed : (parsed.plugins || []);
-    }
-  } catch (e) { remote = []; }
-  var installed = readSheet_(SHEET.CARDS).map(function (c) { return String(c.cardId).trim(); });
-  var list = (remote || [])
-    .filter(function (p) { return String(p.status || 'active').toLowerCase() !== 'disabled'; })
-    .map(function (p) {
-      return { id: p.id, title: p.title, icon: p.icon || '🧩', url: p.url,
-        description: p.description || '', version: p.version || '',
-        embed: p.embed === true, type: p.type || 'jump',
-        needsDistrictBackend: p.needsDistrictBackend === true,
-        installed: installed.indexOf(String(p.id).trim()) >= 0 };
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ALL_RECORDS);
+    if (!sh) return;
+    appendRowObj_(sh, {
+      id: id, districtCode: districtCode_(), type: type, refCode: refCode, title: title,
+      requester: requester, phone: phone, troop: troop, status: status,
+      detail: detail, createdAt: new Date().toISOString(),
     });
-  return ok({ plugins: list, registryUrl: REGISTRY_URL });
+  } catch (e) {}
 }
-function installPlugin_(token, plugin) {
-  var t = checkToken_(token);
-  if (!t.valid) return err('登入已過期');
-  if (!isAdminRole_(t.role)) return err('沒有權限');
-  if (!plugin || !plugin.id) return err('plugin 資料不完整');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(SHEET.CARDS);
-  var cards = readSheet_(SHEET.CARDS);
-  if (cards.some(function (c) { return String(c.cardId).trim() === String(plugin.id).trim(); })) return err('此 plugin 已安裝');
-  var nextOrder = cards.reduce(function (m, c) { return Math.max(m, Number(c.order) || 0); }, 0) + 1;
-  sh.appendRow([plugin.id, plugin.title, plugin.icon || '🧩', plugin.type || 'jump', plugin.url,
-    plugin.description || '', nextOrder, 'TRUE', plugin.embed ? 'TRUE' : 'FALSE', 'plugin', 'done']);
-  var psh = ss.getSheetByName(SHEET.PERMS);
-  if (psh) {
-    var header = psh.getRange(1, 1, 1, psh.getLastColumn()).getValues()[0];
-    var prow = [plugin.id];
-    header.slice(1).forEach(function (role) { prow.push(String(role).trim() === DC_ROLE ? 'edit' : ''); });
-    psh.appendRow(prow);
-  }
-  return ok({ installed: true, cardId: plugin.id });
-}
-function uninstallPlugin_(token, cardId) {
-  var t = checkToken_(token);
-  if (!t.valid) return err('登入已過期');
-  if (!isAdminRole_(t.role)) return err('沒有權限');
-  cardId = String(cardId).trim();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  removeRowByFirstCol_(ss.getSheetByName(SHEET.CARDS), cardId);
-  removeRowByFirstCol_(ss.getSheetByName(SHEET.PERMS), cardId);
-  return ok({ uninstalled: true });
-}
-function removeRowByFirstCol_(sh, value) {
-  if (!sh) return;
-  var v = sh.getDataRange().getValues();
-  for (var i = v.length - 1; i >= 1; i--) if (String(v[i][0]).trim() === value) sh.deleteRow(i + 1);
-}
-function sheetHeadersBySheet_(sh) {
-  if (!sh || sh.getLastRow() < 1) return [];
-  return sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim(); });
-}
-function rowIndexByCol_(sh, colHeader, value) {
-  if (!sh) return -1;
-  var v = sh.getDataRange().getValues();
-  if (v.length < 2) return -1;
-  var head = v[0].map(function (h) { return String(h).trim(); });
-  var ci = head.indexOf(colHeader);
-  if (ci < 0) return -1;
-  for (var i = 1; i < v.length; i++) if (String(v[i][ci]).trim() === String(value).trim()) return i + 1;
-  return -1;
-}
-
-// ===================== Sheet / 工具 =====================
-
-function readSheet_(name) {
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
-  if (!sh) return [];
-  var values = sh.getDataRange().getValues();
-  if (values.length < 2) return [];
-  var headers = values[0].map(function (h) { return String(h).trim(); });
-  var out = [];
-  for (var i = 1; i < values.length; i++) {
-    var row = values[i]; if (row.join('') === '') continue;
-    var obj = {}; headers.forEach(function (h, j) { obj[h] = row[j]; }); out.push(obj);
-  }
-  return out;
-}
-function splitList_(s) {
-  if (!s) return [];
-  return String(s).split(/[,，\s]+/).map(function (x) { return x.trim(); }).filter(Boolean);
-}
-function makeToken_(email, role) {
-  var exp = Date.now() + TOKEN_TTL_HOURS * 3600 * 1000;
-  var payload = email + '|' + role + '|' + exp;
-  return Utilities.base64EncodeWebSafe(payload + '|' + sha256_(payload + TOKEN_SECRET).slice(0, 16));
-}
-function checkToken_(token) {
-  if (!token) return { valid: false };
+function updateRecordStatus_(id, status) {
   try {
-    var raw = Utilities.newBlob(Utilities.base64DecodeWebSafe(token)).getDataAsString();
-    var p = raw.split('|'), email = p[0], role = p[1], exp = Number(p[2]), sig = p[3];
-    if (Date.now() > exp) return { valid: false };
-    if (sig !== sha256_(email + '|' + role + '|' + exp + TOKEN_SECRET).slice(0, 16)) return { valid: false };
-    return { valid: true, email: email, role: role };
-  } catch (e) { return { valid: false }; }
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ALL_RECORDS);
+    var idx = findRowByFirstCol_(sh, id);
+    if (idx > 0) setCellByHeader_(sh, idx, 'status', status);
+  } catch (e) {}
 }
-function sha256_(str) {
-  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, str, Utilities.Charset.UTF_8)
-    .map(function (b) { var v = (b < 0 ? b + 256 : b).toString(16); return v.length === 1 ? '0' + v : v; }).join('');
-}
-function ok(data)  { return { ok: true, data: data }; }
-function err(msg)  { return { ok: false, error: msg }; }
-function json(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
-
-// ===================== 訓練班目錄（CourseLinks） =====================
-// 每個訓練班：1 張專屬 Google Sheet + 1 份標準收表 Script + 1 個 Drive 資料夾。
-// 區職員喺呢度「開班登記」（寫入 CourseLinks）做區會目錄／監管。
-// 報名寫入、批核、名單全部由訓練班負責領袖喺佢自己設定嘅班 Sheet 做，區系統唔插手批核。
-
-function getCourseLinkByCourseId_(courseId) {
-  return readSheet_(SHEET.COURSE_LINKS).filter(function (r) {
-    return String(r.courseId).trim() === String(courseId).trim();
-  })[0] || null;
+function getAllRecords_(token) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  return ok(readSheet_(SHEET.ALL_RECORDS).reverse());
 }
 
-/** 可否管理訓練班（開班／刪班） */
-function canManageCourses_(role) {
-  return role === DC_ROLE || role === SYSADMIN_ROLE || role === 'DDC_TRAINING';
+// ===================== 服務轉發（可選） =====================
+// Config 設定 {KEY}_SCRIPT_URL 就會將該服務整個轉發去外部 Script。
+
+function serviceCfg_(key) {
+  var url = getConfigValue_(key + '_SCRIPT_URL');
+  if (!url) return null;
+  return { url: url, apiKey: getConfigValue_(key + '_SCRIPT_APIKEY') || '' };
 }
-
-function normalizeCourseLink_(r) {
-  return {
-    courseId: String(r.courseId || '').trim(), districtCode: r.districtCode || '',
-    title: r.title || '', badgeName: r.badgeName || '', section: r.section || '',
-    courseNo: r.courseNo || '', sessionsText: r.sessionsText || '',
-    eligibility: r.eligibility || '', fee: r.fee || '', originalFee: r.originalFee || '',
-    subsidyNote: r.subsidyNote || '', deadline: r.deadline || '', quota: r.quota || '',
-    filled: r.filled || '', venue: r.venue || '', noticeUrl: r.noticeUrl || '',
-    contact: r.contact || '', scriptExecUrl: r.scriptExecUrl || '',
-    driveFolderId: r.driveFolderId || '', active: r.active || '',
-    createdAt: r.createdAt || '',
-  };
-}
-
-function getCourseLinks_(token) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  var links = readSheet_(SHEET.COURSE_LINKS).map(normalizeCourseLink_);
-  return ok(links);
-}
-
-/** 公開端只可讀取呢批欄位；每班 Script URL / API Key / Drive ID 永不回傳。 */
-function publicCourseLink_(r) {
-  return {
-    courseId: String(r.courseId || '').trim(),
-    title: r.title || '', badgeName: r.badgeName || '', section: r.section || '',
-    courseNo: r.courseNo || '', sessionsText: r.sessionsText || '',
-    eligibility: r.eligibility || '', fee: r.fee || '', originalFee: r.originalFee || '',
-    subsidyNote: r.subsidyNote || '', deadline: formatCourseDeadline_(r.deadline),
-    quota: Number(r.quota) || 0, filled: Number(r.filled) || 0,
-    venue: r.venue || '', noticeUrl: r.noticeUrl || '', contact: r.contact || '',
-    active: true,
-  };
-}
-
-function isCourseActive_(r) {
-  return String(r.active).trim().toUpperCase() === 'TRUE';
-}
-
-function formatCourseDeadline_(value) {
-  if (!value) return '';
-  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
-    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  }
-  return String(value).trim();
-}
-
-function isCourseDeadlinePassed_(value) {
-  if (!value) return false;
-  var end;
-  if (Object.prototype.toString.call(value) === '[object Date]') {
-    end = new Date(value.getTime());
-    end.setHours(23, 59, 59, 999);
-  } else {
-    var raw = String(value).trim();
-    if (!raw) return false;
-    var dateOnly = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-    end = dateOnly
-      ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 23, 59, 59, 999)
-      : new Date(raw);
-  }
-  return !isNaN(end.getTime()) && end.getTime() < Date.now();
-}
-
-function listCourseLinks_() {
-  return readSheet_(SHEET.COURSE_LINKS).filter(function (r) {
-    return String(r.courseId || '').trim() && String(r.title || '').trim()
-      && isCourseActive_(r) && !isCourseDeadlinePassed_(r.deadline);
-  }).map(publicCourseLink_);
-}
-
-function isAppsScriptExecUrl_(value) {
-  return /^https:\/\/script\.google\.com\/macros\/s\/[^/?#]+\/exec(?:\?[^#]*)?$/.test(String(value || '').trim());
-}
-
-var COURSE_REG_FIELDS = [
-  'memberType', 'nameZh', 'nameEn', 'gender', 'dob', 'phone', 'email',
-  'scoutDistrict', 'region', 'troop', 'scoutId', 'scoutPosition', 'extra',
-  'guardianConsent', 'guardianName', 'guardianRelation', 'guardianPhone', 'guardianEmail',
-  'leaderConsent', 'leaderName', 'leaderPosition', 'leaderEmail',
-  'payMethod', 'payerName', 'payAccount', 'needReceipt', 'note',
-  'receiptFileName', 'receiptMimeType', 'receiptDataUrl'
-];
-
-/**
- * 公開訓練班報名：主後台驗證課程仍開放，再用 CourseLinks 內嘅私密資料
- * server-to-server 轉發到該班 Script addReg。Script URL / Key 不會經 member-portal 前端。
- */
-function submitCourseReg_(body) {
-  body = body || {};
-  if (!body.courseId || !body.nameZh || !body.phone || !body.email) return err('資料不完整');
-  if (!body.receiptDataUrl) return err('請上傳入數紙截圖。未繳費將不獲處理申請');
-
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) return err('報名系統繁忙，請稍後再試。');
-
-  try {
-    // 鎖內重新讀取，避免最後一個名額同時被多人取得。
-    var course = getCourseLinkByCourseId_(body.courseId);
-    if (!course) return err('找不到該訓練班');
-    if (!isCourseActive_(course)) return err('該訓練班已停止報名');
-    if (isCourseDeadlinePassed_(course.deadline)) return err('該訓練班已截止報名');
-
-    var quota = Number(course.quota) || 0;
-    var filled = Number(course.filled) || 0;
-    if (quota > 0 && filled >= quota) return err('該訓練班名額已滿');
-
-    var execUrl = String(course.scriptExecUrl || '').trim();
-    var courseApiKey = String(course.scriptApiKey || '').trim();
-    if (!isAppsScriptExecUrl_(execUrl) || !courseApiKey) return err('該訓練班收表後台尚未完成設定');
-
-    var payload = { action: 'addReg', apiKey: courseApiKey };
-    COURSE_REG_FIELDS.forEach(function (field) {
-      if (body[field] !== undefined) payload[field] = body[field];
-    });
-    payload.courseId = String(course.courseId || '').trim();
-    payload.courseTitle = course.title || '';
-    payload.section = course.section || body.memberType || '';
-    payload.badgeCode = course.badgeName || '';
-
-    var response = UrlFetchApp.fetch(execUrl, {
-      method: 'post',
-      contentType: 'text/plain; charset=utf-8',
-      payload: JSON.stringify(payload),
-      followRedirects: true,
-      muteHttpExceptions: true,
-    });
-    var responseCode = response.getResponseCode();
-    var responseText = response.getContentText();
-    if (responseCode < 200 || responseCode >= 300) return err('訓練班收表後台暫時無法使用（HTTP ' + responseCode + '）');
-    if (/<!doctype html|<html/i.test(responseText)) return err('訓練班收表 Script 尚未設為「所有人」可執行');
-
-    var result;
-    try { result = JSON.parse(responseText); }
-    catch (parseError) { return err('訓練班收表後台回應格式不正確'); }
-    if (!result || result.ok !== true) return err((result && result.error) || '訓練班報名提交失敗');
-
-    // 只在每班 Script 確認寫入成功後更新公開名額。
-    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSE_LINKS);
-    var rowIndex = rowIndexByCol_(sh, 'courseId', course.courseId);
-    if (rowIndex > 0) setCellByHeader_(sh, rowIndex, 'filled', filled + 1);
-
-    var refCode = result.refCode || (result.data && result.data.refCode) || '';
-    return { ok: true, refCode: refCode };
-  } catch (ex) {
-    console.error('submitCourseReg_ failed', ex);
-    return err('訓練班報名轉發失敗，請稍後再試。');
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function saveCourseLink_(token, link) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canManageCourses_(t.role)) return err('沒有權限管理訓練班');
-  link = link || {};
-  var courseId = String(link.courseId || '').trim();
-  var title = String(link.title || '').trim();
-  if (!courseId) return err('課程代碼（courseId）必填');
-  if (!title) return err('課程名稱（title）必填');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(SHEET.COURSE_LINKS);
-  if (!sh) return err('尚未執行 setupSheets()');
-  var headers = sheetHeadersBySheet_(sh);
-  var idx = rowIndexByCol_(sh, 'courseId', courseId);
-  var existing = idx > 0 ? getCourseLinkByCourseId_(courseId) : null;
-  var scriptExecUrl = String(link.scriptExecUrl || '').trim();
-  // getCourseLinks 刻意唔回傳 Key；編輯舊班而欄位留空時必須保留原 Key。
-  var scriptApiKey = String(link.scriptApiKey || (existing && existing.scriptApiKey) || '').trim();
-  var active = String(link.active).trim().toUpperCase() === 'TRUE';
-  if (scriptExecUrl && !isAppsScriptExecUrl_(scriptExecUrl)) return err('收表 Script 網址格式不正確（必須為 Apps Script /exec）');
-  if (active && (!scriptExecUrl || !scriptApiKey)) return err('啟用訓練班前，必須設定收表 Script /exec 網址及 API Key');
-  // 用 link 內提供的欄位對應；有 districtCode 就用，否則用 Config 區碼
-  var districtCode = link.districtCode || getConfigValue_('districtCode') || '';
-  var row = headers.map(function (h) {
-    if (h === 'districtCode') return districtCode;
-    if (h === 'scriptExecUrl') return scriptExecUrl;
-    if (h === 'scriptApiKey') return scriptApiKey;
-    if (h === 'createdAt' && !link[h]) return existing ? existing.createdAt : new Date().toISOString();
-    return link[h] !== undefined ? link[h] : '';
+function callService_(key, action, payload) {
+  var cfg = serviceCfg_(key);
+  if (!cfg) return null;
+  var body = { action: action, apiKey: cfg.apiKey };
+  if (payload) for (var k in payload) body[k] = payload[k];
+  var resp = UrlFetchApp.fetch(cfg.url, {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify(body), muteHttpExceptions: true,
   });
-  if (idx > 0) { sh.getRange(idx, 1, 1, row.length).setValues([row]); }
-  else { sh.appendRow(row); }
-  return ok({ saved: true, courseId: courseId });
+  try { return JSON.parse(resp.getContentText()); }
+  catch (e) { return { ok: false, error: 'Script 回應無法解析（HTTP ' + resp.getResponseCode() + '）' }; }
 }
 
-function deleteCourseLink_(token, courseId) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canManageCourses_(t.role)) return err('沒有權限管理訓練班');
-  courseId = String(courseId || '').trim();
-  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSE_LINKS), courseId);
-  return ok({ deleted: true });
-}
+// ===================== 借場：場地清單 =====================
 
-// ===================== 一次性服務：借場 / 借物資 / 知會 =====================
-// 每區「開一次」：借場、借物資需批核；知會只記錄 + 前端可看（可排序）。
-// 公開提交（intake）由公開端（member-portal）經 /api/proxy 帶 API Key 呼叫；
-// 管理／批核由區職員（呢個 APP）登入後呼叫。
-
-/** 營運權限：可管理借場 / 借物資 / 知會（批核、維運）。STAFF（區職員受薪）預設可處理行政類。 */
-function canOps_(role) {
-  return role === DC_ROLE || role === SYSADMIN_ROLE || role === 'DDC_ADMIN' || role === 'DDC_TRAINING' || role === 'STAFF';
-}
-
-function genRef_(prefix) {
-  return prefix + '-' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd') + '-' + Math.floor(Math.random() * 9000 + 1000);
-}
-function genId_(prefix) {
-  return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-}
-
-// ---------- 借場：場地清單 ----------
 function listVenues_() {
-  return readSheet_(SHEET.VENUES).filter(function (v) { return String(v.active).toUpperCase() !== 'FALSE'; }).map(function (v) {
-    return { venueId: String(v.venueId).trim(), name: v.name || '', location: v.location || '', capacity: v.capacity || '', note: v.note || '' };
-  });
+  if (!isFeature_('venue')) return [];
+  return readSheet_(SHEET.VENUES)
+    .filter(function (v) { return String(v.active).toUpperCase() !== 'FALSE'; })
+    .map(function (v) {
+      return {
+        venueId: String(v.venueId).trim(), name: v.name || '',
+        location: v.location || '', capacity: v.capacity || '', note: v.note || '',
+      };
+    });
+}
+/** 職員版：連 scienerLockId 一齊（保留欄位，TTLock 版唔用） */
+function getVenues_(token) {
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  return ok(readSheet_(SHEET.VENUES));
 }
 function saveVenue_(token, venue) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
   venue = venue || {};
-  var venueId = String(venue.venueId || '').trim();
-  var name = String(venue.name || '').trim();
-  if (!venueId || !name) return err('場地代碼與名稱必填');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(SHEET.VENUES);
-  var headers = sheetHeadersBySheet_(sh);
-  var row = headers.map(function (h) { return venue[h] !== undefined ? venue[h] : ''; });
+  var venueId = String(venue.venueId || '').trim() || genId_('v');
+  if (!String(venue.name || '').trim()) return err('場地名稱必填');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUES);
   var idx = rowIndexByCol_(sh, 'venueId', venueId);
-  if (idx > 0) { sh.getRange(idx, 1, 1, row.length).setValues([row]); }
-  else { sh.appendRow(row); }
-  return ok({ saved: true });
+  var row = {
+    venueId: venueId, districtCode: districtCode_(),
+    name: venue.name, location: venue.location || '', capacity: venue.capacity || '',
+    scienerLockId: venue.scienerLockId || '', note: venue.note || '',
+    active: venue.active === undefined || venue.active ? 'TRUE' : 'FALSE',
+  };
+  if (idx > 0) {
+    Object.keys(row).forEach(function (k) {
+      if (venue[k] !== undefined || k === 'venueId' || k === 'name' || k === 'districtCode') setCellByHeader_(sh, idx, k, row[k]);
+    });
+  } else {
+    appendRowObj_(sh, row);
+  }
+  return ok({ saved: true, venueId: venueId });
 }
 function deleteVenue_(token, venueId) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUES), String(venueId).trim());
   return ok({ deleted: true });
 }
 
-// ---------- 借場：提交 + 批核 ----------
+// ===================== 借場：公開提交 =====================
+
 function submitVenueRequest_(b) {
+  if (!isFeature_('venue')) return err('服務暫未開放');
+  var g = guardLocked_(); if (g) return g;
   if (!b.venueId || !b.name || !b.phone) return err('資料不完整');
-  // 電郵必填：批准後需要寄入場密碼俾申請人
-  if (!b.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(b.email))) return err('請填寫有效的聯絡電郵（用於收取入場密碼）');
-  var venue = readSheet_(SHEET.VENUES).filter(function (v) { return String(v.venueId).trim() === String(b.venueId).trim(); })[0];
+  if (!b.startDate || !b.endDate) return err('請填寫借用時段');
+  // 電郵選填；有填就要格式啱（批准後寄入場密碼用）
+  if (b.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(b.email))) return err('電郵格式不正確');
+
+  var fwd = callService_('VENUE', 'addRequest', b);
+  if (fwd) {
+    if (fwd.ok) return ok({ refCode: (fwd.data && fwd.data.refCode) || '' });
+    return err(fwd.error || '借場轉發失敗');
+  }
+
+  var venue = readSheet_(SHEET.VENUES).filter(function (v) {
+    return String(v.venueId).trim() === String(b.venueId).trim();
+  })[0];
   if (!venue) return err('場地不存在');
+
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
   if (!sh) return err('尚未執行 setupSheets()');
-  var row = {
-    id: genId_('vr'), refCode: genRef_('VR'), submittedAt: new Date().toISOString(),
-    venueId: b.venueId, venueName: venue.name || '', purpose: b.purpose || '',
-    startDate: b.startDate || '', endDate: b.endDate || '',
-    name: b.name, phone: b.phone, email: b.email || '', troop: b.troop || '', position: b.position || '',
-    status: 'pending', reviewer: '', reviewedAt: '', createdAt: new Date().toISOString(),
-  };
-  appendRowObjBySheet_(sh, row);
-  return { ok: true, refCode: row.refCode };
+
+  var rid = genId_('vr'), ref = genRef_('VR'), now = new Date().toISOString();
+  appendRowObj_(sh, {
+    id: rid, districtCode: districtCode_(), refCode: ref,
+    submittedAt: now, createdAt: now,
+    venueId: b.venueId, venueName: venue.name || '',
+    purpose: b.purpose || '', startDate: b.startDate, endDate: b.endDate,
+    name: b.name, phone: b.phone, email: b.email || '',
+    troop: b.troop || '', position: b.position || '',
+    agreeRules: isTrue_(b.agreeRules) ? 'TRUE' : '',
+    status: 'pending', teamupEventId: b.teamupEventId || '', pwdRef: '',
+    reviewer: '', reviewedAt: '',
+  });
+  appendRecord_('venue', rid, ref, '🏛 借場：' + (venue.name || b.venueId), b.name, b.phone, b.troop || '', 'pending',
+    b.startDate + ' → ' + b.endDate);
+  notifyStaff_('🏛 新借場申請', '場地：' + (venue.name || b.venueId) + '\n申請人：' + b.name + '（' + b.phone + '）\n' + b.startDate + ' → ' + b.endDate);
+  return ok({ refCode: ref });
 }
+
+// ===================== 借場：查閱／批核 =====================
+
 function getVenueBookings_(token) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
   return ok(readSheet_(SHEET.VENUE_REQ).reverse());
 }
+
+var VENUE_STATUS = ['pending', 'approved', 'rejected', 'cancelled'];
+
+/** 簡單改狀態（管理系統用；唔掂電子鎖） */
 function setVenueBookingStatus_(token, id, status) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
   status = String(status).toLowerCase();
-  if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(status) < 0) return err('狀態不正確');
+  if (VENUE_STATUS.indexOf(status) < 0) return err('狀態不正確');
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
   var idx = rowIndexByCol_(sh, 'id', String(id).trim());
   if (idx < 0) return err('找不到該申請');
@@ -1050,28 +723,584 @@ function setVenueBookingStatus_(token, id, status) {
   setCellByHeader_(sh, idx, 'status', status);
   setCellByHeader_(sh, idx, 'reviewer', t.email);
   setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
-
-  // ★ 一步到位：批准 → 自動設定 TTLock 限時密碼 + Teamup 轉色 + 電郵申請人
-  var passcode = '';
-  if (status === 'approved') {
-    passcode = String(req.passcode || '').trim();
-    if (!passcode) {
-      try {
-        var pc = createTtlockPasscode_(req.phone || '0000', req.startDate, req.endDate || req.startDate, (req.name || '申請人'));
-        passcode = pc.passcode;
-      } catch (e) {
-        console.error('TTLock 建碼失敗，改用隨機密碼：' + e.message);
-        passcode = genPasscode_();
-      }
-      setCellByHeader_(sh, idx, 'passcode', passcode);
-    }
-    try { teamupOnApprove_(req, passcode); } catch (e) { console.error('Teamup 轉色失敗：' + e.message); }
-    sendVenueApprovalEmail_(req, passcode);
-  } else if (status === 'rejected' || status === 'cancelled') {
+  updateRecordStatus_(id, status);
+  // 拒絕 / 取消 → Teamup 建「拒絕」事件（選填子日曆）+ 電郵通知申請人
+  if (status === 'rejected' || status === 'cancelled') {
     try { teamupOnReject_(req, status); } catch (e) { console.error('Teamup 拒絕事件建立失敗：' + e.message); }
     sendVenueRejectionEmail_(req, status);
   }
-  return ok({ saved: true, passcode: status === 'approved' ? passcode : undefined });
+  return ok({ saved: true });
+}
+
+/**
+ * 完整批核（一條龍）：TTLock 限時密碼 + Teamup 轉色 + 電郵。
+ * - 已有 pending 事件（teamupEventId）→ 搬去「確認借用」子日曆
+ * - 冇 → 喺「確認借用」子日曆新建事件
+ * TTLock 未設定 / 停用 → 自動改用隨機密碼，其餘流程照跑。
+ */
+function approveVenueBooking_(token, id) {
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.VENUE_REQ);
+  var booking = readSheet_(SHEET.VENUE_REQ).filter(function (x) { return String(x.id) === String(id); })[0];
+  if (!booking) return err('找不到申請');
+  if (String(booking.status).toLowerCase() === 'approved') return err('此申請已批核');
+
+  // 1) TTLock 限時密碼（提前/延後 15 分鐘；撞碼自動重試；失敗→隨機密碼照跑）
+  var passcode = String(booking.passcode || '').trim();
+  var warn = '';
+  if (!passcode) {
+    try {
+      var pc = createTtlockPasscode_(booking.phone || '0000', booking.startDate, booking.endDate || booking.startDate, booking.name || '申請人');
+      passcode = pc.passcode;
+    } catch (e) {
+      console.error('TTLock 建碼失敗，改用隨機密碼：' + e.message);
+      passcode = genPasscode_();
+      warn = 'TTLock 建碼失敗，已改用隨機密碼';
+    }
+  }
+
+  // 2) Teamup 轉色
+  var tupMsg = '';
+  try {
+    if (booking.teamupEventId) {
+      tupMsg = teamupMoveToApproved_(booking.teamupEventId);
+    } else {
+      var ev = createTeamupEvent_(teamupCfg_().approvedSub,
+        (booking.venueName || booking.venueId || '區總部') + '（已批准）',
+        buildTeamupNotes_(booking) + '\n✅ 已批准於 ' + new Date().toLocaleString('zh-HK') + '\n🔑 密碼：' + passcode,
+        toTeamupDt_(booking.startDate, false), toTeamupDt_(booking.endDate || booking.startDate, true));
+      if (!ev.ok) tupMsg = ev.error;
+    }
+  } catch (e) { tupMsg = e.message; }
+
+  // 3) 電郵密碼俾申請人
+  var mailMsg = '';
+  try { sendVenueApprovalEmail_(booking, passcode); } catch (e) { mailMsg = e.message; }
+
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx > 0) {
+    setCellByHeader_(sh, idx, 'status', 'approved');
+    setCellByHeader_(sh, idx, 'passcode', passcode);
+    setCellByHeader_(sh, idx, 'reviewer', t.email);
+    setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
+  }
+  updateRecordStatus_(id, 'approved');
+  return ok({ saved: true, password: passcode, warn: [warn, tupMsg, mailMsg].filter(Boolean).join('；') });
+}
+
+function rejectVenueBooking_(token, id) {
+  return setVenueBookingStatus_(token, id, 'rejected');
+}
+
+// ===================== 借物資：物資清單 =====================
+
+function listItems_() {
+  if (!isFeature_('stock')) return [];
+  var r = callService_('STOCK', 'list', null);
+  if (r) return r.ok && r.data ? r.data : [];
+  return readSheet_(SHEET.ITEMS)
+    .filter(function (v) { return String(v.active).toUpperCase() !== 'FALSE'; })
+    .map(function (v) {
+      return {
+        itemId: String(v.itemId).trim(), name: v.name || '', category: v.category || '',
+        totalQty: Number(v.totalQty) || 0, availableQty: Number(v.availableQty) || 0,
+        unit: v.unit || '', note: v.note || '', location: v.location || '',
+      };
+    });
+}
+function getItems_(token) {
+  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
+  return ok(readSheet_(SHEET.ITEMS));
+}
+function saveItem_(token, item) {
+  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
+  item = item || {};
+  var itemId = String(item.itemId || '').trim() || genId_('i');
+  if (!String(item.name || '').trim()) return err('物資名稱必填');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ITEMS);
+  var idx = rowIndexByCol_(sh, 'itemId', itemId);
+  var row = {
+    itemId: itemId, districtCode: districtCode_(),
+    category: item.category || '', name: item.name,
+    totalQty: Number(item.totalQty) || 0,
+    availableQty: item.availableQty !== undefined ? Number(item.availableQty) : (Number(item.totalQty) || 0),
+    unit: item.unit || '', note: item.note || '', location: item.location || '',
+    active: item.active === undefined || item.active ? 'TRUE' : 'FALSE',
+  };
+  if (idx > 0) {
+    Object.keys(row).forEach(function (k) {
+      if (item[k] !== undefined || k === 'itemId' || k === 'name' || k === 'districtCode') setCellByHeader_(sh, idx, k, row[k]);
+    });
+  } else {
+    appendRowObj_(sh, row);
+  }
+  return ok({ saved: true, itemId: itemId });
+}
+function deleteItem_(token, itemId) {
+  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
+  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ITEMS), String(itemId).trim());
+  return ok({ deleted: true });
+}
+
+// ===================== 借物資：公開提交 =====================
+
+function submitStockRequest_(b) {
+  if (!isFeature_('stock')) return err('服務暫未開放');
+  var g = guardLocked_(); if (g) return g;
+  if (!b.itemId || !b.qty || !b.name || !b.phone) return err('資料不完整');
+
+  var fwd = callService_('STOCK', 'addRequest', b);
+  if (fwd) {
+    if (fwd.ok) return ok({ refCode: (fwd.data && fwd.data.refCode) || '' });
+    return err(fwd.error || '借物資轉發失敗');
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var item = readSheet_(SHEET.ITEMS).filter(function (v) {
+    return String(v.itemId).trim() === String(b.itemId).trim();
+  })[0];
+  if (!item) return err('物資不存在');
+
+  var qty = Number(b.qty) || 0;
+  if (qty <= 0) return err('數量不正確');
+  var avail = Number(item.availableQty) || 0;
+  if (qty > avail) return err('數量超出可借數量（可借 ' + avail + '）');
+
+  var sh = ss.getSheetByName(SHEET.STOCK_REQ);
+  if (!sh) return err('尚未執行 setupSheets()');
+
+  var rid = genId_('sr'), ref = genRef_('SR'), now = new Date().toISOString();
+  appendRowObj_(sh, {
+    id: rid, districtCode: districtCode_(), refCode: ref,
+    submittedAt: now, createdAt: now,
+    itemId: b.itemId, itemName: item.name || '', category: item.category || '', qty: qty,
+    purpose: b.purpose || '', borrowDate: b.borrowDate || '', returnDate: b.returnDate || '',
+    name: b.name, phone: b.phone, email: b.email || '',
+    troop: b.troop || '', position: b.position || '',
+    agreeRules: isTrue_(b.agreeRules) ? 'TRUE' : '',
+    status: 'pending', reviewer: '', reviewedAt: '',
+  });
+
+  // ★ 庫存扣減時機
+  if (STOCK_DEDUCT_ON === 'submit') {
+    var iIdx = rowIndexByCol_(ss.getSheetByName(SHEET.ITEMS), 'itemId', String(b.itemId).trim());
+    if (iIdx > 0) setCellByHeader_(ss.getSheetByName(SHEET.ITEMS), iIdx, 'availableQty', avail - qty);
+  }
+
+  appendRecord_('stock', rid, ref, '📦 借物資：' + item.name, b.name, b.phone, b.troop || '', 'pending',
+    item.name + ' x' + qty + ' · ' + (b.borrowDate || '') + ' → ' + (b.returnDate || ''));
+  notifyStaff_('📦 新借物資申請', '物資：' + item.name + ' x' + qty + '\n申請人：' + b.name + '（' + b.phone + '）\n' + (b.borrowDate || '') + ' → ' + (b.returnDate || ''));
+  return ok({ refCode: ref });
+}
+
+// ===================== 借物資：查閱／批核（庫存只扣一次） =====================
+
+function getStockRequests_(token) {
+  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
+  return ok(readSheet_(SHEET.STOCK_REQ).reverse());
+}
+
+var STOCK_STATUS = ['pending', 'approved', 'rejected', 'returned', 'cancelled'];
+/** 呢啲狀態代表「物資喺申請人手上」，需要佔用庫存 */
+function stockHolds_(status) { return String(status).toLowerCase() === 'approved'; }
+
+function setStockRequestStatus_(token, id, status) {
+  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
+  status = String(status).toLowerCase();
+  if (STOCK_STATUS.indexOf(status) < 0) return err('狀態不正確');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.STOCK_REQ);
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該申請');
+
+  var req = readSheet_(SHEET.STOCK_REQ).filter(function (r) { return String(r.id).trim() === String(id).trim(); })[0];
+  if (!req) return err('找不到該申請');
+  var prev = String(req.status || '').toLowerCase();
+
+  // ★ 只喺「佔用狀態」轉變時調整庫存，避免重複加減
+  var wasHeld = (STOCK_DEDUCT_ON === 'submit') ? (prev !== 'rejected' && prev !== 'returned' && prev !== 'cancelled') : stockHolds_(prev);
+  var nowHeld = (STOCK_DEDUCT_ON === 'submit') ? (status !== 'rejected' && status !== 'returned' && status !== 'cancelled') : stockHolds_(status);
+
+  if (wasHeld !== nowHeld) {
+    var ish = ss.getSheetByName(SHEET.ITEMS);
+    var iIdx = rowIndexByCol_(ish, 'itemId', String(req.itemId).trim());
+    if (iIdx > 0) {
+      var cur = Number(ish.getRange(iIdx, colIdxByHeader_(ish, 'availableQty')).getValue()) || 0;
+      var delta = (nowHeld ? -1 : 1) * (Number(req.qty) || 0);
+      setCellByHeader_(ish, iIdx, 'availableQty', Math.max(0, cur + delta));
+    }
+  }
+
+  setCellByHeader_(sh, idx, 'status', status);
+  setCellByHeader_(sh, idx, 'reviewer', t.email);
+  setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
+  updateRecordStatus_(id, status);
+
+  if (status === 'approved' && req.email) {
+    try {
+      MailApp.sendEmail(req.email, '✅ 借物資申請已批核',
+        '你申請借用「' + req.itemName + '」x' + req.qty + ' 已獲批核。\n'
+        + '借用期：' + req.borrowDate + ' 至 ' + req.returnDate + '。\n請於約定時間到區總部領取。');
+    } catch (e) {}
+  }
+  return ok({ saved: true });
+}
+
+// ===================== 活動知會 =====================
+
+function submitActivityNotice_(b) {
+  if (!isFeature_('activity')) return err('服務暫未開放');
+  var g = guardLocked_(); if (g) return g;
+  if (!b.troop || !b.activityName || !b.leaderName || !b.leaderPhone) return err('資料不完整');
+
+  var fwd = callService_('ACTIVITY', 'addNotice', b);
+  if (fwd) {
+    if (fwd.ok) return ok({ refCode: (fwd.data && fwd.data.refCode) || '' });
+    return err(fwd.error || '活動知會轉發失敗');
+  }
+
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ACTIVITY_REQ);
+  if (!sh) return err('尚未執行 setupSheets()');
+
+  // sections（成員系統，多選）／section（管理系統，單一）兩邊並存
+  var sections = b.sections || b.section || '';
+  var rid = genId_('an'), ref = genRef_('AN'), now = new Date().toISOString();
+  appendRowObj_(sh, {
+    id: rid, districtCode: districtCode_(), refCode: ref,
+    submittedAt: now, createdAt: now,
+    year: b.year || new Date().getFullYear(),
+    section: Array.isArray(sections) ? sections.join('、') : sections,
+    sections: Array.isArray(sections) ? sections.join('、') : sections,
+    nature: b.nature || '', troop: b.troop, activityName: b.activityName,
+    startDateTime: b.startDateTime || '', endDateTime: b.endDateTime || '',
+    location: b.location || '',
+    membersCount: b.membersCount || '', leadersCount: b.leadersCount || '', parentsCount: b.parentsCount || '',
+    leaderName: b.leaderName, leaderPhone: b.leaderPhone, leaderEmail: b.leaderEmail || '',
+    note: b.note || '',
+  });
+  appendRecord_('activity', rid, ref, '🗓 知會：' + b.activityName, b.leaderName, b.leaderPhone, b.troop, 'filed',
+    (b.startDateTime || '') + ' · ' + (b.location || ''));
+  notifyStaff_('🗓 新活動知會', '旅團：' + b.troop + '\n活動：' + b.activityName + '\n' + (b.startDateTime || ''));
+  return ok({ refCode: ref });
+}
+
+/** 公開查閱（可 year / section / nature 過濾） */
+function listActivityNotices_(p) {
+  p = p || {};
+  var list = readSheet_(SHEET.ACTIVITY_REQ);
+  list.sort(function (a, b) {
+    var yr = (Number(b.year) || 0) - (Number(a.year) || 0);
+    if (yr !== 0) return yr;
+    return String(b.submittedAt || b.createdAt).localeCompare(String(a.submittedAt || a.createdAt));
+  });
+  if (p.year)    list = list.filter(function (r) { return String(r.year) === String(p.year); });
+  if (p.section) list = list.filter(function (r) { return String(r.section || r.sections).indexOf(String(p.section)) >= 0; });
+  if (p.nature)  list = list.filter(function (r) { return String(r.nature) === String(p.nature); });
+  var dc = districtCode_();
+  return list.map(function (r) {
+    var o = {};
+    Object.keys(r).forEach(function (k) { o[k] = r[k]; });
+    o.districtCode = o.districtCode || dc;
+    return o;
+  });
+}
+function getActivityNotices_(token) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  return ok(listActivityNotices_({}));
+}
+function deleteActivityNotice_(token, id) {
+  // 行政類角色（同借場/借物資運維權限）可刪
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ACTIVITY_REQ), String(id).trim());
+  return ok({ deleted: true });
+}
+
+// ===================== 訓練班目錄（CourseLinks） =====================
+// 每個訓練班 = 1 張專屬 Sheet + 1 份收表 Script + 1 個 Drive 資料夾。
+// 欄名以管理系統為準：scriptExecUrl / scriptApiKey / driveFolderId
+// 讀取時同時接受舊欄名 apiBase / apiKey（相容成員系統舊資料）。
+
+function courseExecUrl_(r) { return String(r.scriptExecUrl || r.apiBase || '').trim(); }
+function courseApiKey_(r)  { return String(r.scriptApiKey || r.apiKey || '').trim(); }
+
+/** 公開顯示用（唔含 script url / api key） */
+function courseLinkPublic_(r) {
+  return {
+    courseId: String(r.courseId || '').trim(), districtCode: r.districtCode || districtCode_(),
+    title: r.title || '', badgeName: r.badgeName || '', section: r.section || '',
+    courseNo: r.courseNo || '', sessionsText: r.sessionsText || '',
+    eligibility: r.eligibility || '',
+    fee: Number(r.fee) || 0, originalFee: Number(r.originalFee) || 0,
+    subsidyNote: r.subsidyNote || '', deadline: r.deadline || '',
+    quota: Number(r.quota) || 0, filled: Number(r.filled) || 0,
+    venue: r.venue || '', noticeUrl: r.noticeUrl || '', contact: r.contact || '',
+  };
+}
+
+/** ★ 公開：成員系統讀開放中嘅訓練班（active=TRUE 且 deadline 未過） */
+function listCourseLinks_() {
+  if (!isFeature_('course')) return [];
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return readSheet_(SHEET.COURSE_LINKS)
+    .filter(function (r) {
+      if (!String(r.courseId || '').trim()) return false;
+      if (String(r.active).toUpperCase() === 'FALSE') return false;
+      var dl = String(r.deadline || '').trim();
+      return !dl || dl >= today;
+    })
+    .map(courseLinkPublic_);
+}
+
+/** 管理：連 scriptExecUrl / scriptApiKey / driveFolderId */
+function getCourseLinks_(token) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  return ok(readSheet_(SHEET.COURSE_LINKS).map(function (r) {
+    var o = courseLinkPublic_(r);
+    o.scriptExecUrl = courseExecUrl_(r);
+    o.scriptApiKey  = courseApiKey_(r);
+    o.driveFolderId = r.driveFolderId || '';
+    o.apiBase = o.scriptExecUrl;  // 相容舊前端
+    o.apiKey  = o.scriptApiKey;
+    o.active = String(r.active).toUpperCase() !== 'FALSE';
+    o.createdAt = r.createdAt || '';
+    return o;
+  }));
+}
+
+function saveCourseLink_(token, link) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  link = link || {};
+  var courseId = String(link.courseId || '').trim() || genId_('cl');
+  var title = String(link.title || '').trim();
+  if (!title) return err('課程名稱（title）必填');
+
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSE_LINKS);
+  if (!sh) return err('尚未執行 setupSheets()');
+  var idx = rowIndexByCol_(sh, 'courseId', courseId);
+
+  // 兩套欄名都收，統一寫入
+  var execUrl = String(link.scriptExecUrl || link.apiBase || '').trim();
+  var apiKey  = String(link.scriptApiKey || link.apiKey || '').trim();
+
+  var row = {
+    courseId: courseId, districtCode: link.districtCode || districtCode_(),
+    title: title, badgeName: link.badgeName || '', section: link.section || '',
+    courseNo: link.courseNo || '', sessionsText: link.sessionsText || '',
+    eligibility: link.eligibility || '',
+    fee: Number(link.fee) || 0, originalFee: Number(link.originalFee) || 0,
+    subsidyNote: link.subsidyNote || '', deadline: link.deadline || '',
+    quota: Number(link.quota) || 0,
+    venue: link.venue || '', noticeUrl: link.noticeUrl || '', contact: link.contact || '',
+    scriptExecUrl: execUrl, scriptApiKey: apiKey,
+    apiBase: execUrl, apiKey: apiKey,           // 同步舊欄位，兩邊前端都讀到
+    driveFolderId: link.driveFolderId || '',
+    active: link.active === undefined || link.active ? 'TRUE' : 'FALSE',
+  };
+
+  if (idx > 0) {
+    Object.keys(row).forEach(function (k) { setCellByHeader_(sh, idx, k, row[k]); });
+  } else {
+    row.filled = Number(link.filled) || 0;
+    row.createdAt = new Date().toISOString();
+    appendRowObj_(sh, row);
+  }
+  return ok({ saved: true, courseId: courseId });
+}
+
+function deleteCourseLink_(token, courseId) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSE_LINKS), String(courseId).trim());
+  return ok({ deleted: true });
+}
+
+// ===================== 訓練班：公開報名（轉發去該班 Script） =====================
+
+function submitCourseReg_(b) {
+  if (!isFeature_('course')) return err('服務暫未開放');
+  var g = guardLocked_(); if (g) return g;
+  if (!b.courseId || !b.nameZh || !b.phone || !b.email) return err('資料不完整');
+  if (!b.memberType && !b.section) return err('請選擇所屬支部');
+  if (!b.receiptDataUrl) return err('請上傳入數紙截圖。未繳費將不獲處理申請');
+
+  var link = readSheet_(SHEET.COURSE_LINKS).filter(function (x) {
+    return String(x.courseId).trim() === String(b.courseId).trim()
+      && String(x.active).toUpperCase() !== 'FALSE';
+  })[0];
+  if (!link) return err('找不到此訓練班或已截止報名');
+
+  var execUrl = courseExecUrl_(link);
+  if (!execUrl) return err('此訓練班未設定收表 Script，請聯絡職員');
+  if (Number(link.quota) > 0 && (Number(link.filled) || 0) >= Number(link.quota)) return err('此班名額已滿');
+
+  var payload = {
+    action: 'addReg',
+    apiKey: courseApiKey_(link),
+    driveFolderId: link.driveFolderId || '',
+    courseId: b.courseId, courseTitle: link.title || '',
+    nameZh: b.nameZh, nameEn: b.nameEn || '', gender: b.gender || '', dob: b.dob || '',
+    phone: b.phone, email: b.email,
+    memberType: b.memberType || '', section: link.section || '', badgeCode: link.badgeCode || '',
+    scoutDistrict: b.scoutDistrict || '', region: b.region || '', troop: b.troop || '',
+    scoutId: b.scoutId || '', scoutPosition: b.scoutPosition || '',
+    guardianConsent: b.guardianConsent || '', guardianName: b.guardianName || '',
+    guardianRelation: b.guardianRelation || '', guardianEmail: b.guardianEmail || '',
+    guardianPhone: b.guardianPhone || '',
+    leaderConsent: b.leaderConsent || '', leaderName: b.leaderName || '',
+    leaderPosition: b.leaderPosition || '', leaderEmail: b.leaderEmail || '',
+    payMethod: b.payMethod || 'FPS', payerName: b.payerName || '', payAccount: b.payAccount || '',
+    receiptFileName: b.receiptFileName || '', receiptMimeType: b.receiptMimeType || 'image/jpeg',
+    receiptDataUrl: b.receiptDataUrl || '', needReceipt: b.needReceipt || '', note: b.note || '',
+  };
+
+  var resp = UrlFetchApp.fetch(execUrl, {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify(payload), muteHttpExceptions: true,
+  });
+  var result = {};
+  try { result = JSON.parse(resp.getContentText()); } catch (e) {}
+  if (!result.ok) return err((result && result.error) || '訓練班收表失敗（HTTP ' + resp.getResponseCode() + '）');
+
+  var ref = (result.data && result.data.refCode) || '';
+
+  // 更新已報名人數
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSE_LINKS);
+  var idx = rowIndexByCol_(sh, 'courseId', String(b.courseId).trim());
+  if (idx > 0) setCellByHeader_(sh, idx, 'filled', (Number(link.filled) || 0) + 1);
+
+  appendRecord_('course', genId_('crs'), ref, '🎓 報班：' + (link.title || b.courseId),
+    b.nameZh, b.phone, b.troop || '', 'filed',
+    '已轉發至訓練班專屬表 · ' + (b.memberType || '') + '（已交入數紙）');
+  notifyStaff_('🎓 新訓練班報名',
+    '班：' + (link.title || b.courseId) + '\n學員：' + b.nameZh + '（' + b.phone + '）\n支部：' + (b.memberType || ''));
+  return ok({ refCode: ref });
+}
+
+/** 讀某班名單（轉發去該班 Script listRegs） */
+function getCourseRegs_(token, courseId) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  var link = readSheet_(SHEET.COURSE_LINKS).filter(function (x) {
+    return String(x.courseId).trim() === String(courseId).trim();
+  })[0];
+  if (!link) return err('找不到此訓練班');
+  var execUrl = courseExecUrl_(link);
+  if (!execUrl) return ok([]);
+  try {
+    var resp = UrlFetchApp.fetch(execUrl + '?action=listRegs&apiKey=' + encodeURIComponent(courseApiKey_(link)),
+      { muteHttpExceptions: true });
+    var r = JSON.parse(resp.getContentText());
+    return r.ok ? ok(r.data || []) : err(r.error || '讀取名單失敗');
+  } catch (e) { return err('讀取名單失敗：' + e); }
+}
+
+function setCourseRegStatus_(token, courseId, id, status) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  var link = readSheet_(SHEET.COURSE_LINKS).filter(function (x) {
+    return String(x.courseId).trim() === String(courseId).trim();
+  })[0];
+  if (!link) return err('找不到此訓練班');
+  var execUrl = courseExecUrl_(link);
+  if (!execUrl) return err('此訓練班未設定收表 Script');
+  try {
+    var resp = UrlFetchApp.fetch(execUrl, {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ action: 'setRegStatus', apiKey: courseApiKey_(link), id: id, status: status }),
+      muteHttpExceptions: true,
+    });
+    var r = JSON.parse(resp.getContentText());
+    return r.ok ? ok(r.data || { saved: true }) : err(r.error || '更新失敗');
+  } catch (e) { return err('更新失敗：' + e); }
+}
+
+function setRegFeePaid_(token, courseId, id, paid) {
+  return setCourseRegStatus_(token, courseId, id, paid ? 'paid' : 'unpaid');
+}
+
+// ===================== 舊版內建課程（Courses，保留相容） =====================
+
+function listCourses_() {
+  if (!isFeature_('course')) return [];
+  return readSheet_(SHEET.COURSES).map(function (r) {
+    return {
+      courseId: r.courseId, title: r.title, section: r.section || '',
+      badgeName: r.badgeName || '', courseNo: r.courseNo || '',
+      sessionsText: r.sessionsText || '', eligibility: r.eligibility || '',
+      fee: Number(r.fee) || 0, originalFee: Number(r.originalFee) || 0,
+      deadline: r.deadline || '', quota: Number(r.quota) || 0, filled: Number(r.filled) || 0,
+      venue: r.venue || '', status: r.status || 'open',
+      noticeUrl: r.noticeUrl || '', fpsNote: r.fpsNote || '',
+    };
+  }).filter(function (c) { return String(c.status).toLowerCase() !== 'closed'; });
+}
+function getCourses_(token) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  return ok(readSheet_(SHEET.COURSES));
+}
+function saveCourse_(token, course) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  course = course || {};
+  var courseId = String(course.courseId || '').trim() || genId_('c');
+  if (!String(course.title || '').trim()) return err('課程名稱必填');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSES);
+  var idx = rowIndexByCol_(sh, 'courseId', courseId);
+  var row = {
+    courseId: courseId, districtCode: districtCode_(), title: course.title,
+    sessionsText: course.sessionsText || '', eligibility: course.eligibility || '',
+    fee: Number(course.fee) || 0, originalFee: Number(course.originalFee) || 0,
+    deadline: course.deadline || '', quota: Number(course.quota) || 0,
+    venue: course.venue || '', status: course.status || 'open',
+    noticeUrl: course.noticeUrl || '', fpsNote: course.fpsNote || '',
+  };
+  if (idx > 0) Object.keys(row).forEach(function (k) { setCellByHeader_(sh, idx, k, row[k]); });
+  else { row.filled = 0; appendRowObj_(sh, row); }
+  return ok({ saved: true, courseId: courseId });
+}
+function deleteCourse_(token, courseId) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSES), String(courseId).trim());
+  return ok({ deleted: true });
+}
+
+/** 下拉參數：支部／地域／區會／徽章 */
+function listCourseParams_() {
+  var raw = readSheet_(SHEET.COURSE_PARAMS);
+  var badges = [], sections = [], districts = [], regions = [], memberTypes = [];
+  raw.forEach(function (r) {
+    var k = r.key || '', v = r.value || '';
+    if (k === 'badge') badges.push({ code: r.code || '', group: r.group || '', nameZh: v, nameEn: r.nameEn || '', kind: r.kind || '' });
+    else if (k === 'section') sections.push(v);
+    else if (k === 'district') districts.push(v);
+    else if (k === 'region') regions.push(v);
+    else if (k === 'memberType') memberTypes.push(v);
+  });
+  return { badges: badges, sections: sections, districts: districts, regions: regions, memberTypes: memberTypes };
+}
+
+// ===================== 電子鎖（通通鎖 TTLock）/ 日曆 / 電郵 =====================
+// 門鎖用 TTLock（SKW 區現有硬件）。批准 → createTtlockPasscode_ 建限時密碼。
+// Teamup 金鑰主用 TEAMUP_* 欄名，同時兼容舊 teamup* 欄名。
+
+function md5_(s) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, s, Utilities.Charset.UTF_8)
+    .map(function (b) { var v = (b < 0 ? b + 256 : b).toString(16); return v.length === 1 ? '0' + v : v; }).join('');
+}
+function ttlockBase_() {
+  var b = getConfigValue_('ttlockApiBase') || 'https://api.ttlock.com';
+  return String(b).replace(/\/+$/, '');
+}
+function ttlockDisabled_() { return String(getConfigValue_('ttlockDisabled')).toUpperCase() === 'TRUE'; }
+function ttlockToken_() {
+  var clientId = getConfigValue_('ttlockClientId');
+  var secret = getConfigValue_('ttlockClientSecret');
+  var user = getConfigValue_('ttlockUsername');
+  var pw = getConfigValue_('ttlockPassword');
+  if (!clientId || !secret || !user || !pw) throw new Error('未設定 TTLock Config（ttlockClientId/Secret/Username/Password）');
+  var payload = { client_id: clientId, client_secret: secret, username: user, password: md5_(pw), grant_type: 'password' };
+  var res = UrlFetchApp.fetch(ttlockBase_() + '/oauth2/token', { method: 'post', payload: payload, muteHttpExceptions: true });
+  var data = JSON.parse(res.getContentText());
+  if (!data.access_token) throw new Error('TTLock 登入失敗 ' + JSON.stringify(data));
+  return data.access_token;
 }
 
 /** 生成 6 位數字密碼（避開已存在嘅 passcode，防撞碼） */
@@ -1085,181 +1314,7 @@ function genPasscode_() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-function venueMailConfig_() {
-  var districtName = getConfigValue_('districtName') || '童軍區';
-  var fromName = getConfigValue_('notifyFrom') || (districtName + ' 管理系統');
-  return { districtName: districtName, fromName: fromName };
-}
-
-/** 批准 → 寄「已批准 + 入場密碼」俾申請人 */
-function sendVenueApprovalEmail_(req, passcode) {
-  var email = String(req.email || '').trim();
-  if (!email) { console.log('無申請人電郵，跳過批准通知。'); return; }
-  var cfg = venueMailConfig_();
-  var name = req.name || '申請人';
-  var html =
-    '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:20px;border:1px solid #e1e4e8;border-radius:8px;">'
-    + '<h2 style="color:#15803d;text-align:center;border-bottom:2px solid #bbf7d0;padding-bottom:10px;">✅ 場地借用已獲批准</h2>'
-    + '<p>你好 ' + esc_(name) + '，你所申請的場地借用已獲批核：</p>'
-    + '<div style="background:#f6f8fa;border-left:4px solid #16a34a;padding:14px 18px;margin:16px 0;font-size:14px;color:#444;line-height:1.8;">'
-    + '<b>場地：</b>' + esc_(req.venueName || req.venueId) + '<br/>'
-    + '<b>日期：</b>' + esc_(req.startDate || '') + (req.endDate ? ' → ' + esc_(req.endDate) : '') + '<br/>'
-    + '<b>申請編號：</b>' + esc_(req.refCode || '') + '<br/>'
-    + '<b>用途：</b>' + esc_(req.purpose || '—')
-    + '</div>'
-    + '<div style="background:#f0fdf4;border:2px dashed #bbf7d0;border-radius:8px;padding:22px;text-align:center;margin:18px 0;">'
-    + '<div style="font-size:13px;color:#166534;font-weight:bold;">🔑 入場密碼</div>'
-    + '<div style="font-size:40px;font-weight:800;letter-spacing:6px;color:#166534;font-family:monospace;margin:10px 0;">' + esc_(passcode) + '</div>'
-    + '<div style="font-size:13px;color:#374151;">請於借用時段使用此密碼進入場地。</div>'
-    + '</div>'
-    + '<div style="background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;font-size:13px;color:#78350f;line-height:1.7;">'
-    + '<b>使用守則：</b>使用完畢後請關閉所有電源、清走垃圾並鎖好場地。如有問題請聯絡區職員。'
-    + '</div>'
-    + '<p style="font-size:13px;color:#666;text-align:center;margin-top:26px;">' + esc_(cfg.districtName) + ' 敬啟</p>'
-    + '</div>';
-  try {
-    MailApp.sendEmail({ to: email, subject: '[' + cfg.districtName + '] 場地借用已獲批准 - 入場密碼 ' + passcode, htmlBody: html, name: cfg.fromName });
-  } catch (e) {
-    console.error('批准電郵寄送失敗：' + e);
-  }
-}
-
-/** 拒絕 / 取消 → 電郵通知申請人 */
-function sendVenueRejectionEmail_(req, status) {
-  var email = String(req.email || '').trim();
-  if (!email) { console.log('無申請人電郵，跳過拒絕通知。'); return; }
-  var cfg = venueMailConfig_();
-  var name = req.name || '申請人';
-  var title = status === 'cancelled' ? '已取消' : '未獲批准';
-  var html =
-    '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:20px;border:1px solid #e1e4e8;border-radius:8px;">'
-    + '<h2 style="color:#dc2626;text-align:center;border-bottom:2px solid #fecaca;padding-bottom:10px;">❌ 場地借用' + title + '</h2>'
-    + '<p>你好 ' + esc_(name) + '，你所申請的場地借用已' + title + '：</p>'
-    + '<div style="background:#f6f8fa;border-left:4px solid #dc2626;padding:14px 18px;margin:16px 0;font-size:14px;color:#444;line-height:1.8;">'
-    + '<b>場地：</b>' + esc_(req.venueName || req.venueId) + '<br/>'
-    + '<b>日期：</b>' + esc_(req.startDate || '') + (req.endDate ? ' → ' + esc_(req.endDate) : '')
-    + '</div>'
-    + '<p style="font-size:14px;color:#555;">如有疑問，請聯絡區職員查詢。</p>'
-    + '<p style="font-size:13px;color:#666;text-align:center;margin-top:26px;">' + esc_(cfg.districtName) + ' 敬啟</p>'
-    + '</div>';
-  try {
-    MailApp.sendEmail({ to: email, subject: '[' + cfg.districtName + '] 場地借用' + title, htmlBody: html, name: cfg.fromName });
-  } catch (e) {
-    console.error('拒絕電郵寄送失敗：' + e);
-  }
-}
-
-/** HTML 轉義，避免申請人名字含特殊字元破壞電郵樣式 */
-function esc_(v) {
-  return String(v == null ? '' : v)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-// ===================== Teamup + TTLock 一條龍借場 =====================
-// 申請人喺成員系統填表（寫入 VenueBookings，status=pending）；
-// 管理系統 /venue-regs 批核 → 批准時自動：
-//   1) 通通鎖(TTLock) 設定限時密碼
-//   2) Teamup 建立「確認借用區總部」子日曆事件（轉顏色 藍→紅）
-//   3) 電郵密碼俾申請人
-// 拒絕/取消：Teamup 建立「拒絕」子日曆事件 + 電郵通知（如需）。
-
-function teamupCfg_() {
-  return {
-    apiKey: getConfigValue_('teamupApiKey'),
-    calendarId: getConfigValue_('teamupCalendarId'),
-    approvedSub: getConfigValue_('teamupApprovedSubId'),
-    rejectedSub: getConfigValue_('teamupRejectedSubId'),
-  };
-}
-function teamupReady_() {
-  var c = teamupCfg_();
-  return !!(c.apiKey && c.calendarId && c.approvedSub);
-}
-function teamupBase_() { return 'https://api.teamup.com/' + teamupCfg_().calendarId; }
-function teamupFetch_(url, options) {
-  var opt = options || {};
-  opt.headers = { 'Teamup-Token': teamupCfg_().apiKey, 'Content-Type': 'application/json' };
-  opt.muteHttpExceptions = true;
-  var res = UrlFetchApp.fetch(url, opt);
-  return { code: res.getResponseCode(), text: res.getContentText() };
-}
-
-/** 把申請資料寫成 Teamup 事件 notes */
-function buildTeamupNotes_(req) {
-  return '姓名：' + String(req.name || '') + '\n電話：' + String(req.phone || '')
-    + '\n電郵：' + String(req.email || '') + '\n旅團：' + String(req.troop || '')
-    + '\n申請編號：' + String(req.refCode || '') + '\n用途：' + String(req.purpose || '');
-}
-/** 正規化成 Teamup 需要嘅 ISO 起訖時間 */
-function toTeamupDt_(value, endOfDay) {
-  if (!value) return '';
-  var d = new Date(value);
-  if (isNaN(d.getTime())) return String(value);
-  if (endOfDay) { d.setHours(23, 59, 59, 999); }
-  return d.toISOString();
-}
-
-/** 建立 Teamup 事件到指定子日曆 */
-function createTeamupEvent_(subId, title, notes, startDt, endDt) {
-  if (!teamupReady_() || !subId) return { ok: false, error: 'Teamup 尚未設定' };
-  var body = JSON.stringify({
-    subcalendar_ids: [parseInt(subId)],
-    title: title,
-    notes: notes,
-    start_dt: startDt,
-    end_dt: endDt || startDt,
-  });
-  var r = teamupFetch_(teamupBase_() + '/events', { method: 'post', payload: body });
-  if (r.code < 200 || r.code >= 300) return { ok: false, error: 'Teamup 建立事件失敗 HTTP ' + r.code + '：' + r.text };
-  try { var data = JSON.parse(r.text); return { ok: true, eventId: data && data.event ? data.event.id : '' }; }
-  catch (e) { return { ok: true, eventId: '' }; }
-}
-
-/** 批准 → 喺「確認借用」子日曆建事件（轉色） */
-function teamupOnApprove_(req, passcode) {
-  if (!teamupReady_()) return;
-  var title = (req.venueName || req.venueId || '區總部') + '（已批准）';
-  var notes = buildTeamupNotes_(req)
-    + '\n✅ 已批准於 ' + new Date().toLocaleString('zh-HK')
-    + '\n🔑 密碼：' + passcode;
-  createTeamupEvent_(teamupCfg_().approvedSub, title, notes,
-    toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true));
-}
-/** 拒絕/取消 → 喺「拒絕」子日曆建事件 */
-function teamupOnReject_(req, status) {
-  if (!teamupReady_()) return;
-  if (!teamupCfg_().rejectedSub) return;
-  var label = status === 'cancelled' ? '已取消' : '已拒絕';
-  var title = (req.venueName || req.venueId || '區總部') + '（' + label + '）';
-  var notes = buildTeamupNotes_(req) + '\n❌ ' + label + '於 ' + new Date().toLocaleString('zh-HK');
-  createTeamupEvent_(teamupCfg_().rejectedSub, title, notes,
-    toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true));
-}
-
-// ---------- 通通鎖 TTLock ----------
-function ttlockBase_() {
-  var b = getConfigValue_('ttlockApiBase') || 'https://api.ttlock.com';
-  return String(b).replace(/\/+$/, '');
-}
-function md5_(s) {
-  return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, s, Utilities.Charset.UTF_8)
-    .map(function (b) { var v = (b < 0 ? b + 256 : b).toString(16); return v.length === 1 ? '0' + v : v; }).join('');
-}
-function ttlockToken_() {
-  var clientId = getConfigValue_('ttlockClientId');
-  var secret = getConfigValue_('ttlockClientSecret');
-  var user = getConfigValue_('ttlockUsername');
-  var pw = getConfigValue_('ttlockPassword');
-  if (!clientId || !secret || !user || !pw) throw new Error('未設定 TTLock Config（ttlockClientId/Secret/Username/Password）');
-  var payload = { client_id: clientId, client_secret: secret, username: user, password: md5_(pw), grant_type: 'password' };
-  var res = UrlFetchApp.fetch(ttlockBase_() + '/oauth2/token', { method: 'post', payload: payload, muteHttpExceptions: true });
-  var data = JSON.parse(res.getContentText());
-  if (!data.access_token) throw new Error('TTLock 登入失敗 ' + JSON.stringify(data));
-  return data.access_token;
-}
-function ttlockDisabled_() { return String(getConfigValue_('ttlockDisabled')).toUpperCase() === 'TRUE'; }
-/** 建立限時密碼；ttlockDisabled=TRUE 時返回模擬密碼，其餘流程照跑 */
+/** 建立 TTLock 限時密碼；ttlockDisabled=TRUE 時返回模擬密碼，其餘流程照跑 */
 function createTtlockPasscode_(phone, startDate, endDate, name) {
   if (ttlockDisabled_()) return { passcode: genPasscode_(), simulated: true };
   var token = ttlockToken_();
@@ -1287,403 +1342,1034 @@ function createTtlockPasscode_(phone, startDate, endDate, name) {
   throw new Error('TTLock 建碼多次失敗 ' + (lastErr.errmsg || JSON.stringify(lastErr)));
 }
 
-// ---------- 借物資：物資清單 ----------
-function listItems_() {
-  return readSheet_(SHEET.ITEMS).filter(function (v) { return String(v.active).toUpperCase() !== 'FALSE'; }).map(function (v) {
-    return { itemId: String(v.itemId).trim(), name: v.name || '', category: v.category || '', totalQty: v.totalQty || '', availableQty: v.availableQty || '', unit: v.unit || '', note: v.note || '' };
-  });
-}
-function saveItem_(token, item) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
-  item = item || {};
-  var itemId = String(item.itemId || '').trim();
-  var name = String(item.name || '').trim();
-  if (!itemId || !name) return err('物資代碼與名稱必填');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(SHEET.ITEMS);
-  var headers = sheetHeadersBySheet_(sh);
-  var row = headers.map(function (h) { return item[h] !== undefined ? item[h] : ''; });
-  var idx = rowIndexByCol_(sh, 'itemId', itemId);
-  if (idx > 0) { sh.getRange(idx, 1, 1, row.length).setValues([row]); }
-  else { sh.appendRow(row); }
-  return ok({ saved: true });
-}
-function deleteItem_(token, itemId) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
-  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ITEMS), String(itemId).trim());
-  return ok({ deleted: true });
-}
+// ---------- Teamup ----------
 
-// ---------- 借物資：提交 + 批核（庫存扣減/歸還） ----------
-function submitStockRequest_(b) {
-  if (!b.itemId || !b.qty || !b.name || !b.phone) return err('資料不完整');
-  var item = readSheet_(SHEET.ITEMS).filter(function (v) { return String(v.itemId).trim() === String(b.itemId).trim(); })[0];
-  if (!item) return err('物資不存在');
-  var qty = Number(b.qty) || 0;
-  var avail = Number(item.availableQty) || 0;
-  if (qty <= 0) return err('數量不正確');
-  if (avail < qty) return err('庫存不足（僅餘 ' + avail + '）');
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.STOCK_REQ);
-  if (!sh) return err('尚未執行 setupSheets()');
-  var row = {
-    id: genId_('sr'), refCode: genRef_('SR'), submittedAt: new Date().toISOString(),
-    itemId: b.itemId, itemName: item.name || '', qty: qty,
-    purpose: b.purpose || '', borrowDate: b.borrowDate || '', returnDate: b.returnDate || '',
-    name: b.name, phone: b.phone, email: b.email || '', troop: b.troop || '', position: b.position || '',
-    status: 'pending', reviewer: '', reviewedAt: '', createdAt: new Date().toISOString(),
+/** Teamup 金鑰：主用 TEAMUP_*，兼容舊 teamup* 欄名 */
+function teamupCfg_() {
+  return {
+    apiKey: getConfigValue_('TEAMUP_API_KEY') || getConfigValue_('teamupApiKey'),
+    calendarId: getConfigValue_('TEAMUP_CALENDAR_KEY') || getConfigValue_('teamupCalendarId'),
+    pendingSub: getConfigValue_('TEAMUP_PENDING_SUBCAL_ID') || '',
+    approvedSub: getConfigValue_('TEAMUP_APPROVED_SUBCAL_ID') || getConfigValue_('teamupApprovedSubId'),
+    rejectedSub: getConfigValue_('TEAMUP_REJECTED_SUBCAL_ID') || getConfigValue_('teamupRejectedSubId'),
   };
-  appendRowObjBySheet_(sh, row);
-  return { ok: true, refCode: row.refCode };
 }
-function getStockRequests_(token) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
-  return ok(readSheet_(SHEET.STOCK_REQ).reverse());
+function teamupReady_() {
+  var c = teamupCfg_();
+  return !!(c.apiKey && c.calendarId);
 }
-function setStockRequestStatus_(token, id, status) {
-  var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
-  if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(String(status).toLowerCase()) < 0) return err('狀態不正確');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(SHEET.STOCK_REQ);
-  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
-  if (idx < 0) return err('找不到該申請');
-  setCellByHeader_(sh, idx, 'status', String(status).toLowerCase());
-  setCellByHeader_(sh, idx, 'reviewer', t.email);
-  setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
-  // 批准先扣庫存，拒絕/取消歸還
-  if (String(status).toLowerCase() === 'approved') { adjustItemQty_(ss, sh, idx, -1); }
-  else if (['rejected', 'cancelled'].indexOf(String(status).toLowerCase()) >= 0) { adjustItemQty_(ss, sh, idx, 1); }
-  return ok({ saved: true });
+function teamupApi_(method, path, body) {
+  var c = teamupCfg_();
+  if (!c.apiKey || !c.calendarId) return null;
+  var options = { method: method, headers: { 'Teamup-Token': c.apiKey }, muteHttpExceptions: true };
+  if (body) { options.contentType = 'application/json'; options.payload = JSON.stringify(body); }
+  try { return JSON.parse(UrlFetchApp.fetch('https://api.teamup.com/' + path, options).getContentText()); }
+  catch (e) { return null; }
 }
-/** 依該申請嘅 itemId/qty 調整庫存：dir=1 歸還，dir=-1 扣除 */
-function adjustItemQty_(ss, reqSh, reqIdx, dir) {
-  var reqId = String(reqSh.getRange(reqIdx, 1).getValue()).trim();
-  var req = readSheet_(SHEET.STOCK_REQ).filter(function (r) { return String(r.id).trim() === reqId; })[0];
-  if (!req) return;
-  var ish = ss.getSheetByName(SHEET.ITEMS);
-  var iIdx = rowIndexByCol_(ish, 'itemId', String(req.itemId).trim());
-  if (iIdx < 0) return;
-  var cur = Number(ish.getRange(iIdx, colIdxByHeader_(ish, 'availableQty')).getValue()) || 0;
-  var newQty = Math.max(0, cur + dir * (Number(req.qty) || 0));
-  setCellByHeader_(ish, iIdx, 'availableQty', newQty);
+function teamupFetch_(url, options) {
+  var opt = options || {};
+  opt.headers = { 'Teamup-Token': teamupCfg_().apiKey, 'Content-Type': 'application/json' };
+  opt.muteHttpExceptions = true;
+  var res = UrlFetchApp.fetch(url, opt);
+  return { code: res.getResponseCode(), text: res.getContentText() };
+}
+/** 把申請資料寫成 Teamup 事件 notes */
+function buildTeamupNotes_(req) {
+  return '姓名：' + String(req.name || '') + '\n電話：' + String(req.phone || '')
+    + '\n電郵：' + String(req.email || '') + '\n旅團：' + String(req.troop || '')
+    + '\n申請編號：' + String(req.refCode || '') + '\n用途：' + String(req.purpose || '');
+}
+/** 正規化成 Teamup 需要嘅 ISO 起訖時間 */
+function toTeamupDt_(value, endOfDay) {
+  if (!value) return '';
+  var d = new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  if (endOfDay) { d.setHours(23, 59, 59, 999); }
+  return d.toISOString();
+}
+/** 建立 Teamup 事件到指定子日曆 */
+function createTeamupEvent_(subId, title, notes, startDt, endDt) {
+  if (!teamupReady_() || !subId) return { ok: false, error: 'Teamup 尚未設定' };
+  var body = JSON.stringify({
+    subcalendar_ids: [parseInt(subId, 10)],
+    title: title,
+    notes: notes,
+    start_dt: startDt,
+    end_dt: endDt || startDt,
+  });
+  var r = teamupFetch_('https://api.teamup.com/' + teamupCfg_().calendarId + '/events', { method: 'post', payload: body });
+  if (r.code < 200 || r.code >= 300) return { ok: false, error: 'Teamup 建立事件失敗 HTTP ' + r.code + '：' + r.text };
+  try { var data = JSON.parse(r.text); return { ok: true, eventId: data && data.event ? data.event.id : '' }; }
+  catch (e) { return { ok: true, eventId: '' }; }
+}
+/** 將 pending 事件搬去「確認借用」子日曆（轉色） */
+function teamupMoveToApproved_(eventId) {
+  var c = teamupCfg_();
+  if (!c.approvedSub || !eventId) return '';
+  var r = teamupApi_('put', c.calendarId + '/events/' + eventId, { subcalendar_ids: [Number(c.approvedSub)] });
+  return (r && r.event) ? '' : 'TeamUp 更新失敗';
+}
+/** 拒絕/取消 → 喺「拒絕」子日曆建事件（選填） */
+function teamupOnReject_(req, status) {
+  if (!teamupReady_()) return;
+  if (!teamupCfg_().rejectedSub) return;
+  var label = status === 'cancelled' ? '已取消' : '已拒絕';
+  var title = (req.venueName || req.venueId || '區總部') + '（' + label + '）';
+  var notes = buildTeamupNotes_(req) + '\n❌ ' + label + '於 ' + new Date().toLocaleString('zh-HK');
+  createTeamupEvent_(teamupCfg_().rejectedSub, title, notes,
+    toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true));
 }
 
-// ---------- 知會：提交 + 查看（可排序/過濾）+ 刪除 ----------
-function submitActivityNotice_(b) {
-  if (!b.troop || !b.activityName || !b.leaderName || !b.leaderPhone) return err('資料不完整');
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ACTIVITY_REQ);
-  if (!sh) return err('尚未執行 setupSheets()');
-  var row = {
-    id: genId_('an'), refCode: genRef_('AN'), submittedAt: new Date().toISOString(),
-    year: b.year || new Date().getFullYear(), section: b.section || '', nature: b.nature || '',
-    troop: b.troop, activityName: b.activityName,
-    startDateTime: b.startDateTime || '', endDateTime: b.endDateTime || '',
-    location: b.location || '', membersCount: b.membersCount || '', leadersCount: b.leadersCount || '',
-    parentsCount: b.parentsCount || '',
-    leaderName: b.leaderName, leaderPhone: b.leaderPhone, leaderEmail: b.leaderEmail || '',
-    note: b.note || '', createdAt: new Date().toISOString(),
+// ---------- 電郵 ----------
+
+function venueMailConfig_() {
+  var districtName = getConfigValue_('districtName') || '童軍區';
+  var fromName = getConfigValue_('notifyFrom') || (districtName + ' 管理系統');
+  return { districtName: districtName, fromName: fromName };
+}
+/** HTML 轉義，避免申請人名字含特殊字元破壞電郵樣式 */
+function esc_(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+/** 批准 → 寄「已批准 + 入場密碼」俾申請人 */
+function sendVenueApprovalEmail_(req, passcode) {
+  var email = String(req.email || '').trim();
+  if (!email) { console.log('無申請人電郵，跳過批准通知。'); return; }
+  var cfg = venueMailConfig_();
+  var name = req.name || '申請人';
+  var html =
+    '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:20px;border:1px solid #e1e4e8;border-radius:8px;">'
+    + '<h2 style="color:#15803d;text-align:center;border-bottom:2px solid #bbf7d0;padding-bottom:10px;">✅ 場地借用已獲批准</h2>'
+    + '<p>你好 ' + esc_(name) + '，你所申請的場地借用已獲批核：</p>'
+    + '<div style="background:#f6f8fa;border-left:4px solid #16a34a;padding:14px 18px;margin:16px 0;font-size:14px;color:#444;line-height:1.8;">'
+    + '<b>場地：</b>' + esc_(req.venueName || req.venueId) + '<br/>'
+    + '<b>日期：</b>' + esc_(req.startDate || '') + (req.endDate ? ' → ' + esc_(req.endDate) : '') + '<br/>'
+    + '<b>申請編號：</b>' + esc_(req.refCode || '') + '<br/>'
+    + '<b>用途：</b>' + esc_(req.purpose || '—')
+    + '</div>'
+    + '<div style="background:#f0fdf4;border:2px dashed #bbf7d0;border-radius:8px;padding:22px;text-align:center;margin:18px 0;">'
+    + '<div style="font-size:13px;color:#166534;font-weight:bold;">🔑 入場密碼</div>'
+    + '<div style="font-size:40px;font-weight:800;letter-spacing:6px;color:#166534;font-family:monospace;margin:10px 0;">' + esc_(passcode) + '</div>'
+    + '<div style="font-size:13px;color:#374151;">請於借用時段使用此密碼進入場地。</div>'
+    + '</div>'
+    + '<div style="background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;font-size:13px;color:#78350f;line-height:1.7;">'
+    + '<b>使用守則：</b>使用完畢後請關閉所有電源、清走垃圾並鎖好場地。如有問題請聯絡區職員。'
+    + '</div>'
+    + '<p style="font-size:13px;color:#666;text-align:center;margin-top:26px;">' + esc_(cfg.districtName) + ' 敬啟</p>'
+    + '</div>';
+  MailApp.sendEmail({ to: email, subject: '[' + cfg.districtName + '] 場地借用已獲批准 - 入場密碼 ' + passcode, htmlBody: html, name: cfg.fromName });
+}
+/** 拒絕 / 取消 → 電郵通知申請人 */
+function sendVenueRejectionEmail_(req, status) {
+  var email = String(req.email || '').trim();
+  if (!email) { console.log('無申請人電郵，跳過拒絕通知。'); return; }
+  var cfg = venueMailConfig_();
+  var name = req.name || '申請人';
+  var title = status === 'cancelled' ? '已取消' : '未獲批准';
+  var html =
+    '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:20px;border:1px solid #e1e4e8;border-radius:8px;">'
+    + '<h2 style="color:#dc2626;text-align:center;border-bottom:2px solid #fecaca;padding-bottom:10px;">❌ 場地借用' + title + '</h2>'
+    + '<p>你好 ' + esc_(name) + '，你所申請的場地借用已' + title + '：</p>'
+    + '<div style="background:#f6f8fa;border-left:4px solid #dc2626;padding:14px 18px;margin:16px 0;font-size:14px;color:#444;line-height:1.8;">'
+    + '<b>場地：</b>' + esc_(req.venueName || req.venueId) + '<br/>'
+    + '<b>日期：</b>' + esc_(req.startDate || '') + (req.endDate ? ' → ' + esc_(req.endDate) : '')
+    + '</div>'
+    + '<p style="font-size:14px;color:#555;">如有疑問，請聯絡區職員查詢。</p>'
+    + '<p style="font-size:13px;color:#666;text-align:center;margin-top:26px;">' + esc_(cfg.districtName) + ' 敬啟</p>'
+    + '</div>';
+  MailApp.sendEmail({ to: email, subject: '[' + cfg.districtName + '] 場地借用' + title, htmlBody: html, name: cfg.fromName });
+}
+function notifyStaff_(subject, body) {
+  var to = getConfigValue_('NOTIFY_STAFF_EMAIL');
+  if (!to) return;
+  try { MailApp.sendEmail(to, subject, body); } catch (e) {}
+}
+
+// ===================== 卡片（管理系統主控台） =====================
+
+function normalizeCard_(c) {
+  return {
+    cardId: String(c.cardId).trim(), title: c.title, icon: c.icon, type: c.type, url: c.url,
+    description: c.description, order: Number(c.order) || 0,
+    enabled: String(c.enabled).toUpperCase() !== 'FALSE',
+    embed: String(c.embed).toUpperCase() === 'TRUE',
+    source: c.source || 'core',
+    category: String(c.category || 'done').trim() === 'todo' ? 'todo' : 'done',
   };
-  appendRowObjBySheet_(sh, row);
-  return { ok: true, refCode: row.refCode };
 }
-function listActivityNotices_(p) {
-  var list = readSheet_(SHEET.ACTIVITY_REQ);
-  // 排序：年份（desc）→ submittedAt（desc）
-  list.sort(function (a, b) {
-    var yr = (Number(b.year) || 0) - (Number(a.year) || 0);
-    if (yr !== 0) return yr;
-    return String(b.submittedAt).localeCompare(String(a.submittedAt));
-  });
-  // 過濾（可選）：year / section / nature
-  if (p.year) list = list.filter(function (r) { return String(r.year) === String(p.year); });
-  if (p.section) list = list.filter(function (r) { return String(r.section) === String(p.section); });
-  if (p.nature) list = list.filter(function (r) { return String(r.nature) === String(p.nature); });
-  var dc = getConfigValue_('districtCode') || '';
-  return list.map(function (r) {
-    var o = {}; Object.keys(r).forEach(function (k) { o[k] = r[k]; }); o.districtCode = dc; return o;
-  });
+function getCards_(token) {
+  var t = checkToken_(token);
+  if (!t.valid) return err('登入已過期，請重新登入');
+  var perms = readPerms_();
+  var u = readSheet_(SHEET.USERS).filter(function (x) {
+    return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
+  })[0];
+  var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
+  var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).filter(function (c) {
+    if (!c.enabled) return false;
+    if (scopeOverride && scopeOverride.indexOf(c.cardId) < 0) return false;
+    var access = (perms[c.cardId] || {})[t.role] || '';
+    c.access = access;
+    return access === 'edit' || access === 'view';
+  }).sort(function (a, b) { return a.order - b.order; });
+  return ok(cards);
 }
-function deleteActivityNotice_(token, id) {
+function setCardEnabled_(token, cardId, enabled) {
   var t = requireAdmin_(token); if (t.error) return err(t.error);
-  if (!canOps_(t.role)) return err('沒有權限');
-  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ACTIVITY_REQ), String(id).trim());
-  return ok({ deleted: true });
+  cardId = String(cardId || '').trim();
+  if (!cardId) return err('cardId 必填');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.CARDS);
+  var idx = rowIndexByCol_(sh, 'cardId', cardId);
+  if (idx < 0) return err('找不到該卡片');
+  setCellByHeader_(sh, idx, 'enabled', enabled ? 'TRUE' : 'FALSE');
+  return ok({ saved: true, cardId: cardId, enabled: !!enabled });
 }
-
-// ---------- 一次性服務：通用表工具 ----------
-function appendRowObjBySheet_(sh, obj) {
-  var headers = sheetHeadersBySheet_(sh);
-  var arr = headers.map(function (h) { return obj[h] !== undefined ? obj[h] : ''; });
-  sh.appendRow(arr);
-}
-function colIdxByHeader_(sh, colHeader) {
-  var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim(); });
-  return head.indexOf(colHeader) + 1;
-}
-function setCellByHeader_(sh, rowIdx, colHeader, value) {
-  var ci = colIdxByHeader_(sh, colHeader) - 1;
-  if (ci >= 0) sh.getRange(rowIdx, ci + 1).setValue(value);
-}
-
-// ===================== 一鍵建表 + 範例資料 =====================
-
-function setupSheets() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  // ★ 確保 Config 有 API_KEY_HASH 行（舊版 Sheet 升級用）
-  var configSheet = ss.getSheetByName(SHEET.CONFIG);
-  if (!configSheet) {
-    ensureSheet_(ss, SHEET.CONFIG, [['key', 'value'],
-      ['districtName', '筲箕灣區'], ['logoText', '🧭'], ['theme', 'purple'],
-      ['API_KEY_HASH', '', 'setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。']]);
-    configSheet = ss.getSheetByName(SHEET.CONFIG);
-  } else {
-    ensureConfigRow_(configSheet, 'API_KEY_HASH', '', 'setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。');
-  }
-
-  // 如果 Config 只有 2 欄（舊版），擴展到 3 欄
-  if (configSheet && configSheet.getLastColumn() < 3) {
-    configSheet.insertColumnAfter(2);
-    configSheet.getRange(1, 3).setValue('說明');
-  }
-
-  // ★ 借場一條龍（Teamup + TTLock）金鑰設定 — 舊版 Sheet 升級用
-  [
-    ['teamupApiKey', '', 'Teamup API Key'],
-    ['teamupCalendarId', '', 'Teamup 分享金鑰（形如 ks...）'],
-    ['teamupApprovedSubId', '', '「確認借用區總部」子日曆 ID（紅，批准後建事件）'],
-    ['teamupRejectedSubId', '', '(選填) 拒絕子日曆 ID'],
-    ['ttlockClientId', '', 'TTLock Client ID'],
-    ['ttlockClientSecret', '', 'TTLock Client Secret'],
-    ['ttlockUsername', '', 'TTLock App 登入帳號'],
-    ['ttlockPassword', '', 'TTLock App 登入密碼'],
-    ['ttlockLockId', '', '大門鎖 Lock ID'],
-    ['ttlockApiBase', 'https://api.ttlock.com', 'TTLock 區域 server（global/eu/cn）'],
-    ['ttlockDisabled', '', 'TRUE = 跳過 TTLock，只用 Teamup 轉色 + 電郵密碼'],
-    ['notifyFrom', '', '寄件人名稱（預設用區名）'],
-    ['approverEmail', '', '(選填) 收待審批通知信職員'],
-  ].forEach(function (row) { ensureConfigRow_(configSheet, row[0], row[1], row[2]); });
-
-  ensureSheet_(ss, SHEET.SYSTEM, [['key', 'value'],
-    ['locked', 'FALSE'], ['lockMessage', '系統維護中，請稍候再試。']]);
-
-  // Roles：DC + SYSADMIN + 各職級（全部 protected=TRUE 受保護），另加獨立 STAFF
-  ensureSheet_(ss, SHEET.ROLES, [['role', 'label', 'protected'],
-    ['DC',           '區總監',            'TRUE'],
-    ['SYSADMIN',     '系統管理員',         'TRUE'],
-    ['DDC_ADMIN',    '副區總監（行政）',    'TRUE'],
-    ['DDC_TRAINING', '副區總監（訓練）',    'TRUE'],
-    ['ADC_ROVER',    '助理區總監（樂行）',  'TRUE'],
-    ['ADC_VENTURE',  '助理區總監（深資）',  'TRUE'],
-    ['ADC_SCOUT',    '助理區總監（童軍）',  'TRUE'],
-    ['ADC_CUBS',     '助理區總監（幼童軍）','TRUE'],
-    ['ADC_GH',       '助理區總監（小童軍）','TRUE'],
-    ['DL',           '區長',               'TRUE'],
-    ['LEADER',       '區領袖',             'TRUE'],
-    ['AL',           '助理區領袖',         'TRUE'],
-    ['STAFF',        '區職員（受薪）',      'TRUE']]);
-
-  ensureSheet_(ss, SHEET.CARDS, [
-    ['cardId','title','icon','type','url','description','order','enabled','embed','source','category'],
-    ['visit','旅團探訪','🏕','builtin','/awards','年度旅探訪（全區共有）','1','TRUE','FALSE','core','todo'],
-    ['contacts','旅團聯絡簿','📇','builtin','/contacts','聯絡資料 · 分組 · 群發','2','TRUE','FALSE','core','todo'],
-    ['awards','獎勵提名','🎖','builtin','/awards','讀獲獎名單 · 推下一級','3','TRUE','FALSE','core','todo'],
-    ['annual','週年會議文件','📂','builtin','/annual-docs','議程 · 紀錄 · 6月前籌備','4','TRUE','FALSE','core','todo'],
-    ['budget','區年度預算','📑','builtin','/budget','年度預算編列與追蹤','5','TRUE','FALSE','core','todo'],
-    ['meeting','會議行事曆','📅','builtin','/meeting','幹部/執委/週年會議','6','TRUE','FALSE','core','todo'],
-    ['committee','委任系統','🗂','builtin','/committee','委任 · 續任 · R02','7','TRUE','FALSE','core','todo'],
-    ['unit','旅團管理系統','🧭','builtin','/unit','旅名冊 · 人數統計','8','TRUE','FALSE','core','todo'],
-    ['venueReg','區總部借場批核','🏛','builtin','/venue-regs','Teamup 借場審批 · 批准自動轉色+TTLock 密碼+電郵','9','TRUE','FALSE','core','done'],
-    ['stockReg','物資借用審批','📦','builtin','/stock-regs','借物資批核 · 庫存管理','10','TRUE','FALSE','core','done'],
-    ['activity','活動知會','🗓','builtin','/activity-notices','旅團活動知會記錄 · 查閱','11','TRUE','FALSE','core','done'],
-    ['incident','意外 / 應變','🚨','builtin','/incident','通報 · 惡劣天氣','12','TRUE','FALSE','core','todo'],
-    ['training','訓練班管理','🎓','builtin','/training','開班登記 · 區會目錄（批核由負責領袖喺各班 Sheet 做）','13','TRUE','FALSE','core','done'],
-  ]);
-
-  var roles = ['DC','SYSADMIN','DDC_ADMIN','DDC_TRAINING','ADC_ROVER','ADC_VENTURE','ADC_SCOUT','ADC_CUBS','ADC_GH','DL','LEADER','AL','STAFF'];
-  function row(cid, map) { var r = [cid]; roles.forEach(function (x) { r.push(map[x] || ''); }); return r; }
-  var ALL_VIEW = {}, ALL_EDIT = {}; roles.forEach(function (r) { ALL_VIEW[r] = 'view'; ALL_EDIT[r] = 'edit'; });
-  function adminEdit() { var m = {}; roles.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; return m; }
-  function opsEdit() { var m = {}; roles.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
-  function trainingEdit() { var m = {}; roles.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
-  var P = [['cardId'].concat(roles)];
-  P.push(row('visit',     ALL_EDIT));
-  P.push(row('contacts',  ALL_EDIT));
-  P.push(row('awards',    adminEdit()));
-  P.push(row('annual',    adminEdit()));
-  P.push(row('budget',    adminEdit()));
-  P.push(row('meeting',   adminEdit()));
-  P.push(row('committee', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'edit' }));
-  P.push(row('unit',      adminEdit()));
-  P.push(row('venueReg',  opsEdit()));
-  P.push(row('stockReg',  opsEdit()));
-  P.push(row('activity',  opsEdit()));
-  P.push(row('incident',  ALL_VIEW));
-  P.push(row('training',  trainingEdit()));
-  ensureSheet_(ss, SHEET.PERMS, P);
-  ss.getSheetByName(SHEET.PERMS).setFrozenColumns(1);
-
-  // 訓練班目錄（單一資料來源；管理員喺「訓練班管理」開班登記）
-  ensureSheet_(ss, SHEET.COURSE_LINKS, [
-    ['courseId','districtCode','title','badgeName','section','courseNo','sessionsText',
-     'eligibility','fee','originalFee','subsidyNote','deadline','quota','filled',
-     'venue','noticeUrl','contact','scriptExecUrl','scriptApiKey','driveFolderId','active','createdAt'],
-  ]);
-
-  // 一次性服務表（每區開一次）：場地 / 場地申請 / 物資 / 物資申請 / 知會
-  ensureSheet_(ss, SHEET.VENUES, [['venueId','name','location','capacity','note','active']]);
-  ensureSheet_(ss, SHEET.VENUE_REQ, [
-    ['id','refCode','submittedAt','venueId','venueName','purpose','startDate','endDate',
-     'name','phone','email','troop','position','status','reviewer','reviewedAt','passcode','createdAt'],
-  ]);
-  ensureSheet_(ss, SHEET.ITEMS, [['itemId','name','category','totalQty','availableQty','unit','note','active']]);
-  ensureSheet_(ss, SHEET.STOCK_REQ, [
-    ['id','refCode','submittedAt','itemId','itemName','qty','purpose','borrowDate','returnDate',
-     'name','phone','email','troop','position','status','reviewer','reviewedAt','createdAt'],
-  ]);
-  ensureSheet_(ss, SHEET.ACTIVITY_REQ, [
-    ['id','refCode','submittedAt','year','section','nature','troop','activityName',
-     'startDateTime','endDateTime','location','membersCount','leadersCount','parentsCount',
-     'leaderName','leaderPhone','leaderEmail','note','createdAt'],
-  ]);
-  var salt = 'skw2026';
-  var hash = sha256_('scout1234' + salt);
-  ensureSheet_(ss, SHEET.USERS, [
-    ['email','passwordHash','salt','role','displayName','scopes','cards','active'],
-    ['dc@skwscout.org.hk',           hash, salt, 'DC',           '區總監',          'all',  '',  'TRUE'],
-    ['sysadmin@skwscout.org.hk',     hash, salt, 'SYSADMIN',     '系統管理員',       'all',  '',  'TRUE'],
-    ['ddc.admin@skwscout.org.hk',    hash, salt, 'DDC_ADMIN',    '副區總監（行政）', 'admin', '',  'TRUE'],
-    ['ddc.training@skwscout.org.hk', hash, salt, 'DDC_TRAINING', '副區總監（訓練）', 'training', '', 'TRUE'],
-    ['adc.scout@skwscout.org.hk',    hash, salt, 'ADC_SCOUT',    '助理區總監（童軍）','section:scout','','TRUE'],
-    ['dl@skwscout.org.hk',           hash, salt, 'DL',           '區長',              'admin', '', 'TRUE'],
-    ['leader@skwscout.org.hk',       hash, salt, 'LEADER',       '區領袖',            'section:scout','','TRUE'],
-    ['al@skwscout.org.hk',           hash, salt, 'AL',           '助理區領袖',         'section:scout','','TRUE'],
-    ['staff@skwscout.org.hk',        hash, salt, 'STAFF',        '區職員（受薪）',     'admin', '', 'TRUE'],
-  ]);
-
-  // ★ 保護敏感工作表
-  protectSensitiveSheets_(ss);
-
-  // ★ 自動生成 API Key
-  var apiKeyPlain = generateApiKey_(ss);
-
-  // ★ 建立 README
-  buildReadmeSheet_(ss);
-
-  // 顯示完成提示
-  SpreadsheetApp.getUi().alert(
-    '童軍區管理平台初始化完成',
-    '已建立 Config / System / Roles / Cards / Perms / Users\n'
-    + '＋ 一次性服務表（Venues/VenueBookings/Items/StockRequests/ActivityNotices）\n'
-    + '＋ 訓練班目錄（CourseLinks）。\n'
-    + '🏛 借場：申請人於 member-portal 填表 → 你喺 /venue-regs 批核 → 自動設定 TTLock 限時密碼 + Teamup 轉色 + 電郵申請人。\n'
-    + '示範密碼：scout1234\n\n'
-    + '接下來：\n'
-    + '1. 到 Config 填區名（districtName）\n'
-    + '2. 到 Users 改帳號密碼\n'
-    + '3. Deploy 為 Web App → 複製 /exec 網址\n'
-    + '4. 把 /exec 網址和 API Key 交給平台管理員',
-    SpreadsheetApp.getUi().ButtonSet.OK
-  );
-
-  // ★ API Key 只顯示一次
-  if (apiKeyPlain) {
-    SpreadsheetApp.getUi().alert(
-      '🔑 你的 API Key（只顯示一次）',
-      '───────────────────────\n'
-      + apiKeyPlain
-      + '\n───────────────────────\n\n'
-      + '⚠️ 複製時只取上下橫線之間的文字！\n'
-      + 'Config 只存雜湊值，無法還原。\n'
-      + '忘記了？到選單 → 🔑 重新生成 API Key。',
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-  }
-}
-
-function buildReadmeSheet_(ss) {
-  var name = 'README_新手必看';
-  var sh = ss.getSheetByName(name) || ss.insertSheet(name, 0);
-  sh.clear();
-  var rows = [
-    ['童軍區管理平台 設定指南', ''],
-    ['', ''],
-    ['你需要做的事（照順序）', ''],
-    ['1', '到黃色 Config 填 districtName（區名）、logoText'],
-    ['2', '到藍色 Users 修改帳號密碼（示範密碼：scout1234）'],
-    ['3', '上方選單 → 改密碼工具（可批次改）'],
-    ['4', 'Deploy 為 Web App：Apps Script 右上方「部署」→「網頁應用程式」→ 執行身分：我自己 → 誰可以存取：任何人 → 部署。複製 /exec 網址。'],
-    ['5', '🔑 Setup 彈窗已顯示 API Key（只顯示一次！）。如果你還沒複製，到選單 → 🔑 重新生成 API Key。'],
-    ['6', '把「區碼 + 區名 + /exec 網址 + API Key」交給平台管理員登記。'],
-    ['', ''],
-    ['🔑 API Key 是甚麼？', ''],
-    ['用途', '前端與你後台之間的通訊密鑰。沒有這把 Key，任何人都無法讀取或修改你的資料。'],
-    ['存放在哪', '你只需要在 setup 時複製一次，交給平台管理員設定到 Vercel 環境變數。之後前端每次呼叫都會自動附帶。'],
-    ['忘記了', '選單 → 🔑 重新生成 API Key → 舊 Key 即刻失效'],
-    ['懷疑洩漏', '重新生成即可，舊 Key 即刻失效'],
-    ['', ''],
-    ['🛡️ 你的資料有多安全？', ''],
-    ['資料存放在哪？', 'Google 伺服器（Google Sheet），不是某台不知名的電腦。'],
-    ['API Key 存放在哪？', 'Vercel 伺服器環境變數，不出現在任何前端代碼。'],
-    ['Sheet 存了甚麼？', '只有 API Key 的 SHA-256 雜湊值（API_KEY_HASH），連管理員也無法還原。'],
-    ['攻擊門檻', '要取得你的資料，攻擊者要麼攻破 Google 伺服器，要麼攻破 Vercel 伺服器。比存在自己家裡的電腦更安全。'],
-    ['', ''],
-    ['⚠️ 注意事項', ''],
-    ['不要分享此 Sheet 連結', 'Config 有 API_KEY_HASH 和密碼雜湊，等同後台鑰匙。'],
-    ['環境變數命名', 'PORTAL_{區碼}_APIKEY（例如 SKW 區 → PORTAL_SKW_APIKEY）'],
-  ];
-  sh.getRange(1, 1, rows.length, 2).setValues(rows);
-  sh.getRange('A1:B1').merge().setBackground('#1565c0').setFontColor('white').setFontWeight('bold').setFontSize(14);
-  sh.setColumnWidth(1, 200); sh.setColumnWidth(2, 720);
-  sh.setFrozenRows(1); sh.setTabColor('#1565c0');
-}
-
-function ensureSheet_(ss, name, rows) {
-  var sh = ss.getSheetByName(name) || ss.insertSheet(name);
-  sh.clear();
-  sh.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
-  sh.getRange(1, 1, 1, rows[0].length).setFontWeight('bold').setBackground('#e3f2fd');
-  sh.setFrozenRows(1);
-}
-
-// ===================== 方便：在 Sheet 直接改密碼 =====================
-
-/**
- * 改密碼工具（不用懂 hash）：
- *   1. 改下面 email / newPassword 兩個值
- *   2. 在 Apps Script 上方函數選單選 setUserPassword → 執行
- *   3. 該帳號密碼即更新（自動算 hash 寫回 Users）
- */
-function setUserPassword() {
-  var email = 'dc@skwscout.org.hk';   // ← 改成要改密碼的帳號
-  var newPassword = 'scout1234';      // ← 改成新密碼
-  applyPassword_(email, newPassword);
-}
-
-/** 一次把所有帳號設成同一個密碼（初始化方便用） */
-function resetAllPasswords() {
-  var newPassword = 'scout1234';      // ← 改成想要的初始密碼
-  var users = readSheet_(SHEET.USERS);
-  users.forEach(function (u) { if (u.email) applyPassword_(String(u.email), newPassword); });
-  SpreadsheetApp.getUi().alert('已將全部帳號密碼設為：' + newPassword);
-}
-
-function applyPassword_(email, newPassword) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(SHEET.USERS);
+function setCategoryEnabled_(token, category, enabled) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  category = String(category || '').trim();
+  if (category !== 'done' && category !== 'todo') return err('分類不正確');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.CARDS);
   var v = sh.getDataRange().getValues();
-  var head = v[0].map(function (x) { return String(x).trim(); });
-  var cEmail = head.indexOf('email'), cHash = head.indexOf('passwordHash'), cSalt = head.indexOf('salt');
+  if (v.length < 2) return err('沒有卡片');
+  var head = v[0].map(function (h) { return String(h).trim(); });
+  var cCat = head.indexOf('category'), cEn = head.indexOf('enabled');
+  if (cCat < 0 || cEn < 0) return err('Cards 表缺少 category / enabled 欄');
+  var count = 0;
   for (var i = 1; i < v.length; i++) {
-    if (String(v[i][cEmail]).trim().toLowerCase() === String(email).trim().toLowerCase()) {
-      var salt = String(v[i][cSalt] || '') || Utilities.getUuid().slice(0, 8);
-      sh.getRange(i + 1, cSalt + 1).setValue(salt);
-      sh.getRange(i + 1, cHash + 1).setValue(sha256_(newPassword + salt));
-      return true;
+    if (String(v[i][cCat] || '').trim() === category) {
+      sh.getRange(i + 1, cEn + 1).setValue(enabled ? 'TRUE' : 'FALSE');
+      count++;
     }
   }
-  return false;
+  return ok({ saved: true, category: category, enabled: !!enabled, count: count });
+}
+
+// ===================== 權限矩陣 =====================
+
+function readPerms_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.PERMS);
+  if (!sh) return {};
+  var v = sh.getDataRange().getValues();
+  if (v.length < 2) return {};
+  var roles = v[0].slice(1).map(function (x) { return String(x).trim(); });
+  var out = {};
+  for (var i = 1; i < v.length; i++) {
+    var cid = String(v[i][0]).trim(); if (!cid) continue;
+    out[cid] = {};
+    for (var j = 0; j < roles.length; j++) {
+      var val = String(v[i][j + 1] || '').trim().toLowerCase();
+      if (val === 'edit' || val === 'view') out[cid][roles[j]] = val;
+    }
+  }
+  return out;
+}
+function getPerms_(token) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).sort(function (a, b) { return a.order - b.order; });
+  var roles = readSheet_(SHEET.ROLES).map(function (r) {
+    return { role: String(r.role).trim(), label: r.label || r.role, protected: String(r.protected).toUpperCase() === 'TRUE' };
+  });
+  return ok({ cards: cards, roles: roles, matrix: readPerms_() });
+}
+function savePerms_(token, matrix) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!matrix) return err('沒有資料');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var roles = readSheet_(SHEET.ROLES).map(function (r) { return String(r.role).trim(); });
+  var cards = readSheet_(SHEET.CARDS).map(function (c) { return String(c.cardId).trim(); });
+  var header = ['cardId'].concat(roles);
+  var rows = [header];
+  cards.forEach(function (cid) {
+    var row = [cid];
+    roles.forEach(function (role) {
+      var v = ((matrix[cid] || {})[role] || '').toString().toLowerCase();
+      row.push(v === 'edit' || v === 'view' ? v : '');
+    });
+    rows.push(row);
+  });
+  var sh = ss.getSheetByName(SHEET.PERMS) || ss.insertSheet(SHEET.PERMS);
+  sh.clear();
+  sh.getRange(1, 1, rows.length, header.length).setValues(rows);
+  sh.getRange(1, 1, 1, header.length).setFontWeight('bold').setBackground('#ede9fe');
+  sh.setFrozenRows(1); sh.setFrozenColumns(1);
+  return ok({ saved: true });
+}
+
+// ===================== 角色管理 =====================
+
+function getRoleObj_(role) {
+  return readSheet_(SHEET.ROLES).filter(function (r) { return String(r.role).trim() === role; })[0] || null;
+}
+function getRole_(role) {
+  var r = getRoleObj_(String(role).trim());
+  return r ? { role: r.role, label: r.label || r.role } : { role: role, label: role };
+}
+function isProtectedRole_(role) {
+  var r = getRoleObj_(String(role).trim());
+  return !!r && String(r.protected).toUpperCase() === 'TRUE';
+}
+function roleRowIndex_(role) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ROLES);
+  if (!sh) return -1;
+  var v = sh.getDataRange().getValues();
+  for (var i = 1; i < v.length; i++) if (String(v[i][0]).trim() === role) return i + 1;
+  return -1;
+}
+function addRole_(token, role, label) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  role = String(role || '').trim().toUpperCase();
+  label = String(label || '').trim();
+  if (!role || !label) return err('角色碼與名稱必填');
+  if (getRoleObj_(role)) return err('角色已存在');
+  if (role === DC_ROLE || role === SYSADMIN_ROLE) return err('保留角色碼，不可使用');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ss.getSheetByName(SHEET.ROLES).appendRow([role, label, 'FALSE']);
+  var psh = ss.getSheetByName(SHEET.PERMS);
+  if (psh) psh.getRange(1, psh.getLastColumn() + 1).setValue(role);
+  return ok({ saved: true });
+}
+function updateRole_(token, role, label) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  role = String(role || '').trim();
+  var obj = getRoleObj_(role);
+  if (!obj) return err('角色不存在');
+  if (String(obj.protected).toUpperCase() === 'TRUE' && t.role !== DC_ROLE) return err('受保護角色只有區總監可修改');
+  if (role === DC_ROLE && t.role !== DC_ROLE) return err('不可修改區總監');
+  var idx = roleRowIndex_(role);
+  if (idx > 0) SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ROLES).getRange(idx, 2).setValue(String(label || obj.label));
+  return ok({ saved: true });
+}
+function deleteRole_(token, role) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  role = String(role || '').trim();
+  var obj = getRoleObj_(role);
+  if (!obj) return err('角色不存在');
+  if (String(obj.protected).toUpperCase() === 'TRUE') return err('受保護角色不可刪除');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var idx = roleRowIndex_(role);
+  if (idx > 0) ss.getSheetByName(SHEET.ROLES).deleteRow(idx);
+  var psh = ss.getSheetByName(SHEET.PERMS);
+  if (psh) {
+    var header = psh.getRange(1, 1, 1, psh.getLastColumn()).getValues()[0];
+    for (var c = header.length - 1; c >= 1; c--) if (String(header[c]).trim() === role) psh.deleteColumn(c + 1);
+  }
+  return ok({ deleted: true });
+}
+
+// ===================== 帳戶管理（Users） =====================
+
+function userRowIndex_(email) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
+  if (!sh) return -1;
+  var v = sh.getDataRange().getValues();
+  for (var i = 1; i < v.length; i++) {
+    if (String(v[i][0]).trim().toLowerCase() === String(email).trim().toLowerCase()) return i + 1;
+  }
+  return -1;
+}
+function getUsers_(token) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  return ok(readSheet_(SHEET.USERS).filter(function (u) { return u.email; }).map(function (u) {
+    return {
+      email: String(u.email).trim(), displayName: u.displayName || '', role: u.role || '',
+      scopes: u.scopes || '', cards: u.cards || '',
+      active: String(u.active).toUpperCase() !== 'FALSE',
+    };
+  }));
+}
+function batchCreateUsers_(token, users) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!Array.isArray(users) || !users.length) return err('沒有帳戶資料');
+  if (users.length > 300) return err('每次最多開立 300 個帳戶');
+  var roles = readSheet_(SHEET.ROLES).map(function (r) { return String(r.role).trim(); });
+  var existing = {};
+  readSheet_(SHEET.USERS).forEach(function (u) { existing[String(u.email).trim().toLowerCase()] = true; });
+  var rows = [], rejected = [], seen = {};
+  users.forEach(function (u, i) {
+    u = u || {};
+    var email = String(u.email || '').trim().toLowerCase();
+    var name = String(u.displayName || '').trim();
+    var role = String(u.role || '').trim().toUpperCase();
+    var password = String(u.password || '');
+    var reason = '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) reason = '電郵格式不正確';
+    else if (!name) reason = '顯示名稱必填';
+    else if (roles.indexOf(role) < 0) reason = '角色不存在';
+    else if (isProtectedRole_(role) && t.role !== DC_ROLE) reason = '只有區總監可開立受保護角色帳戶';
+    else if (password.length < 8) reason = '初始密碼最少 8 個字元';
+    else if (existing[email] || seen[email]) reason = '電郵已存在或重複';
+    if (reason) { rejected.push({ row: i + 1, email: email, reason: reason }); return; }
+    var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+    rows.push([email, sha256_(password + salt), salt, role, name,
+      String(u.scopes || '').trim(), String(u.cards || '').trim(), 'TRUE']);
+    seen[email] = true;
+  });
+  if (rows.length) {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
+    sh.getRange(sh.getLastRow() + 1, 1, rows.length, 8).setValues(rows);
+  }
+  return ok({ created: rows.length, rejected: rejected, skipped: rejected.length });
+}
+function updateUser_(token, email, patch) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  var row = userRowIndex_(email); if (row < 0) return err('找不到帳戶');
+  var current = readSheet_(SHEET.USERS).filter(function (u) {
+    return String(u.email).trim().toLowerCase() === String(email).trim().toLowerCase();
+  })[0];
+  patch = patch || {};
+  if (((current && isProtectedRole_(current.role)) || (patch.role && isProtectedRole_(patch.role))) && t.role !== DC_ROLE) {
+    return err('只有區總監可修改受保護角色帳戶');
+  }
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
+  var roles = readSheet_(SHEET.ROLES).map(function (r) { return String(r.role).trim(); });
+  if (patch.role && roles.indexOf(String(patch.role).trim()) < 0) return err('角色不存在');
+  if (patch.displayName != null) sh.getRange(row, 5).setValue(String(patch.displayName).trim());
+  if (patch.role) sh.getRange(row, 4).setValue(String(patch.role).trim());
+  if (patch.scopes != null) sh.getRange(row, 6).setValue(String(patch.scopes).trim());
+  if (patch.cards != null) sh.getRange(row, 7).setValue(String(patch.cards).trim());
+  if (patch.active != null) sh.getRange(row, 8).setValue(patch.active ? 'TRUE' : 'FALSE');
+  if (patch.password != null && String(patch.password).length) {
+    if (String(patch.password).length < 8) return err('新密碼最少 8 個字元');
+    var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+    sh.getRange(row, 2, 1, 2).setValues([[sha256_(String(patch.password) + salt), salt]]);
+  }
+  return ok({ saved: true });
+}
+function deleteUser_(token, email) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  var row = userRowIndex_(email); if (row < 0) return err('找不到帳戶');
+  var current = readSheet_(SHEET.USERS).filter(function (u) {
+    return String(u.email).trim().toLowerCase() === String(email).trim().toLowerCase();
+  })[0];
+  if (current && isProtectedRole_(current.role) && t.role !== DC_ROLE) return err('只有區總監可刪除受保護角色帳戶');
+  if (String(email).trim().toLowerCase() === String(t.email).trim().toLowerCase()) return err('不可刪除目前登入帳戶');
+  SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS).deleteRow(row);
+  return ok({ deleted: true });
+}
+function changePassword_(token, oldPassword, newPassword) {
+  var t = checkToken_(token);
+  if (!t.valid) return err('登入已過期');
+  if (!oldPassword || !newPassword) return err('請輸入舊密碼及新密碼');
+  if (String(newPassword).length < 8) return err('新密碼最少 8 個字元');
+  var row = userRowIndex_(t.email);
+  if (row < 0) return err('找不到帳戶');
+  var current = readSheet_(SHEET.USERS).filter(function (u) {
+    return String(u.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
+  })[0];
+  if (!current) return err('找不到帳戶');
+  if (sha256_(String(oldPassword) + (current.salt || '')) !== String(current.passwordHash).trim()) return err('舊密碼不正確');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
+  var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+  sh.getRange(row, 2, 1, 2).setValues([[sha256_(String(newPassword) + salt), salt]]);
+  return ok({ changed: true });
+}
+
+// ===================== Staff 表（成員系統舊介面） =====================
+
+function getStaffList_(token) {
+  var t = requirePerm_(token, 'canStaff'); if (t.error) return err(t.error);
+  return ok(readSheet_(SHEET.STAFF).filter(function (s) { return s.email; }).map(function (s) {
+    return {
+      email: String(s.email).trim(), name: s.name || '', role: s.role || '',
+      canVenue: isTrue_(s.canVenue), canStock: isTrue_(s.canStock),
+      canCourse: isTrue_(s.canCourse), canStaff: isTrue_(s.canStaff),
+      active: String(s.active).toUpperCase() !== 'FALSE',
+    };
+  }));
+}
+function saveStaff_(token, staff) {
+  var t = requirePerm_(token, 'canStaff'); if (t.error) return err(t.error);
+  staff = staff || {};
+  var email = String(staff.email || '').trim().toLowerCase();
+  if (!email) return err('電郵必填');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.STAFF);
+  var idx = rowIndexByCol_(sh, 'email', email);
+  var row = {
+    email: email, name: staff.name || '', role: staff.role || 'STAFF',
+    canVenue: staff.canVenue ? 'TRUE' : 'FALSE', canStock: staff.canStock ? 'TRUE' : 'FALSE',
+    canCourse: staff.canCourse ? 'TRUE' : 'FALSE', canStaff: staff.canStaff ? 'TRUE' : 'FALSE',
+    active: staff.active === undefined || staff.active ? 'TRUE' : 'FALSE',
+  };
+  if (staff.password) {
+    if (String(staff.password).length < 8) return err('密碼最少 8 個字元');
+    row.salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+    row.passwordHash = sha256_(String(staff.password) + row.salt);
+  }
+  if (idx > 0) Object.keys(row).forEach(function (k) { setCellByHeader_(sh, idx, k, row[k]); });
+  else {
+    if (!row.passwordHash) return err('新帳戶必須設定密碼');
+    appendRowObj_(sh, row);
+  }
+  return ok({ saved: true });
+}
+function deleteStaff_(token, email) {
+  var t = requirePerm_(token, 'canStaff'); if (t.error) return err(t.error);
+  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.STAFF), String(email).trim().toLowerCase());
+  return ok({ deleted: true });
+}
+function changeStaffPassword_(token, oldPassword, newPassword) {
+  var t = checkToken_(token);
+  if (!t.valid) return err('登入已過期');
+  if (String(newPassword || '').length < 8) return err('新密碼最少 8 個字元');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.STAFF);
+  var idx = rowIndexByCol_(sh, 'email', String(t.email).trim().toLowerCase());
+  if (idx < 0) return changePassword_(token, oldPassword, newPassword); // 唔喺 Staff 表就試 Users
+  var cur = readSheet_(SHEET.STAFF).filter(function (s) {
+    return String(s.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
+  })[0];
+  if (sha256_(String(oldPassword) + (cur.salt || '')) !== String(cur.passwordHash).trim()) return err('舊密碼不正確');
+  var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+  setCellByHeader_(sh, idx, 'salt', salt);
+  setCellByHeader_(sh, idx, 'passwordHash', sha256_(String(newPassword) + salt));
+  return ok({ changed: true });
+}
+
+// ===================== Plugin Registry =====================
+
+function getRegistry_(token) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  var remote = [];
+  try {
+    var resp = UrlFetchApp.fetch(REGISTRY_URL, { muteHttpExceptions: true });
+    if (resp.getResponseCode() === 200) {
+      var parsed = JSON.parse(resp.getContentText());
+      remote = Array.isArray(parsed) ? parsed : (parsed.plugins || []);
+    }
+  } catch (e) { remote = []; }
+  var installed = readSheet_(SHEET.CARDS).map(function (c) { return String(c.cardId).trim(); });
+  return ok({
+    plugins: (remote || [])
+      .filter(function (p) { return String(p.status || 'active').toLowerCase() !== 'disabled'; })
+      .map(function (p) {
+        return {
+          id: p.id, title: p.title, icon: p.icon || '🧩', url: p.url,
+          description: p.description || '', version: p.version || '',
+          embed: p.embed === true, type: p.type || 'jump',
+          needsDistrictBackend: p.needsDistrictBackend === true,
+          installed: installed.indexOf(String(p.id).trim()) >= 0,
+        };
+      }),
+    registryUrl: REGISTRY_URL,
+  });
+}
+function installPlugin_(token, plugin) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!plugin || !plugin.id) return err('plugin 資料不完整');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var cards = readSheet_(SHEET.CARDS);
+  if (cards.some(function (c) { return String(c.cardId).trim() === String(plugin.id).trim(); })) return err('此 plugin 已安裝');
+  var nextOrder = cards.reduce(function (m, c) { return Math.max(m, Number(c.order) || 0); }, 0) + 1;
+  ss.getSheetByName(SHEET.CARDS).appendRow([plugin.id, plugin.title, plugin.icon || '🧩',
+    plugin.type || 'jump', plugin.url, plugin.description || '', nextOrder, 'TRUE',
+    plugin.embed ? 'TRUE' : 'FALSE', 'plugin', 'done']);
+  var psh = ss.getSheetByName(SHEET.PERMS);
+  if (psh) {
+    var header = psh.getRange(1, 1, 1, psh.getLastColumn()).getValues()[0];
+    var prow = [plugin.id];
+    header.slice(1).forEach(function (role) { prow.push(String(role).trim() === DC_ROLE ? 'edit' : ''); });
+    psh.appendRow(prow);
+  }
+  return ok({ installed: true, cardId: plugin.id });
+}
+function uninstallPlugin_(token, cardId) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  cardId = String(cardId).trim();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  removeRowByFirstCol_(ss.getSheetByName(SHEET.CARDS), cardId);
+  removeRowByFirstCol_(ss.getSheetByName(SHEET.PERMS), cardId);
+  return ok({ uninstalled: true });
+}
+
+// ===================== 安全 UI 工具（無 UI 環境自動降級） =====================
+
+function safeUi_() {
+  try { return SpreadsheetApp.getUi(); } catch (e) { return null; }
+}
+function uiAlert_(title, message) {
+  var ui = safeUi_();
+  if (ui) { ui.alert(title, message, ui.ButtonSet.OK); return false; }
+  Logger.log('\n===== ' + title + ' =====\n' + message + '\n');
+  console.log('\n===== ' + title + ' =====\n' + message + '\n');
+  return true;
+}
+function uiPrompt_(title, message) {
+  var ui = safeUi_();
+  if (!ui) { Logger.log('（無 UI 環境，略過提示：' + title + '）'); return null; }
+  var r = ui.prompt(title, message, ui.ButtonSet.OK_CANCEL);
+  return r.getSelectedButton() === ui.Button.OK ? r.getResponseText() : null;
+}
+function showKeyDialog_(title, key, note) {
+  var ui = safeUi_();
+  if (!ui) {
+    var msg = '\n╔══════════════════════════════════════╗\n'
+      + '  ' + title + '\n'
+      + '╚══════════════════════════════════════╝\n'
+      + '  API KEY ↓↓↓ 只顯示一次，請即刻複製 ↓↓↓\n\n'
+      + '  ' + key + '\n\n'
+      + '  ↑↑↑ 只取上面一行文字，唔好帶空格 ↑↑↑\n'
+      + (note ? '  ' + note + '\n' : '');
+    Logger.log(msg); console.log(msg);
+    return;
+  }
+  var safeKey = String(key).replace(/</g, '&lt;');
+  var html = HtmlService.createHtmlOutput(
+    '<div style="font-family:system-ui,-apple-system,\'Noto Sans TC\',sans-serif;padding:8px 4px">'
+    + '<p style="margin:0 0 8px">請即刻複製下面嘅 API Key（<b>只顯示一次</b>）：</p>'
+    + '<input id="k" value="' + safeKey + '" readonly style="width:100%;padding:10px;font-size:15px;'
+    + 'font-family:ui-monospace,Menlo,Consolas,monospace;border:2px solid #1565c0;border-radius:6px" />'
+    + '<p style="margin:10px 0 0;color:#b00">' + (note || '') + '</p>'
+    + '<p style="margin:8px 0 0;color:#666;font-size:12px">同一個 Key 要設定去兩個 Vercel 環境變數：'
+    + 'PORTAL_{區碼}_APIKEY 同 MEMBER_{區碼}_APIKEY。</p>'
+    + '<script>var i=document.getElementById("k");i.focus();i.select();<\/script>'
+    + '</div>'
+  ).setWidth(560).setHeight(250);
+  ui.showModalDialog(html, title);
+}
+
+// ===================== API Key 管理 =====================
+
+function newApiKey_() {
+  return 'ak_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+function generateApiKey_(ss) {
+  var sh = ss.getSheetByName(SHEET.CONFIG);
+  if (!sh) return '';
+  ensureConfigRow_(sh, 'API_KEY_HASH', '', 'setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。');
+  var values = sh.getDataRange().getValues();
+  var generated = '';
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() === 'API_KEY_HASH' && !String(values[i][1] || '').trim()) {
+      generated = newApiKey_();
+      sh.getRange(i + 1, 2).setValue(sha256_(generated));
+      sh.getRange(i + 1, 3).setValue('setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。');
+    }
+  }
+  return generated;
+}
+function regenerateApiKeyMenu() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.CONFIG);
+  if (!sh) { uiAlert_('錯誤', '找不到 Config 工作表。請先執行 setupSheets()。'); return; }
+  ensureConfigRow_(sh, 'API_KEY_HASH', '', 'setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。');
+  var values = sh.getDataRange().getValues();
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() === 'API_KEY_HASH') {
+      var key = newApiKey_();
+      sh.getRange(i + 1, 2).setValue(sha256_(key));
+      sh.getRange(i + 1, 3).setValue('重新生成於 ' + new Date().toISOString());
+      showKeyDialog_('🔑 新 API Key 已生成', key, '舊 Key 即刻失效！兩個前端嘅環境變數都要更新。');
+      return;
+    }
+  }
+  uiAlert_('錯誤', '找不到 API_KEY_HASH 設定行。');
+}
+/** 別名：喺編輯器直接執行，Key 印去執行記錄 */
+function showNewApiKey() { regenerateApiKeyMenu(); }
+
+function protectSensitiveSheets_(ss) {
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { me = ''; }
+  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS].forEach(function (name) {
+    try {
+      var sh = ss.getSheetByName(name);
+      if (!sh) return;
+      sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function (p) {
+        if (p.getDescription().indexOf('童軍區統一後台') === 0) p.remove();
+      });
+      var prot = sh.protect().setDescription('童軍區統一後台：保護敏感設定（API_KEY_HASH / 密碼雜湊）');
+      if (me) {
+        prot.addEditor(me);
+        prot.getEditors().forEach(function (ed) {
+          if (ed.getEmail() && ed.getEmail() !== me) { try { prot.removeEditor(ed); } catch (x) {} }
+        });
+      }
+      if (prot.canDomainEdit && prot.canDomainEdit()) prot.setDomainEdit(false);
+    } catch (e) {}
+  });
+}
+
+// ===================== 健康檢查 =====================
+
+function getHealthCheck_() {
+  var r = { ok: true };
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    r.districtName = getConfigValue_('districtName') || '';
+    r.districtCode = districtCode_();
+    r.apiKeySet = !!getConfigValue_('API_KEY_HASH');
+    r.sheetId = ss.getId();
+    r.sheets = ss.getSheets().map(function (s) { return s.getName(); });
+  } catch (e) { r.ok = false; r.error = e.toString(); }
+  return r;
+}
+function healthCheckMenu() {
+  var h = getHealthCheck_();
+  var missing = [];
+  blueprint_().forEach(function (bp) { if ((h.sheets || []).indexOf(bp.name) < 0) missing.push(bp.name); });
+  uiAlert_('🩺 健康檢查',
+    '區名：' + (h.districtName || '（未填）') + '\n'
+    + '區碼：' + (h.districtCode || '（未填）') + '\n'
+    + 'API Key：' + (h.apiKeySet ? '已設定 ✅' : '未設定 ❌') + '\n'
+    + '缺少的工作表：' + (missing.length ? missing.join('、') : '無 ✅')
+    + (missing.length ? '\n\n→ 執行選單「🧱 補建缺失表」' : ''));
+}
+
+// ===================== 選單 =====================
+
+function onOpen() {
+  var ui = safeUi_();
+  if (!ui) return;
+  ui.createMenu('🧭 區統一後台')
+    .addItem('🔑 重新生成 API Key', 'regenerateApiKeyMenu')
+    .addItem('🩺 健康檢查', 'healthCheckMenu')
+    .addSeparator()
+    .addItem('🧱 補建缺失表（不清空資料）', 'setupSheets')
+    .addItem('🔐 改單一帳號密碼', 'setUserPasswordMenu')
+    .addItem('♻️ 全部帳號重設密碼', 'resetAllPasswordsMenu')
+    .addSeparator()
+    .addItem('📋 顯示設定步驟', 'showSetupReminder')
+    .addToUi();
+}
+function showSetupReminder() {
+  uiAlert_('設定步驟',
+    '1. Config 填 districtName（區名）、districtCode（區碼）\n'
+    + '2. Users / Staff 改帳號密碼（示範密碼：' + DEFAULT_PASSWORD + '）\n'
+    + '3. 借場一條龍（選填）：Config 填 TEAMUP_*（Teamup）同 ttlock*（通通鎖）金鑰\n'
+    + '4. 部署為 Web App（執行身分：我自己；存取：任何人）→ 複製 /exec\n'
+    + '5. 選單 🔑 重新生成 API Key → 複製\n'
+    + '6. 兩個 Vercel 專案各設一個環境變數（同一個 Key 值）：\n'
+    + '   · 管理系統 PORTAL_{區碼}_APIKEY\n'
+    + '   · 成員系統 MEMBER_{區碼}_APIKEY\n'
+    + '7. 兩邊 lib/district.ts 嘅 apiBase 都填同一條 /exec 網址');
+}
+
+// ===================== 表格藍圖（表頭取聯集） =====================
+
+var ROLE_LIST = ['DC', 'SYSADMIN', 'DDC_ADMIN', 'DDC_TRAINING', 'ADC_ROVER', 'ADC_VENTURE',
+  'ADC_SCOUT', 'ADC_CUBS', 'ADC_GH', 'DL', 'LEADER', 'AL', 'STAFF'];
+
+function blueprint_() {
+  var salt = 'skw' + new Date().getFullYear();
+  var hash = sha256_(DEFAULT_PASSWORD + salt);
+
+  var permRows = (function () {
+    function row(cid, map) { var r = [cid]; ROLE_LIST.forEach(function (x) { r.push(map[x] || ''); }); return r; }
+    var ALL_VIEW = {}, ALL_EDIT = {};
+    ROLE_LIST.forEach(function (r) { ALL_VIEW[r] = 'view'; ALL_EDIT[r] = 'edit'; });
+    function adminEdit() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; return m; }
+    function opsEdit() { var m = adminEdit(); m.DDC_TRAINING = 'edit'; m.STAFF = 'edit'; return m; }
+    function trainingEdit() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
+    var P = [['cardId'].concat(ROLE_LIST)];
+    P.push(row('visit', ALL_EDIT));
+    P.push(row('contacts', ALL_EDIT));
+    P.push(row('awards', adminEdit()));
+    P.push(row('annual', adminEdit()));
+    P.push(row('budget', adminEdit()));
+    P.push(row('meeting', adminEdit()));
+    P.push(row('committee', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'edit' }));
+    P.push(row('unit', adminEdit()));
+    P.push(row('venueReg', opsEdit()));
+    P.push(row('stockReg', opsEdit()));
+    P.push(row('activity', opsEdit()));
+    P.push(row('incident', ALL_VIEW));
+    P.push(row('training', trainingEdit()));
+    return P;
+  })();
+
+  return [
+    { name: SHEET.CONFIG, headerColor: '#fff3cd', rows: [
+      ['key', 'value', '說明'],
+      ['districtName', '筲箕灣區', '區名'],
+      ['districtCode', 'SKW', '區碼（大寫），環境變數用：PORTAL_{區碼}_APIKEY / MEMBER_{區碼}_APIKEY'],
+      ['logoText', '🧭', '前端 logo'],
+      ['theme', 'purple', '主題色'],
+      ['API_KEY_HASH', '', 'setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。'],
+      ['TROOP_LIST', '', '旅號清單（逗號分隔），活動知會表用'],
+      ['NOTIFY_STAFF_EMAIL', '', '新申請通知收件人'],
+      // 借場一條龍（Teamup + 通通鎖 TTLock）
+      ['TEAMUP_API_KEY', '', 'Teamup API Token（兼容舊欄名 teamupApiKey）'],
+      ['TEAMUP_CALENDAR_KEY', '', 'Teamup 分享金鑰 ks...（兼容舊 teamupCalendarId）'],
+      ['TEAMUP_PENDING_SUBCAL_ID', '', '藍色（申請中）子日曆'],
+      ['TEAMUP_APPROVED_SUBCAL_ID', '', '紅色（已批）子日曆（兼容舊 teamupApprovedSubId）'],
+      ['TEAMUP_REJECTED_SUBCAL_ID', '', '(選填) 拒絕子日曆（兼容舊 teamupRejectedSubId）'],
+      ['TEAMUP_BOOKING_URL', '', '公開登記連結'],
+      ['ttlockClientId', '', '通通鎖 TTLock Client ID'],
+      ['ttlockClientSecret', '', 'TTLock Client Secret'],
+      ['ttlockUsername', '', 'TTLock App 登入帳號'],
+      ['ttlockPassword', '', 'TTLock App 登入密碼'],
+      ['ttlockLockId', '', '大門鎖 Lock ID'],
+      ['ttlockApiBase', 'https://api.ttlock.com', 'TTLock 區域 server（global/eu/cn）'],
+      ['ttlockDisabled', '', 'TRUE = 跳過 TTLock，改用隨機密碼（聯調用）'],
+      ['notifyFrom', '', '電郵寄件人名稱（預設用區名）'],
+      ['approverEmail', '', '(選填) 收待審批通知信職員'],
+      // 付款 / 規定
+      ['FPS_ACCOUNT_NAME', '', '轉數快戶口名'],
+      ['FPS_ACCOUNT_NUMBER', '', '轉數快號碼'],
+      ['VENUE_RULES', '', '借場規定（留空用內建）'],
+      ['VENUE_RULES_URL', '', '借場規則 PDF'],
+      ['VENUE_TERMS_URL', '', '場地使用條件 PDF'],
+      ['CCTV_URL', '', '閉路電視指引 PDF'],
+      ['STOCK_RULES', '', '借物資規定（留空用內建）'],
+      ['STOCK_RULES_URL', '', '借物資規定 PDF'],
+      // 服務轉發（留空 = 寫入本表）
+      ['STOCK_SCRIPT_URL', '', '【借物資】外部收表 Script（留空=寫入本表）'],
+      ['STOCK_SCRIPT_APIKEY', '', ''],
+      ['VENUE_SCRIPT_URL', '', '【借場】外部收表 Script（留空=寫入本表）'],
+      ['VENUE_SCRIPT_APIKEY', '', ''],
+      ['ACTIVITY_SCRIPT_URL', '', '【活動知會】外部收表 Script（留空=寫入本表）'],
+      ['ACTIVITY_SCRIPT_APIKEY', '', ''],
+    ] },
+
+    { name: SHEET.SYSTEM, rows: [
+      ['key', 'value'],
+      ['locked', 'FALSE'],
+      ['lockMessage', '系統維護中，請稍候再試。'],
+    ] },
+
+    { name: SHEET.ROLES, rows: [
+      ['role', 'label', 'protected'],
+      ['DC', '區總監', 'TRUE'],
+      ['SYSADMIN', '系統管理員', 'TRUE'],
+      ['DDC_ADMIN', '副區總監（行政）', 'TRUE'],
+      ['DDC_TRAINING', '副區總監（訓練）', 'TRUE'],
+      ['ADC_ROVER', '助理區總監（樂行）', 'TRUE'],
+      ['ADC_VENTURE', '助理區總監（深資）', 'TRUE'],
+      ['ADC_SCOUT', '助理區總監（童軍）', 'TRUE'],
+      ['ADC_CUBS', '助理區總監（幼童軍）', 'TRUE'],
+      ['ADC_GH', '助理區總監（小童軍）', 'TRUE'],
+      ['DL', '區長', 'TRUE'],
+      ['LEADER', '區領袖', 'TRUE'],
+      ['AL', '助理區領袖', 'TRUE'],
+      ['STAFF', '區職員（受薪）', 'TRUE'],
+    ] },
+
+    { name: SHEET.CARDS, rows: [
+      ['cardId', 'title', 'icon', 'type', 'url', 'description', 'order', 'enabled', 'embed', 'source', 'category'],
+      ['visit', '旅團探訪', '🏕', 'builtin', '/visit', '年度旅團探訪', 1, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['contacts', '旅團聯絡簿', '📇', 'builtin', '/contacts', '聯絡資料 · 分組 · 群發', 2, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '讀獲獎名單 · 推下一級', 3, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['annual', '週年會議文件', '📂', 'builtin', '/annual-docs', '議程 · 紀錄', 4, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['budget', '區年度預算', '📑', 'builtin', '/budget', '預算編列與追蹤', 5, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['meeting', '會議行事曆', '📅', 'builtin', '/meeting', '幹部/執委/週年會議', 6, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['committee', '委任系統', '🗂', 'builtin', '/committee', '委任 · 續任 · R02', 7, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['unit', '旅團管理系統', '🧭', 'builtin', '/unit', '旅名冊 · 人數統計', 8, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['venueReg', '場地借用審批', '🏛', 'builtin', '/venue-regs', '借場申請批核 · 場地清單', 9, 'TRUE', 'FALSE', 'core', 'done'],
+      ['stockReg', '物資借用審批', '📦', 'builtin', '/stock-regs', '借物資批核 · 庫存管理', 10, 'TRUE', 'FALSE', 'core', 'done'],
+      ['activity', '活動知會', '🗓', 'builtin', '/activity-notices', '旅團活動知會記錄', 11, 'TRUE', 'FALSE', 'core', 'done'],
+      ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '通報 · 惡劣天氣', 12, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['training', '訓練班管理', '🎓', 'builtin', '/training', '開班登記 · 區會目錄', 13, 'TRUE', 'FALSE', 'core', 'done'],
+    ] },
+
+    { name: SHEET.PERMS, headerColor: '#ede9fe', frozenCols: 1, rows: permRows },
+
+    { name: SHEET.USERS, rows: [
+      ['email', 'passwordHash', 'salt', 'role', 'displayName', 'scopes', 'cards', 'active'],
+      ['dc@skwscout.org.hk', hash, salt, 'DC', '區總監', 'all', '', 'TRUE'],
+      ['sysadmin@skwscout.org.hk', hash, salt, 'SYSADMIN', '系統管理員', 'all', '', 'TRUE'],
+      ['ddc.admin@skwscout.org.hk', hash, salt, 'DDC_ADMIN', '副區總監（行政）', 'admin', '', 'TRUE'],
+      ['ddc.training@skwscout.org.hk', hash, salt, 'DDC_TRAINING', '副區總監（訓練）', 'training', '', 'TRUE'],
+      ['staff@skwscout.org.hk', hash, salt, 'STAFF', '區職員（受薪）', 'admin', '', 'TRUE'],
+    ] },
+
+    { name: SHEET.STAFF, rows: [
+      ['email', 'name', 'passwordHash', 'salt', 'role', 'canVenue', 'canStock', 'canCourse', 'canStaff', 'active'],
+    ] },
+
+    // ── 業務表：表頭取兩邊聯集 ──
+    { name: SHEET.VENUES, rows: [
+      ['venueId', 'districtCode', 'name', 'location', 'capacity', 'scienerLockId', 'note', 'active'],
+    ] },
+    { name: SHEET.VENUE_REQ, rows: [
+      ['id', 'districtCode', 'refCode', 'submittedAt', 'venueId', 'venueName', 'purpose',
+        'startDate', 'endDate', 'name', 'phone', 'email', 'troop', 'position', 'agreeRules',
+        'status', 'teamupEventId', 'pwdRef', 'passcode', 'reviewer', 'reviewedAt', 'createdAt'],
+    ] },
+    { name: SHEET.ITEMS, rows: [
+      ['itemId', 'districtCode', 'category', 'name', 'totalQty', 'availableQty', 'unit', 'note', 'location', 'active'],
+    ] },
+    { name: SHEET.STOCK_REQ, rows: [
+      ['id', 'districtCode', 'refCode', 'submittedAt', 'itemId', 'itemName', 'category', 'qty',
+        'purpose', 'borrowDate', 'returnDate', 'name', 'phone', 'email', 'troop', 'position',
+        'agreeRules', 'status', 'reviewer', 'reviewedAt', 'createdAt'],
+    ] },
+    { name: SHEET.ACTIVITY_REQ, rows: [
+      ['id', 'districtCode', 'refCode', 'submittedAt', 'year', 'section', 'sections', 'nature',
+        'troop', 'activityName', 'startDateTime', 'endDateTime', 'location',
+        'membersCount', 'leadersCount', 'parentsCount',
+        'leaderName', 'leaderPhone', 'leaderEmail', 'note', 'createdAt'],
+    ] },
+    { name: SHEET.COURSE_LINKS, rows: [
+      ['courseId', 'districtCode', 'title', 'badgeName', 'section', 'courseNo', 'sessionsText',
+        'eligibility', 'fee', 'originalFee', 'subsidyNote', 'deadline', 'quota', 'filled',
+        'venue', 'noticeUrl', 'contact',
+        'scriptExecUrl', 'scriptApiKey', 'driveFolderId',
+        'apiBase', 'apiKey',
+        'active', 'createdAt'],
+    ] },
+    { name: SHEET.COURSES, rows: [
+      ['courseId', 'districtCode', 'title', 'section', 'badgeName', 'courseNo', 'sessionsText',
+        'eligibility', 'fee', 'originalFee', 'deadline', 'quota', 'filled', 'venue',
+        'status', 'noticeUrl', 'fpsNote'],
+    ] },
+    { name: SHEET.COURSE_REQ, rows: [
+      ['id', 'districtCode', 'courseId', 'courseTitle', 'timestamp', 'email', 'nameZh', 'nameEn',
+        'phone', 'gender', 'dob', 'scoutDistrict', 'troop', 'scoutId', 'scoutPosition', 'note',
+        'guardianConsent', 'guardianName', 'guardianRelation', 'guardianEmail', 'guardianPhone',
+        'leaderConsent', 'leaderName', 'leaderPosition', 'leaderEmail',
+        'payMethod', 'payerName', 'payAccount', 'receiptUrl', 'formUrl', 'needReceipt', 'status', 'refCode'],
+    ] },
+    { name: SHEET.COURSE_PARAMS, rows: [
+      ['key', 'group', 'code', 'value', 'nameEn', 'kind'],
+    ] },
+    { name: SHEET.ALL_RECORDS, rows: [
+      ['id', 'districtCode', 'type', 'refCode', 'title', 'requester', 'phone', 'troop', 'status', 'detail', 'createdAt'],
+    ] },
+  ];
+}
+
+// ===================== 一鍵建表（★ 補建，唔會清空） =====================
+
+/**
+ * 安全：已存在嘅表只會「補缺失欄位」，唔會 clear。
+ * 全新表先會寫入示範資料。
+ */
+function setupSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var created = [], patched = [];
+
+  blueprint_().forEach(function (bp) {
+    var sh = ss.getSheetByName(bp.name);
+    if (!sh) {
+      ensureSheet_(ss, bp.name, bp.rows, bp.headerColor, bp.frozenCols);
+      created.push(bp.name);
+      return;
+    }
+    var want = bp.rows[0].map(function (h) { return String(h).trim(); });
+    var have = sheetHeadersBySheet_(sh);
+    if (!have.length) {
+      sh.getRange(1, 1, 1, want.length).setValues([want]);
+      sh.getRange(1, 1, 1, want.length).setFontWeight('bold').setBackground(bp.headerColor || '#e3f2fd');
+      patched.push(bp.name + '（補表頭）');
+      return;
+    }
+    var missing = want.filter(function (h) { return have.indexOf(h) < 0; });
+    if (missing.length) {
+      sh.getRange(1, have.length + 1, 1, missing.length).setValues([missing]);
+      sh.getRange(1, 1, 1, have.length + missing.length).setFontWeight('bold');
+      patched.push(bp.name + '（+' + missing.join('/') + '）');
+    }
+  });
+
+  // Config 必備行（逐條補，唔覆蓋已填值）
+  var cfg = ss.getSheetByName(SHEET.CONFIG);
+  blueprint_()[0].rows.slice(1).forEach(function (r) { ensureConfigRow_(cfg, r[0], r[1], r[2]); });
+
+  seedCourseParams_(ss);
+  protectSensitiveSheets_(ss);
+
+  var key = generateApiKey_(ss);
+
+  uiAlert_('✅ 建表完成',
+    '新建工作表：' + (created.length ? created.join('、') : '無') + '\n'
+    + '補上欄位：' + (patched.length ? patched.join('、') : '無') + '\n'
+    + 'API Key：' + (key ? '已新生成（下一個視窗顯示）' : '原有設定保持不變') + '\n\n'
+    + '示範密碼：' + DEFAULT_PASSWORD + '\n\n'
+    + '下一步：\n'
+    + '1. Config 填 districtName / districtCode\n'
+    + '2. 借場一條龍：Config 填 TEAMUP_*（Teamup）同 ttlock*（通通鎖）金鑰\n'
+    + '3. 部署為 Web App（存取：任何人）→ 複製 /exec\n'
+    + '4. 同一個 API Key 設定去兩個 Vercel 環境變數：\n'
+    + '   PORTAL_{區碼}_APIKEY 同 MEMBER_{區碼}_APIKEY');
+
+  if (key) showKeyDialog_('🔑 你的 API Key（只顯示一次）', key,
+    '⚠️ 兩個前端都用呢一個 Key。而家就複製。');
+}
+
+/** 建立新表（每行長度可以唔同，自動補空白） */
+function ensureSheet_(ss, name, rows, headerColor, frozenCols) {
+  var sh = ss.getSheetByName(name) || ss.insertSheet(name);
+  sh.clear();
+  var width = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 0);
+  if (!width) return sh;
+  var padded = rows.map(function (r) {
+    var c = r.slice();
+    while (c.length < width) c.push('');
+    return c;
+  });
+  sh.getRange(1, 1, padded.length, width).setValues(padded);
+  sh.getRange(1, 1, 1, width).setFontWeight('bold').setBackground(headerColor || '#e3f2fd');
+  sh.setFrozenRows(1);
+  if (frozenCols) sh.setFrozenColumns(frozenCols);
+  return sh;
+}
+
+/** 種入下拉參數（只喺空表時做一次） */
+function seedCourseParams_(ss) {
+  var sh = ss.getSheetByName(SHEET.COURSE_PARAMS);
+  if (!sh || sh.getLastRow() > 1) return;
+  var rows = [];
+  ['小童軍', '幼童軍', '童軍', '深資童軍', '樂行童軍'].forEach(function (v) { rows.push(['section', '', '', v, '', '']); });
+  ['港島地域', '九龍地域', '東九龍地域', '新界地域', '新界東地域'].forEach(function (v) { rows.push(['region', '', '', v, '', '']); });
+  [
+    '銀禧區',
+    '港島西區', '維多利亞城區', '灣仔區', '港島北區', '筲箕灣區', '柴灣區', '港島南區',
+    '深水埗西區', '深水埗東區', '九龍塘區', '九龍城區', '何文田區', '紅磡區', '油尖區', '旺角區', '深旺區',
+    '慈雲山區', '黃大仙區', '九龍灣區', '觀塘區', '鯉魚門區', '將軍澳區', '秀茂坪區', '西貢區',
+    '元朗西區', '元朗東區', '十八鄉區', '北葵涌區', '南葵涌區', '青衣區', '荃灣區', '離島區', '大嶼山區',
+    '屯門東區', '屯門西區', '壁峰區', '沙田西區', '沙田南區', '沙田東區', '沙田北區',
+    '大埔南區', '大埔北區', '雙魚區'
+  ].forEach(function (v) { rows.push(['district', '', '', v, '', '']); });
+  if (rows.length) sh.getRange(2, 1, rows.length, 6).setValues(rows);
+}
+
+// ===================== 改密碼工具 =====================
+
+function setUserPassword() {
+  applyPassword_('dc@skwscout.org.hk', DEFAULT_PASSWORD);
+}
+function setUserPasswordMenu() {
+  var email = uiPrompt_('🔐 改密碼', '請輸入帳號電郵：');
+  if (email === null) { uiAlert_('提示', '請喺 Sheet 內用選單執行。'); return; }
+  var pw = uiPrompt_('🔐 改密碼', '請輸入新密碼（最少 8 個字元）：');
+  if (pw === null) return;
+  if (String(pw).length < 8) { uiAlert_('錯誤', '新密碼最少 8 個字元。'); return; }
+  uiAlert_('改密碼', applyPassword_(String(email).trim(), pw) ? '✅ 已更新：' + email : '❌ 找不到帳戶：' + email);
+}
+function resetAllPasswords() {
+  readSheet_(SHEET.USERS).forEach(function (u) { if (u.email) applyPassword_(String(u.email), DEFAULT_PASSWORD); });
+}
+function resetAllPasswordsMenu() {
+  var pw = uiPrompt_('♻️ 全部帳號重設密碼', '請輸入新密碼（最少 8 個字元）：');
+  if (pw === null) { uiAlert_('提示', '請喺 Sheet 內用選單執行。'); return; }
+  if (String(pw).length < 8) { uiAlert_('錯誤', '新密碼最少 8 個字元。'); return; }
+  var n = 0;
+  readSheet_(SHEET.USERS).forEach(function (u) { if (u.email && applyPassword_(String(u.email), pw)) n++; });
+  readSheet_(SHEET.STAFF).forEach(function (u) { if (u.email && applyPassword_(String(u.email), pw)) n++; });
+  uiAlert_('完成', '✅ 已將 ' + n + ' 個帳號密碼設為：' + pw);
+}
+/** Users 同 Staff 兩張表都試 */
+function applyPassword_(email, newPassword) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var done = false;
+  [SHEET.USERS, SHEET.STAFF].forEach(function (name) {
+    var sh = ss.getSheetByName(name);
+    if (!sh) return;
+    var idx = rowIndexByCol_(sh, 'email', String(email).trim().toLowerCase());
+    if (idx < 0) {
+      // email 可能大小寫唔同，逐行比對
+      var v = sh.getDataRange().getValues();
+      var ci = v[0].map(function (h) { return String(h).trim(); }).indexOf('email');
+      for (var i = 1; i < v.length && ci >= 0; i++) {
+        if (String(v[i][ci]).trim().toLowerCase() === String(email).trim().toLowerCase()) { idx = i + 1; break; }
+      }
+    }
+    if (idx < 0) return;
+    var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+    setCellByHeader_(sh, idx, 'salt', salt);
+    setCellByHeader_(sh, idx, 'passwordHash', sha256_(newPassword + salt));
+    done = true;
+  });
+  return done;
 }

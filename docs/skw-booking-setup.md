@@ -1,10 +1,12 @@
 # 🏕️ 實體門鎖自動化（skw-booking-system）— 選用參考
 
 > **非必要。** 主流程（申請人於 member-portal 填表 → 管理系統審批 → 自動生成密碼並電郵）已由
-> portal 內建 `venue-regs`（Google Sheet 後台）完成，見 `docs/venue-booking-flow.md`。
+> portal 內建 `venue-regs`（Google Sheet 後台，統一後台 v4.0 嘅 `approveVenueBooking`）完成，
+> 見 `docs/venue-booking-flow.md`。v4.0 統一後台內建 **TTLock 限時密碼 + Teamup 轉色 + 電郵** 一條龍，
+> 唔使另起 Vercel service。
 >
-> 呢份係「如需把密碼真正寫入**實體門鎖（TTLock）**」時嘅選用整合參考。`services/skw-booking/` 係原先
-> 獨立 repo，保留在此作為可選方案，`lib/ttlock.js` 已修好你之前卡住的「TTLock 設定密碼」步驟。
+> 呢份係舊有獨立服務嘅選用參考。`services/skw-booking/` 係原先獨立 repo，保留在此作為可選方案，
+> `lib/ttlock.js` 已修好你之前卡住的「TTLock 設定密碼」步驟。
 
 ---
 

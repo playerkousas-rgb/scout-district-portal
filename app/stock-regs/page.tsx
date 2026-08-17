@@ -6,7 +6,7 @@ import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession, StockItem, StockRequest } from '@/lib/types';
 
-const STATUS: Record<string, string> = { pending: '待批', approved: '已批', rejected: '已拒絕', cancelled: '已取消' };
+const STATUS: Record<string, string> = { pending: '待批', approved: '已批', rejected: '已拒絕', returned: '已歸還', cancelled: '已取消' };
 
 export default function StockRegsPage() {
   const router = useRouter();
@@ -57,7 +57,7 @@ export default function StockRegsPage() {
     <>
       <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
       <h1 className="page-title">📦 物資借用審批</h1>
-      <p className="page-sub">批核借物資；批准自動扣庫存，拒絕/取消自動歸還。</p>
+      <p className="page-sub">批核借物資；批准自動扣庫存，拒絕/取消/歸還自動回補。</p>
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}
 
@@ -77,6 +77,9 @@ export default function StockRegsPage() {
               <span className={`state ${r.status === 'approved' ? 'on' : r.status === 'pending' ? '' : 'off'}`}>{STATUS[r.status || 'pending'] || r.status}</span>
               <div className="user-actions" style={{ display: 'inline-flex', gap: 6 }}>
                 <button className="mini-btn" disabled={busy} onClick={() => setStatus(r, 'approved')}>✅ 批准</button>
+                {r.status === 'approved' && (
+                  <button className="mini-btn" disabled={busy} onClick={() => setStatus(r, 'returned')}>📥 歸還</button>
+                )}
                 <button className="mini-btn danger" disabled={busy} onClick={() => setStatus(r, 'rejected')}>✕ 拒絕</button>
                 <button className="mini-btn" disabled={busy} onClick={() => setStatus(r, 'cancelled')}>↩ 取消</button>
               </div>

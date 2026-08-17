@@ -13,7 +13,10 @@
 | **scout-district-portal**（區管理平台） | 區職員 | 登入後按角色 | 讀取＋批核＋管理（讀寫同一批 Sheet 嘅 status） |
 
 - 訓練班 GS 開班／登記 Script／Drive／通告／批核 **全部喺 scout-district-portal 呢邊做**。
-- member-portal 只負責公開報名寫入，**唔再做批核**（會剷走佢嘅 staffLogin／批核 code）。
+- member-portal 只負責公開報名寫入，**唔做批核**。
+- ★ 後台實行 **統一後台 v4.0**：兩邊共用同一張 Sheet + 同一份 Code.gs + 同一個 /exec + 同一個 API Key
+  （Vercel 設兩個環境變數名 `PORTAL_{區碼}_APIKEY` / `MEMBER_{區碼}_APIKEY`，同一個 Key 值）。
+  `staffLogin`／Staff 表保留喺共用後台（供舊 /staff 頁用），member-portal 前端只用公開 action。
 
 ---
 
@@ -153,15 +156,16 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
 ## 4. 對接所需要嘅改造（兩邊）
 
 ### member-portal（公開端，純 intake）
-1. **剷走** `staffLogin`／批核／Staff 相關 code（`saveStaff`/`deleteStaff`/`setStockRequestStatus`/`setCourseRegStatus`…）。
-2. 保留：公開 submit（venue/stock/activity/course）+ `getPublicInfo`/`listItems`/`listCourses`/`listVenues`。
-3. **入數紙權限**：`saveReceipt_` 唔再 `setSharing(ANYONE_WITH_LINK)`；改為存入管理員指定嘅 Drive folder（folder 層權限，只畀職員）。
-4. `REG_HEADERS` 加 `status / reviewer / reviewedAt` 欄。
+1. 前端只用公開 action：公開 submit（venue/stock/activity/course）+ `getPublicInfo`/`listItems`/`listCourses`/`listVenues`/`listCourseLinks`/`listActivityNotices`。
+   （共用後台嘅 `staffLogin`／批核 action 保留但 member-portal 唔用。）
+2. **入數紙權限**：`saveReceipt_` 唔再 `setSharing(ANYONE_WITH_LINK)`；改為存入管理員指定嘅 Drive folder（folder 層權限，只畀職員）。
+3. `REG_HEADERS` 加 `status / reviewer / reviewedAt` 欄。
 
 ### scout-district-portal（區職員端，讀＋批核）
 1. 新增卡片 `training`、`courseRegs`、`venue`、`stock`、`activity`、`notices`（見矩陣）。
-2. 呢啲卡片後台要能透過另一組 env key（`MEMBER_{區碼}_APIKEY`）或直接讀 member Sheet，攞到報名資料做批核。
+2. 統一後台直接讀同一張 Sheet 嘅報名資料做批核，唔使另一組 env key（`MEMBER_{區碼}_APIKEY` 只係 member-portal 專案用嘅變數名，值同 `PORTAL_*` 一樣）。
 3. `lib/api.ts` 加相應 action（`listCourses`、`listCourseRegs`、`setCourseRegStatus`、`saveCourseLink`…）。
+4. 借場批核行 **`approveVenueBooking`**（TTLock 限時密碼 → Teamup 轉色 → 電郵），拒絕/取消行 `setVenueBookingStatus`。
 
 ### 兩邊都要
 1. **後門清除**：`MASTER_EMAIL/MASTER_PW`、`TOKEN_SECRET='CHANGE_ME_*'` 一律移除或改每區隨機。
