@@ -74,6 +74,9 @@ export const api = {
   setCardEnabled: (token: string, cardId: string, enabled: boolean):
     Promise<ApiResult<{ saved: boolean; cardId: string; enabled: boolean }>> =>
     callPost('setCardEnabled', { token, cardId, enabled }),
+  changePassword: (token: string, oldPassword: string, newPassword: string):
+    Promise<ApiResult<{ changed: boolean }>> =>
+    callPost('changePassword', { token, oldPassword, newPassword }),
 
   // 角色管理（DC / SYSADMIN）
   addRole: (token: string, role: string, label: string): Promise<ApiResult<{ saved: boolean }>> =>

@@ -45,6 +45,7 @@ export interface PortalUser {
   displayName: string;
   role: string;
   scopes: string;
+  cards?: string; // 每帳戶 scope 覆寫（逗號分隔 cardId；留空 = 用角色矩陣）
   active: boolean;
 }
 
@@ -54,6 +55,7 @@ export interface BatchUserInput {
   role: string;
   password: string;
   scopes?: string;
+  cards?: string; // 卡片範圍 scope 覆寫（逗號分隔 cardId；留空 = 用角色矩陣）
 }
 
 export interface DistrictConfig {

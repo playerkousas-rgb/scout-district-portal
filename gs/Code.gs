@@ -126,6 +126,7 @@ function doPost(e) {
       case 'saveNotice':      return json(saveNotice_(body.token, body.notice));
       case 'deleteNotice':    return json(deleteNotice_(body.token, body.id));
       case 'setCardEnabled':  return json(setCardEnabled_(body.token, body.cardId, body.enabled));
+      case 'changePassword':  return json(changePassword_(body.token, body.oldPassword, body.newPassword));
       default:                return json(err('未知的 action: ' + action));
     }
   } catch (ex) { return json(err('伺服器錯誤：' + ex)); }
@@ -327,8 +328,15 @@ function getCards_(token) {
   var t = checkToken_(token);
   if (!t.valid) return err('登入已過期，請重新登入');
   var perms = readPerms_();
+  // 每帳戶 scope 覆寫（cards 欄，逗號分隔嘅 cardId；留空 = 用角色矩陣）
+  var u = readSheet_(SHEET.USERS).filter(function (x) {
+    return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
+  })[0];
+  var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
   var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).filter(function (c) {
     if (!c.enabled) return false;
+    // 若有用戶 scope 覆寫，只畀佢睇 scope 內嘅卡
+    if (scopeOverride && scopeOverride.indexOf(c.cardId) < 0) return false;
     var access = (perms[c.cardId] || {})[t.role] || '';
     c.access = access;
     return access === 'edit' || access === 'view';
@@ -502,7 +510,7 @@ function getUsers_(token) {
   var t = requireAdmin_(token); if (t.error) return err(t.error);
   // 絕不回傳 passwordHash / salt
   var users = readSheet_(SHEET.USERS).filter(function (u) { return u.email; }).map(function (u) {
-    return { email: String(u.email).trim(), displayName: u.displayName || '', role: u.role || '', scopes: u.scopes || '', active: String(u.active).toUpperCase() !== 'FALSE' };
+    return { email: String(u.email).trim(), displayName: u.displayName || '', role: u.role || '', scopes: u.scopes || '', cards: u.cards || '', active: String(u.active).toUpperCase() !== 'FALSE' };
   });
   return ok(users);
 }
@@ -520,6 +528,7 @@ function batchCreateUsers_(token, users) {
     var role = String((u || {}).role || '').trim().toUpperCase();
     var password = String((u || {}).password || '');
     var scopes = String((u || {}).scopes || '').trim();
+    var cards = String((u || {}).cards || '').trim();
     var reason = '';
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) reason = '電郵格式不正確';
     else if (!name) reason = '顯示名稱必填';
@@ -529,12 +538,12 @@ function batchCreateUsers_(token, users) {
     else if (existing[email] || seen[email]) reason = '電郵已存在或重複';
     if (reason) { rejected.push({ row: i + 1, email: email, reason: reason }); return; }
     var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
-    rows.push([email, sha256_(password + salt), salt, role, name, scopes, 'TRUE']);
+    rows.push([email, sha256_(password + salt), salt, role, name, scopes, cards, 'TRUE']);
     seen[email] = true;
   });
   if (rows.length) {
     var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
-    sh.getRange(sh.getLastRow() + 1, 1, rows.length, 7).setValues(rows);
+    sh.getRange(sh.getLastRow() + 1, 1, rows.length, 8).setValues(rows);
   }
   return ok({ created: rows.length, rejected: rejected, skipped: rejected.length });
 }
@@ -550,7 +559,8 @@ function updateUser_(token, email, patch) {
   if (patch.displayName != null) sh.getRange(row, 5).setValue(String(patch.displayName).trim());
   if (patch.role) sh.getRange(row, 4).setValue(String(patch.role).trim());
   if (patch.scopes != null) sh.getRange(row, 6).setValue(String(patch.scopes).trim());
-  if (patch.active != null) sh.getRange(row, 7).setValue(patch.active ? 'TRUE' : 'FALSE');
+  if (patch.cards != null) sh.getRange(row, 7).setValue(String(patch.cards).trim());
+  if (patch.active != null) sh.getRange(row, 8).setValue(patch.active ? 'TRUE' : 'FALSE');
   if (patch.password != null && String(patch.password).length) {
     if (String(patch.password).length < 8) return err('新密碼最少 8 個字元');
     var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
@@ -558,6 +568,29 @@ function updateUser_(token, email, patch) {
   }
   return ok({ saved: true });
 }
+/**
+ * 前端登入後改自己密碼（需提供舊密碼）。
+ * 後台（DC/SYS/超管）則用 updateUser 直接改（唔使知舊密碼）。
+ */
+function changePassword_(token, oldPassword, newPassword) {
+  var t = checkToken_(token);
+  if (!t.valid) return err('登入已過期');
+  if (!oldPassword || !newPassword) return err('請輸入舊密碼及新密碼');
+  if (String(newPassword).length < 8) return err('新密碼最少 8 個字元');
+  var row = userRowIndex_(t.email);
+  if (row < 0) return err('找不到帳戶');
+  var current = readSheet_(SHEET.USERS).filter(function (u) {
+    return String(u.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
+  })[0];
+  if (!current) return err('找不到帳戶');
+  // 驗證舊密碼
+  if (sha256_(String(oldPassword) + (current.salt || '')) !== String(current.passwordHash).trim()) return err('舊密碼不正確');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS);
+  var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+  sh.getRange(row, 2, 1, 2).setValues([[sha256_(String(newPassword) + salt), salt]]);
+  return ok({ changed: true });
+}
+
 function deleteUser_(token, email) {
   var t = requireAdmin_(token); if (t.error) return err(t.error);
   var row = userRowIndex_(email); if (row < 0) return err('找不到帳戶');
@@ -813,9 +846,9 @@ function setCourseRegStatus_(token, courseId, id, status) {
 // 公開提交（intake）由公開端（member-portal）經 /api/proxy 帶 API Key 呼叫；
 // 管理／批核由區職員（呢個 APP）登入後呼叫。
 
-/** 營運權限：可管理借場 / 借物資 / 知會（批核、維運） */
+/** 營運權限：可管理借場 / 借物資 / 知會（批核、維運）。STAFF（區職員受薪）預設可處理行政類。 */
 function canOps_(role) {
-  return role === DC_ROLE || role === SYSADMIN_ROLE || role === 'DDC_ADMIN' || role === 'DDC_TRAINING';
+  return role === DC_ROLE || role === SYSADMIN_ROLE || role === 'DDC_ADMIN' || role === 'DDC_TRAINING' || role === 'STAFF';
 }
 
 function genRef_(prefix) {
@@ -1096,7 +1129,7 @@ function setupSheets() {
   ensureSheet_(ss, SHEET.SYSTEM, [['key', 'value'],
     ['locked', 'FALSE'], ['lockMessage', '系統維護中，請稍候再試。']]);
 
-  // Roles：DC + SYSADMIN + 8 真實角色，全部 protected=TRUE（受保護）
+  // Roles：DC + SYSADMIN + 各職級（全部 protected=TRUE 受保護），另加獨立 STAFF
   ensureSheet_(ss, SHEET.ROLES, [['role', 'label', 'protected'],
     ['DC',           '區總監',            'TRUE'],
     ['SYSADMIN',     '系統管理員',         'TRUE'],
@@ -1108,7 +1141,9 @@ function setupSheets() {
     ['ADC_CUBS',     '助理區總監（幼童軍）','TRUE'],
     ['ADC_GH',       '助理區總監（小童軍）','TRUE'],
     ['DL',           '區長',               'TRUE'],
-    ['LEADER',       '職領袖',             'TRUE']]);
+    ['LEADER',       '區領袖',             'TRUE'],
+    ['AL',           '助理區領袖',         'TRUE'],
+    ['STAFF',        '區職員（受薪）',      'TRUE']]);
 
   ensureSheet_(ss, SHEET.CARDS, [
     ['cardId','title','icon','type','url','description','order','enabled','embed','source'],
@@ -1129,7 +1164,7 @@ function setupSheets() {
     ['notices','通告庫','📢','builtin','/notices','發佈及管理通告','15','TRUE','FALSE','core'],
   ]);
 
-  var roles = ['DC','SYSADMIN','DDC_ADMIN','DDC_TRAINING','ADC_ROVER','ADC_VENTURE','ADC_SCOUT','ADC_CUBS','ADC_GH','DL','LEADER'];
+  var roles = ['DC','SYSADMIN','DDC_ADMIN','DDC_TRAINING','ADC_ROVER','ADC_VENTURE','ADC_SCOUT','ADC_CUBS','ADC_GH','DL','LEADER','AL','STAFF'];
   function row(cid, map) { var r = [cid]; roles.forEach(function (x) { r.push(map[x] || ''); }); return r; }
   var ALL_VIEW = {}, ALL_EDIT = {}; roles.forEach(function (r) { ALL_VIEW[r] = 'view'; ALL_EDIT[r] = 'edit'; });
   function adminEdit() { var m = {}; roles.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; return m; }
@@ -1183,14 +1218,16 @@ function setupSheets() {
   var salt = 'skw2026';
   var hash = sha256_('scout1234' + salt);
   ensureSheet_(ss, SHEET.USERS, [
-    ['email','passwordHash','salt','role','displayName','scopes','active'],
-    ['dc@skwscout.org.hk',           hash, salt, 'DC',           '區總監',          'all',  'TRUE'],
-    ['sysadmin@skwscout.org.hk',     hash, salt, 'SYSADMIN',     '系統管理員',       'all',  'TRUE'],
-    ['ddc.admin@skwscout.org.hk',    hash, salt, 'DDC_ADMIN',    '副區總監（行政）', 'admin','TRUE'],
-    ['ddc.training@skwscout.org.hk', hash, salt, 'DDC_TRAINING', '副區總監（訓練）', 'training','TRUE'],
-    ['adc.scout@skwscout.org.hk',    hash, salt, 'ADC_SCOUT',    '助理區總監（童軍）','section:scout','TRUE'],
-    ['dl@skwscout.org.hk',           hash, salt, 'DL',           '區長',              'admin',       'TRUE'],
-    ['leader@skwscout.org.hk',       hash, salt, 'LEADER',       '職領袖',            'section:scout','TRUE'],
+    ['email','passwordHash','salt','role','displayName','scopes','cards','active'],
+    ['dc@skwscout.org.hk',           hash, salt, 'DC',           '區總監',          'all',  '',  'TRUE'],
+    ['sysadmin@skwscout.org.hk',     hash, salt, 'SYSADMIN',     '系統管理員',       'all',  '',  'TRUE'],
+    ['ddc.admin@skwscout.org.hk',    hash, salt, 'DDC_ADMIN',    '副區總監（行政）', 'admin', '',  'TRUE'],
+    ['ddc.training@skwscout.org.hk', hash, salt, 'DDC_TRAINING', '副區總監（訓練）', 'training', '', 'TRUE'],
+    ['adc.scout@skwscout.org.hk',    hash, salt, 'ADC_SCOUT',    '助理區總監（童軍）','section:scout','','TRUE'],
+    ['dl@skwscout.org.hk',           hash, salt, 'DL',           '區長',              'admin', '', 'TRUE'],
+    ['leader@skwscout.org.hk',       hash, salt, 'LEADER',       '區領袖',            'section:scout','','TRUE'],
+    ['al@skwscout.org.hk',           hash, salt, 'AL',           '助理區領袖',         'section:scout','','TRUE'],
+    ['staff@skwscout.org.hk',        hash, salt, 'STAFF',        '區職員（受薪）',     'admin', '', 'TRUE'],
   ]);
 
   // ★ 保護敏感工作表

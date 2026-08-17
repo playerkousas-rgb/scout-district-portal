@@ -61,6 +61,20 @@ export default function HomePage() {
 
   function logout() { clearSession(); setSession(null); setCards([]); }
 
+  // 改自己密碼
+  const [showPw, setShowPw] = useState(false);
+  const [oldPw, setOldPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [pwMsg, setPwMsg] = useState('');
+  const [pwErr, setPwErr] = useState('');
+  async function submitPw() {
+    if (!session) return;
+    setPwErr(''); setPwMsg('');
+    const r = await api.changePassword(session.token, oldPw, newPw);
+    if (r.ok) { setPwMsg('密碼已更新 ✓'); setOldPw(''); setNewPw(''); }
+    else setPwErr(r.error || '修改失敗');
+  }
+
   if (!hasDistrict) return null; // DistrictShell 會顯示選區
 
   // 已選區，未登入 → 第二重：帳戶登入
@@ -100,9 +114,23 @@ export default function HomePage() {
           {session.isAdmin && <button className="admin-btn" onClick={() => router.push(withDistrict('/users'))}>👥 帳戶管理</button>}
           {session.isAdmin && <button className="admin-btn" onClick={() => router.push(withDistrict('/plugins'))}>🧩 外掛市集</button>}
           {session.isAdmin && <button className="admin-btn" onClick={() => router.push(withDistrict('/admin'))}>⚙️ 權限/角色</button>}
+          <button className="admin-btn" onClick={() => setShowPw(v => !v)}>🔑 改密碼</button>
           <button className="admin-btn" onClick={logout}>登出</button>
         </div>
       </div>
+
+      {showPw && (
+        <div className="info-card" style={{ marginTop: 14, borderColor: '#fbbf24' }}>
+          <div className="section-head"><div><h3>🔑 修改密碼</h3></div><button className="mini-btn" onClick={() => setShowPw(false)}>關閉</button></div>
+          <div className="account-form" style={{ flexWrap: 'wrap', display: 'flex', gap: 8 }}>
+            <input type="password" placeholder="舊密碼" value={oldPw} onChange={e => setOldPw(e.target.value)} style={{ width: 180 }} />
+            <input type="password" placeholder="新密碼（最少 8 字元）" value={newPw} onChange={e => setNewPw(e.target.value)} style={{ width: 200 }} />
+            <button className="btn-sm" onClick={submitPw}>更新</button>
+            {pwErr && <span className="err" style={{ fontSize: 12 }}>{pwErr}</span>}
+            {pwMsg && <span className="ok-msg">{pwMsg}</span>}
+          </div>
+        </div>
+      )}
 
       <div style={{ height: 18 }} />
       {loading && <div className="center"><div className="spinner" /><div>載入卡片中…</div></div>}
