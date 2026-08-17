@@ -39,7 +39,7 @@ export const DISTRICTS = {
   SKW: {
     code: 'SKW',
     name: '筲箕灣區',
-    apiBase: 'https://script.google.com/macros/s/AKfycbzag_0DKfFYzjJYAlH9Sf3ojUGGDzIpQlEpRZWI5A-BZ7irOz2OguYVxlSCu9xw5hjJsw/exec',
+    apiBase: 'https://script.google.com/macros/s/AKfycbwjxArQHwRrzCXMTyUon_PozUklGRC5ZnvS_vfYVjr3hTvhPMDIVYTtpJ9POUS8qPAv/exec',
     status: 'live',
     note: '模板區 / 首個接入區。Vercel env: PORTAL_SKW_APIKEY',
   },
