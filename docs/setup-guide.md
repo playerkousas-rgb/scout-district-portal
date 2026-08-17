@@ -117,6 +117,7 @@ master GS 檔（已附標準 Script，只有區會存）
 | `app/activity-notices` | 活動知會頁 |
 | `docs/venue-booking-flow.md` | 借場一條龍流程（申請→審批→TTLock+Teamup+電郵） |
 | `docs/keys-checklist.md` | **找回＋驗證 Teamup/TTLock API Key 嘅 checklist** |
+| `docs/booking-setup-merge-checklist.md` | **Merge 後逐步操作：貼 Code.gs→setup→填 Key→驗證→測試** |
 | `services/skw-booking/` | 選用：實體門鎖 TTLock 自動化（可選，非必要） |
 | `docs/skw-booking-setup.md` | 選用：實體門鎖整合參考 |
 | `docs/card-permission-plan.md` | 卡片＋角色權限矩陣規劃 |
