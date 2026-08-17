@@ -90,3 +90,147 @@ export interface ApiResult<T> {
   data?: T;
   error?: string;
 }
+
+// ===================== 訓練班（CourseLinks + 報名） =====================
+
+export interface CourseLink {
+  courseId: string;
+  districtCode?: string;
+  title: string;
+  badgeName?: string;
+  section?: string;
+  courseNo?: string;
+  sessionsText?: string;
+  eligibility?: string;
+  fee?: string;
+  originalFee?: string;
+  subsidyNote?: string;
+  deadline?: string;
+  quota?: string;
+  filled?: string;
+  venue?: string;
+  noticeUrl?: string;
+  contact?: string;
+  scriptExecUrl?: string;
+  scriptApiKey?: string;
+  driveFolderId?: string;
+  active?: string;
+  createdAt?: string;
+}
+
+export type CourseRegStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+export interface CourseReg {
+  id: string;
+  refCode?: string;
+  submittedAt?: string;
+  courseId?: string;
+  courseTitle?: string;
+  nameZh?: string;
+  nameEn?: string;
+  gender?: string;
+  dob?: string;
+  phone?: string;
+  email?: string;
+  section?: string;
+  scoutDistrict?: string;
+  troop?: string;
+  scoutId?: string;
+  payMethod?: string;
+  payerName?: string;
+  payAccount?: string;
+  receiptUrl?: string;
+  needReceipt?: string;
+  note?: string;
+  status?: CourseRegStatus | string;
+  reviewer?: string;
+  reviewedAt?: string;
+}
+
+// ===================== 一次性服務：借場 / 借物資 / 知會 =====================
+
+export interface Venue {
+  venueId: string;
+  name: string;
+  location?: string;
+  capacity?: string;
+  note?: string;
+  active?: string;
+}
+export interface VenueBooking {
+  id: string;
+  refCode?: string;
+  submittedAt?: string;
+  venueId?: string;
+  venueName?: string;
+  purpose?: string;
+  startDate?: string;
+  endDate?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  troop?: string;
+  position?: string;
+  status?: string;
+  reviewer?: string;
+  reviewedAt?: string;
+}
+export interface StockItem {
+  itemId: string;
+  name: string;
+  category?: string;
+  totalQty?: string;
+  availableQty?: string;
+  unit?: string;
+  note?: string;
+  active?: string;
+}
+export interface StockRequest {
+  id: string;
+  refCode?: string;
+  submittedAt?: string;
+  itemId?: string;
+  itemName?: string;
+  qty?: number;
+  purpose?: string;
+  borrowDate?: string;
+  returnDate?: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  troop?: string;
+  position?: string;
+  status?: string;
+  reviewer?: string;
+  reviewedAt?: string;
+}
+export interface ActivityNotice {
+  id: string;
+  refCode?: string;
+  submittedAt?: string;
+  year?: string;
+  section?: string;
+  nature?: string;
+  troop?: string;
+  activityName?: string;
+  startDateTime?: string;
+  endDateTime?: string;
+  location?: string;
+  membersCount?: string;
+  leadersCount?: string;
+  parentsCount?: string;
+  leaderName?: string;
+  leaderPhone?: string;
+  leaderEmail?: string;
+  note?: string;
+  districtCode?: string;
+}
+export interface Notice {
+  id: string;
+  title: string;
+  category?: string;
+  url?: string;
+  body?: string;
+  postedAt?: string;
+  active?: boolean;
+}

@@ -23,6 +23,11 @@
 var SHEET = {
   USERS: 'Users', ROLES: 'Roles', CARDS: 'Cards',
   PERMS: 'Perms', CONFIG: 'Config', SYSTEM: 'System',
+  COURSE_LINKS: 'CourseLinks', // 訓練班目錄（登記每班 Script/Drive/通告）— 單一資料來源
+  // 一次性服務（每區開一次）：借場 / 借物資 / 知會 / 通告
+  VENUES: 'Venues', VENUE_REQ: 'VenueBookings',
+  ITEMS: 'Items', STOCK_REQ: 'StockRequests',
+  ACTIVITY_REQ: 'ActivityNotices', NOTICES: 'Notices',
 };
 
 var TOKEN_SECRET = 'CHANGE_ME_DISTRICT_SECRET';
@@ -63,6 +68,15 @@ function doGet(e) {
       case 'getUsers':       return json(getUsers_(p.token));
       case 'getSystem':      return json(ok(getSystemState_()));
       case 'getRegistry':    return json(getRegistry_(p.token));
+      case 'getCourseLinks': return json(getCourseLinks_(p.token));
+      case 'listCourseRegs': return json(listCourseRegs_(p.token, p.courseId));
+      // 一次性服務
+      case 'listVenues':        return json(ok(listVenues_()));
+      case 'listItems':         return json(ok(listItems_()));
+      case 'listActivityNotices': return json(ok(listActivityNotices_(p)));
+      case 'getVenueBookings':  return json(getVenueBookings_(p.token));
+      case 'getStockRequests':  return json(getStockRequests_(p.token));
+      case 'listNotices':       return json(ok(listNotices_(p)));
       default:               return json(err('未知的 action: ' + action));
     }
   } catch (ex) { return json(err('伺服器錯誤：' + ex)); }
@@ -94,6 +108,23 @@ function doPost(e) {
       case 'deleteUser':      return json(deleteUser_(body.token, body.email));
       case 'installPlugin':   return json(installPlugin_(body.token, body.plugin));
       case 'uninstallPlugin': return json(uninstallPlugin_(body.token, body.cardId));
+      case 'saveCourseLink':  return json(saveCourseLink_(body.token, body.link));
+      case 'deleteCourseLink':return json(deleteCourseLink_(body.token, body.courseId));
+      case 'setCourseRegStatus': return json(setCourseRegStatus_(body.token, body.courseId, body.id, body.status));
+      // 一次性服務 — 公開提交（intake）
+      case 'submitVenueRequest':  return json(submitVenueRequest_(body));
+      case 'submitStockRequest':  return json(submitStockRequest_(body));
+      case 'submitActivityNotice': return json(submitActivityNotice_(body));
+      // 一次性服務 — 管理（批核 / 場地物資維運）
+      case 'setVenueBookingStatus': return json(setVenueBookingStatus_(body.token, body.id, body.status));
+      case 'setStockRequestStatus': return json(setStockRequestStatus_(body.token, body.id, body.status));
+      case 'saveVenue':       return json(saveVenue_(body.token, body.venue));
+      case 'deleteVenue':     return json(deleteVenue_(body.token, body.venueId));
+      case 'saveItem':        return json(saveItem_(body.token, body.item));
+      case 'deleteItem':      return json(deleteItem_(body.token, body.itemId));
+      case 'deleteActivityNotice': return json(deleteActivityNotice_(body.token, body.id));
+      case 'saveNotice':      return json(saveNotice_(body.token, body.notice));
+      case 'deleteNotice':    return json(deleteNotice_(body.token, body.id));
       default:                return json(err('未知的 action: ' + action));
     }
   } catch (ex) { return json(err('伺服器錯誤：' + ex)); }
@@ -186,7 +217,7 @@ function regenerateApiKeyMenu() {
 /** 保護含有敏感資料的工作表，只允許 owner 編輯 */
 function protectSensitiveSheets_(ss) {
   var me = Session.getActiveUser().getEmail();
-  ['Config', 'Users'].forEach(function (name) {
+  ['Config', 'Users', 'CourseLinks'].forEach(function (name) {
     var sh = ss.getSheetByName(name);
     if (!sh) return;
     var prot = sh.protect().setDescription('童軍區管理平台：保護敏感設定（API_KEY_HASH / 密碼雜湊）');
@@ -599,6 +630,20 @@ function removeRowByFirstCol_(sh, value) {
   var v = sh.getDataRange().getValues();
   for (var i = v.length - 1; i >= 1; i--) if (String(v[i][0]).trim() === value) sh.deleteRow(i + 1);
 }
+function sheetHeadersBySheet_(sh) {
+  if (!sh || sh.getLastRow() < 1) return [];
+  return sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim(); });
+}
+function rowIndexByCol_(sh, colHeader, value) {
+  if (!sh) return -1;
+  var v = sh.getDataRange().getValues();
+  if (v.length < 2) return -1;
+  var head = v[0].map(function (h) { return String(h).trim(); });
+  var ci = head.indexOf(colHeader);
+  if (ci < 0) return -1;
+  for (var i = 1; i < v.length; i++) if (String(v[i][ci]).trim() === String(value).trim()) return i + 1;
+  return -1;
+}
 
 // ===================== Sheet / 工具 =====================
 
@@ -642,6 +687,373 @@ function ok(data)  { return { ok: true, data: data }; }
 function err(msg)  { return { ok: false, error: msg }; }
 function json(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
 
+// ===================== 訓練班（CourseLinks + 報名審批） =====================
+// 每個訓練班：1 張專屬 Google Sheet + 1 份標準收表 Script + 1 個 Drive 資料夾。
+// 區職員喺呢度「開班登記」（寫入 CourseLinks），公開端只做報名寫入，
+// 批核時主後台把請求轉發去該班專屬 Script（/exec）讀取名單／改 status。
+
+function getCourseLinkByCourseId_(courseId) {
+  return readSheet_(SHEET.COURSE_LINKS).filter(function (r) {
+    return String(r.courseId).trim() === String(courseId).trim();
+  })[0] || null;
+}
+
+/** 可否管理訓練班（開班／刪班） */
+function canManageCourses_(role) {
+  return role === DC_ROLE || role === SYSADMIN_ROLE || role === 'DDC_TRAINING';
+}
+
+function normalizeCourseLink_(r) {
+  return {
+    courseId: String(r.courseId || '').trim(), districtCode: r.districtCode || '',
+    title: r.title || '', badgeName: r.badgeName || '', section: r.section || '',
+    courseNo: r.courseNo || '', sessionsText: r.sessionsText || '',
+    eligibility: r.eligibility || '', fee: r.fee || '', originalFee: r.originalFee || '',
+    subsidyNote: r.subsidyNote || '', deadline: r.deadline || '', quota: r.quota || '',
+    filled: r.filled || '', venue: r.venue || '', noticeUrl: r.noticeUrl || '',
+    contact: r.contact || '', scriptExecUrl: r.scriptExecUrl || '',
+    driveFolderId: r.driveFolderId || '', active: r.active || '',
+    createdAt: r.createdAt || '',
+  };
+}
+
+function getCourseLinks_(token) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  var links = readSheet_(SHEET.COURSE_LINKS).map(normalizeCourseLink_);
+  return ok(links);
+}
+
+function saveCourseLink_(token, link) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canManageCourses_(t.role)) return err('沒有權限管理訓練班');
+  link = link || {};
+  var courseId = String(link.courseId || '').trim();
+  var title = String(link.title || '').trim();
+  if (!courseId) return err('課程代碼（courseId）必填');
+  if (!title) return err('課程名稱（title）必填');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.COURSE_LINKS);
+  if (!sh) return err('尚未執行 setupSheets()');
+  var headers = sheetHeadersBySheet_(sh);
+  var idx = rowIndexByCol_(sh, 'courseId', courseId);
+  // 用 link 內提供的欄位對應；有 districtCode 就用，否則用 Config 區碼
+  var districtCode = link.districtCode || getConfigValue_('districtCode') || '';
+  var row = headers.map(function (h) {
+    if (h === 'districtCode') return districtCode;
+    if (h === 'createdAt' && !link[h] && idx < 0) return new Date().toISOString();
+    return link[h] !== undefined ? link[h] : '';
+  });
+  if (idx > 0) { sh.getRange(idx, 1, 1, row.length).setValues([row]); }
+  else { sh.appendRow(row); }
+  return ok({ saved: true, courseId: courseId });
+}
+
+function deleteCourseLink_(token, courseId) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canManageCourses_(t.role)) return err('沒有權限管理訓練班');
+  courseId = String(courseId || '').trim();
+  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSE_LINKS), courseId);
+  return ok({ deleted: true });
+}
+
+/** 把請求轉發去該班專屬收表 Script（用該班自己嘅 API Key） */
+function forwardCourse_(link, payload) {
+  if (!link) return { ok: false, error: '找不到課程' };
+  if (!link.scriptExecUrl) return { ok: false, error: '課程未設定收表 Script（scriptExecUrl 為空）' };
+  var body = Object.assign({}, payload, { apiKey: link.scriptApiKey || '' });
+  try {
+    var resp = UrlFetchApp.fetch(link.scriptExecUrl, {
+      method: 'post', muteHttpExceptions: true,
+      contentType: 'application/json;charset=utf-8',
+      payload: JSON.stringify(body),
+    });
+    return JSON.parse(resp.getContentText());
+  } catch (e) {
+    return { ok: false, error: '轉發收表 Script 失敗：' + e };
+  }
+}
+
+function listCourseRegs_(token, courseId) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  var link = getCourseLinkByCourseId_(courseId);
+  if (!link) return err('找不到課程');
+  return forwardCourse_(link, { action: 'listRegs', courseId: courseId });
+}
+
+function setCourseRegStatus_(token, courseId, id, status) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  var link = getCourseLinkByCourseId_(courseId);
+  if (!link) return err('找不到課程');
+  if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(String(status).toLowerCase()) < 0) return err('狀態不正確');
+  return forwardCourse_(link, {
+    action: 'setRegStatus', courseId: courseId, id: id,
+    status: String(status).toLowerCase(), reviewer: t.email,
+  });
+}
+
+// ===================== 一次性服務：借場 / 借物資 / 知會 =====================
+// 每區「開一次」：借場、借物資需批核；知會只記錄 + 前端可看（可排序）。
+// 公開提交（intake）由公開端（member-portal）經 /api/proxy 帶 API Key 呼叫；
+// 管理／批核由區職員（呢個 APP）登入後呼叫。
+
+/** 營運權限：可管理借場 / 借物資 / 知會（批核、維運） */
+function canOps_(role) {
+  return role === DC_ROLE || role === SYSADMIN_ROLE || role === 'DDC_ADMIN' || role === 'DDC_TRAINING';
+}
+
+function genRef_(prefix) {
+  return prefix + '-' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd') + '-' + Math.floor(Math.random() * 9000 + 1000);
+}
+function genId_(prefix) {
+  return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+// ---------- 借場：場地清單 ----------
+function listVenues_() {
+  return readSheet_(SHEET.VENUES).filter(function (v) { return String(v.active).toUpperCase() !== 'FALSE'; }).map(function (v) {
+    return { venueId: String(v.venueId).trim(), name: v.name || '', location: v.location || '', capacity: v.capacity || '', note: v.note || '' };
+  });
+}
+function saveVenue_(token, venue) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
+  venue = venue || {};
+  var venueId = String(venue.venueId || '').trim();
+  var name = String(venue.name || '').trim();
+  if (!venueId || !name) return err('場地代碼與名稱必填');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.VENUES);
+  var headers = sheetHeadersBySheet_(sh);
+  var row = headers.map(function (h) { return venue[h] !== undefined ? venue[h] : ''; });
+  var idx = rowIndexByCol_(sh, 'venueId', venueId);
+  if (idx > 0) { sh.getRange(idx, 1, 1, row.length).setValues([row]); }
+  else { sh.appendRow(row); }
+  return ok({ saved: true });
+}
+function deleteVenue_(token, venueId) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
+  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUES), String(venueId).trim());
+  return ok({ deleted: true });
+}
+
+// ---------- 借場：提交 + 批核 ----------
+function submitVenueRequest_(b) {
+  if (!b.venueId || !b.name || !b.phone) return err('資料不完整');
+  var venue = readSheet_(SHEET.VENUES).filter(function (v) { return String(v.venueId).trim() === String(b.venueId).trim(); })[0];
+  if (!venue) return err('場地不存在');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
+  if (!sh) return err('尚未執行 setupSheets()');
+  var row = {
+    id: genId_('vr'), refCode: genRef_('VR'), submittedAt: new Date().toISOString(),
+    venueId: b.venueId, venueName: venue.name || '', purpose: b.purpose || '',
+    startDate: b.startDate || '', endDate: b.endDate || '',
+    name: b.name, phone: b.phone, email: b.email || '', troop: b.troop || '', position: b.position || '',
+    status: 'pending', reviewer: '', reviewedAt: '', createdAt: new Date().toISOString(),
+  };
+  appendRowObjBySheet_(sh, row);
+  return { ok: true, refCode: row.refCode };
+}
+function getVenueBookings_(token) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
+  return ok(readSheet_(SHEET.VENUE_REQ).reverse());
+}
+function setVenueBookingStatus_(token, id, status) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
+  if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(String(status).toLowerCase()) < 0) return err('狀態不正確');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該申請');
+  setCellByHeader_(sh, idx, 'status', String(status).toLowerCase());
+  setCellByHeader_(sh, idx, 'reviewer', t.email);
+  setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
+  return ok({ saved: true });
+}
+
+// ---------- 借物資：物資清單 ----------
+function listItems_() {
+  return readSheet_(SHEET.ITEMS).filter(function (v) { return String(v.active).toUpperCase() !== 'FALSE'; }).map(function (v) {
+    return { itemId: String(v.itemId).trim(), name: v.name || '', category: v.category || '', totalQty: v.totalQty || '', availableQty: v.availableQty || '', unit: v.unit || '', note: v.note || '' };
+  });
+}
+function saveItem_(token, item) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
+  item = item || {};
+  var itemId = String(item.itemId || '').trim();
+  var name = String(item.name || '').trim();
+  if (!itemId || !name) return err('物資代碼與名稱必填');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.ITEMS);
+  var headers = sheetHeadersBySheet_(sh);
+  var row = headers.map(function (h) { return item[h] !== undefined ? item[h] : ''; });
+  var idx = rowIndexByCol_(sh, 'itemId', itemId);
+  if (idx > 0) { sh.getRange(idx, 1, 1, row.length).setValues([row]); }
+  else { sh.appendRow(row); }
+  return ok({ saved: true });
+}
+function deleteItem_(token, itemId) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
+  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ITEMS), String(itemId).trim());
+  return ok({ deleted: true });
+}
+
+// ---------- 借物資：提交 + 批核（庫存扣減/歸還） ----------
+function submitStockRequest_(b) {
+  if (!b.itemId || !b.qty || !b.name || !b.phone) return err('資料不完整');
+  var item = readSheet_(SHEET.ITEMS).filter(function (v) { return String(v.itemId).trim() === String(b.itemId).trim(); })[0];
+  if (!item) return err('物資不存在');
+  var qty = Number(b.qty) || 0;
+  var avail = Number(item.availableQty) || 0;
+  if (qty <= 0) return err('數量不正確');
+  if (avail < qty) return err('庫存不足（僅餘 ' + avail + '）');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.STOCK_REQ);
+  if (!sh) return err('尚未執行 setupSheets()');
+  var row = {
+    id: genId_('sr'), refCode: genRef_('SR'), submittedAt: new Date().toISOString(),
+    itemId: b.itemId, itemName: item.name || '', qty: qty,
+    purpose: b.purpose || '', borrowDate: b.borrowDate || '', returnDate: b.returnDate || '',
+    name: b.name, phone: b.phone, email: b.email || '', troop: b.troop || '', position: b.position || '',
+    status: 'pending', reviewer: '', reviewedAt: '', createdAt: new Date().toISOString(),
+  };
+  appendRowObjBySheet_(sh, row);
+  return { ok: true, refCode: row.refCode };
+}
+function getStockRequests_(token) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
+  return ok(readSheet_(SHEET.STOCK_REQ).reverse());
+}
+function setStockRequestStatus_(token, id, status) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
+  if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(String(status).toLowerCase()) < 0) return err('狀態不正確');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.STOCK_REQ);
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該申請');
+  setCellByHeader_(sh, idx, 'status', String(status).toLowerCase());
+  setCellByHeader_(sh, idx, 'reviewer', t.email);
+  setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
+  // 批准先扣庫存，拒絕/取消歸還
+  if (String(status).toLowerCase() === 'approved') { adjustItemQty_(ss, sh, idx, -1); }
+  else if (['rejected', 'cancelled'].indexOf(String(status).toLowerCase()) >= 0) { adjustItemQty_(ss, sh, idx, 1); }
+  return ok({ saved: true });
+}
+/** 依該申請嘅 itemId/qty 調整庫存：dir=1 歸還，dir=-1 扣除 */
+function adjustItemQty_(ss, reqSh, reqIdx, dir) {
+  var reqId = String(reqSh.getRange(reqIdx, 1).getValue()).trim();
+  var req = readSheet_(SHEET.STOCK_REQ).filter(function (r) { return String(r.id).trim() === reqId; })[0];
+  if (!req) return;
+  var ish = ss.getSheetByName(SHEET.ITEMS);
+  var iIdx = rowIndexByCol_(ish, 'itemId', String(req.itemId).trim());
+  if (iIdx < 0) return;
+  var cur = Number(ish.getRange(iIdx, colIdxByHeader_(ish, 'availableQty')).getValue()) || 0;
+  var newQty = Math.max(0, cur + dir * (Number(req.qty) || 0));
+  setCellByHeader_(ish, iIdx, 'availableQty', newQty);
+}
+
+// ---------- 知會：提交 + 查看（可排序/過濾）+ 刪除 ----------
+function submitActivityNotice_(b) {
+  if (!b.troop || !b.activityName || !b.leaderName || !b.leaderPhone) return err('資料不完整');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ACTIVITY_REQ);
+  if (!sh) return err('尚未執行 setupSheets()');
+  var row = {
+    id: genId_('an'), refCode: genRef_('AN'), submittedAt: new Date().toISOString(),
+    year: b.year || new Date().getFullYear(), section: b.section || '', nature: b.nature || '',
+    troop: b.troop, activityName: b.activityName,
+    startDateTime: b.startDateTime || '', endDateTime: b.endDateTime || '',
+    location: b.location || '', membersCount: b.membersCount || '', leadersCount: b.leadersCount || '',
+    parentsCount: b.parentsCount || '',
+    leaderName: b.leaderName, leaderPhone: b.leaderPhone, leaderEmail: b.leaderEmail || '',
+    note: b.note || '', createdAt: new Date().toISOString(),
+  };
+  appendRowObjBySheet_(sh, row);
+  return { ok: true, refCode: row.refCode };
+}
+function listActivityNotices_(p) {
+  var list = readSheet_(SHEET.ACTIVITY_REQ);
+  // 排序：年份（desc）→ submittedAt（desc）
+  list.sort(function (a, b) {
+    var yr = (Number(b.year) || 0) - (Number(a.year) || 0);
+    if (yr !== 0) return yr;
+    return String(b.submittedAt).localeCompare(String(a.submittedAt));
+  });
+  // 過濾（可選）：year / section / nature
+  if (p.year) list = list.filter(function (r) { return String(r.year) === String(p.year); });
+  if (p.section) list = list.filter(function (r) { return String(r.section) === String(p.section); });
+  if (p.nature) list = list.filter(function (r) { return String(r.nature) === String(p.nature); });
+  var dc = getConfigValue_('districtCode') || '';
+  return list.map(function (r) {
+    var o = {}; Object.keys(r).forEach(function (k) { o[k] = r[k]; }); o.districtCode = dc; return o;
+  });
+}
+function deleteActivityNotice_(token, id) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
+  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ACTIVITY_REQ), String(id).trim());
+  return ok({ deleted: true });
+}
+
+// ---------- 通告庫 ----------
+function listNotices_(p) {
+  var list = readSheet_(SHEET.NOTICES);
+  list.sort(function (a, b) { return String(b.postedAt).localeCompare(String(a.postedAt)); });
+  if (p.onlyActive) list = list.filter(function (r) { return String(r.active).toUpperCase() !== 'FALSE'; });
+  return list.map(function (r) {
+    return {
+      id: String(r.id).trim(), title: r.title || '', category: r.category || '',
+      url: r.url || '', body: r.body || '', postedAt: r.postedAt || '',
+      active: String(r.active).toUpperCase() !== 'FALSE',
+    };
+  });
+}
+function saveNotice_(token, notice) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
+  notice = notice || {};
+  var title = String(notice.title || '').trim();
+  if (!title) return err('通告標題必填');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.NOTICES);
+  var headers = sheetHeadersBySheet_(sh);
+  var id = String(notice.id || '').trim() || genId_('nt');
+  var row = headers.map(function (h) {
+    if (h === 'id') return id;
+    if (h === 'postedAt' && !notice[h]) return new Date().toISOString();
+    if (h === 'active') return notice.active === false ? 'FALSE' : 'TRUE';
+    return notice[h] !== undefined ? notice[h] : '';
+  });
+  var idx = rowIndexByCol_(sh, 'id', id);
+  if (idx > 0) { sh.getRange(idx, 1, 1, row.length).setValues([row]); }
+  else { sh.appendRow(row); }
+  return ok({ saved: true, id: id });
+}
+function deleteNotice_(token, id) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  if (!canOps_(t.role)) return err('沒有權限');
+  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NOTICES), String(id).trim());
+  return ok({ deleted: true });
+}
+
+// ---------- 一次性服務：通用表工具 ----------
+function appendRowObjBySheet_(sh, obj) {
+  var headers = sheetHeadersBySheet_(sh);
+  var arr = headers.map(function (h) { return obj[h] !== undefined ? obj[h] : ''; });
+  sh.appendRow(arr);
+}
+function colIdxByHeader_(sh, colHeader) {
+  var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim(); });
+  return head.indexOf(colHeader) + 1;
+}
+function setCellByHeader_(sh, rowIdx, colHeader, value) {
+  var ci = colIdxByHeader_(sh, colHeader) - 1;
+  if (ci >= 0) sh.getRange(rowIdx, ci + 1).setValue(value);
+}
+
 // ===================== 一鍵建表 + 範例資料 =====================
 
 function setupSheets() {
@@ -677,7 +1089,9 @@ function setupSheets() {
     ['ADC_VENTURE',  '助理區總監（深資）',  'TRUE'],
     ['ADC_SCOUT',    '助理區總監（童軍）',  'TRUE'],
     ['ADC_CUBS',     '助理區總監（幼童軍）','TRUE'],
-    ['ADC_GH',       '助理區總監（小童軍）','TRUE']]);
+    ['ADC_GH',       '助理區總監（小童軍）','TRUE'],
+    ['DL',           '區長',               'TRUE'],
+    ['LEADER',       '職領袖',             'TRUE']]);
 
   ensureSheet_(ss, SHEET.CARDS, [
     ['cardId','title','icon','type','url','description','order','enabled','embed','source'],
@@ -689,16 +1103,22 @@ function setupSheets() {
     ['meeting','會議行事曆','📅','jump','https://REPLACE_TEAMUP_URL','幹部/執委/週年會議','6','TRUE','TRUE','core'],
     ['committee','委任系統','🗂','jump','https://REPLACE_APPOINTMENT_URL','委任 · 續任 · R02','7','TRUE','TRUE','core'],
     ['unit','旅團管理系統','🧭','jump','https://REPLACE_UNIT_URL','旅名冊 · 人數統計','8','TRUE','TRUE','core'],
-    ['venue','借用場地','🏛','jump','https://REPLACE_VENUE_URL','場地 · 電子鎖','9','TRUE','TRUE','core'],
-    ['stock','物資管理','📦','jump','https://REPLACE_STOCK_URL','區物資借用','10','TRUE','TRUE','core'],
-    ['incident','意外 / 應變','🚨','resource','https://www.scout.org.hk','通報 · 惡劣天氣','11','TRUE','FALSE','core'],
+    ['venueReg','場地借用審批','🏛','builtin','/venue-regs','借場申請批核 · 場地清單','9','TRUE','FALSE','core'],
+    ['stockReg','物資借用審批','📦','builtin','/stock-regs','借物資批核 · 庫存管理','10','TRUE','FALSE','core'],
+    ['activity','活動知會','🗓','builtin','/activity-notices','旅團活動知會記錄 · 查閱','11','TRUE','FALSE','core'],
+    ['incident','意外 / 應變','🚨','resource','https://www.scout.org.hk','通報 · 惡劣天氣','12','TRUE','FALSE','core'],
+    ['training','訓練班管理','🎓','builtin','/training','開班登記 · Script/Drive/通告','13','TRUE','FALSE','core'],
+    ['courseRegs','訓練班報名審批','📝','builtin','/course-regs','檢視名單 · 批核 status','14','TRUE','FALSE','core'],
+    ['notices','通告庫','📢','builtin','/notices','發佈及管理通告','15','TRUE','FALSE','core'],
   ]);
 
-  var roles = ['DC','SYSADMIN','DDC_ADMIN','DDC_TRAINING','ADC_ROVER','ADC_VENTURE','ADC_SCOUT','ADC_CUBS','ADC_GH'];
+  var roles = ['DC','SYSADMIN','DDC_ADMIN','DDC_TRAINING','ADC_ROVER','ADC_VENTURE','ADC_SCOUT','ADC_CUBS','ADC_GH','DL','LEADER'];
   function row(cid, map) { var r = [cid]; roles.forEach(function (x) { r.push(map[x] || ''); }); return r; }
   var ALL_VIEW = {}, ALL_EDIT = {}; roles.forEach(function (r) { ALL_VIEW[r] = 'view'; ALL_EDIT[r] = 'edit'; });
   function adminEdit() { var m = {}; roles.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; return m; }
+  function opsEdit() { var m = {}; roles.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
   function trainingEdit() { var m = {}; roles.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
+  function noticesEdit() { var m = {}; roles.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
   var P = [['cardId'].concat(roles)];
   P.push(row('visit',     ALL_EDIT));
   P.push(row('contacts',  ALL_EDIT));
@@ -708,11 +1128,40 @@ function setupSheets() {
   P.push(row('meeting',   adminEdit()));
   P.push(row('committee', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'edit' }));
   P.push(row('unit',      adminEdit()));
-  P.push(row('venue',     adminEdit()));
-  P.push(row('stock',     adminEdit()));
+  P.push(row('venueReg',  opsEdit()));
+  P.push(row('stockReg',  opsEdit()));
+  P.push(row('activity',  opsEdit()));
   P.push(row('incident',  ALL_VIEW));
+  P.push(row('training',  trainingEdit()));
+  P.push(row('courseRegs',trainingEdit()));
+  P.push(row('notices',   noticesEdit()));
   ensureSheet_(ss, SHEET.PERMS, P);
   ss.getSheetByName(SHEET.PERMS).setFrozenColumns(1);
+
+  // 訓練班目錄（單一資料來源；管理員喺「訓練班管理」開班登記）
+  ensureSheet_(ss, SHEET.COURSE_LINKS, [
+    ['courseId','districtCode','title','badgeName','section','courseNo','sessionsText',
+     'eligibility','fee','originalFee','subsidyNote','deadline','quota','filled',
+     'venue','noticeUrl','contact','scriptExecUrl','scriptApiKey','driveFolderId','active','createdAt'],
+  ]);
+
+  // 一次性服務表（每區開一次）：場地 / 場地申請 / 物資 / 物資申請 / 知會
+  ensureSheet_(ss, SHEET.VENUES, [['venueId','name','location','capacity','note','active']]);
+  ensureSheet_(ss, SHEET.VENUE_REQ, [
+    ['id','refCode','submittedAt','venueId','venueName','purpose','startDate','endDate',
+     'name','phone','email','troop','position','status','reviewer','reviewedAt','createdAt'],
+  ]);
+  ensureSheet_(ss, SHEET.ITEMS, [['itemId','name','category','totalQty','availableQty','unit','note','active']]);
+  ensureSheet_(ss, SHEET.STOCK_REQ, [
+    ['id','refCode','submittedAt','itemId','itemName','qty','purpose','borrowDate','returnDate',
+     'name','phone','email','troop','position','status','reviewer','reviewedAt','createdAt'],
+  ]);
+  ensureSheet_(ss, SHEET.ACTIVITY_REQ, [
+    ['id','refCode','submittedAt','year','section','nature','troop','activityName',
+     'startDateTime','endDateTime','location','membersCount','leadersCount','parentsCount',
+     'leaderName','leaderPhone','leaderEmail','note','createdAt'],
+  ]);
+  ensureSheet_(ss, SHEET.NOTICES, [['id','title','category','url','body','postedAt','active']]);
 
   var salt = 'skw2026';
   var hash = sha256_('scout1234' + salt);
@@ -723,6 +1172,8 @@ function setupSheets() {
     ['ddc.admin@skwscout.org.hk',    hash, salt, 'DDC_ADMIN',    '副區總監（行政）', 'admin','TRUE'],
     ['ddc.training@skwscout.org.hk', hash, salt, 'DDC_TRAINING', '副區總監（訓練）', 'training','TRUE'],
     ['adc.scout@skwscout.org.hk',    hash, salt, 'ADC_SCOUT',    '助理區總監（童軍）','section:scout','TRUE'],
+    ['dl@skwscout.org.hk',           hash, salt, 'DL',           '區長',              'admin',       'TRUE'],
+    ['leader@skwscout.org.hk',       hash, salt, 'LEADER',       '職領袖',            'section:scout','TRUE'],
   ]);
 
   // ★ 保護敏感工作表
@@ -737,7 +1188,9 @@ function setupSheets() {
   // 顯示完成提示
   SpreadsheetApp.getUi().alert(
     '童軍區管理平台初始化完成',
-    '已建立 Config / System / Roles / Cards / Perms / Users。\n'
+    '已建立 Config / System / Roles / Cards / Perms / Users\n'
+    + '＋ 一次性服務表（Venues/VenueBookings/Items/StockRequests/ActivityNotices）\n'
+    + '＋ 訓練班目錄（CourseLinks）。\n'
     + '示範密碼：scout1234\n\n'
     + '接下來：\n'
     + '1. 到 Config 填區名（districtName）\n'
