@@ -50,10 +50,13 @@
 > 自己範圍）、`STAFF`（區職員受薪）預設行政類卡 edit（借場/借物資/知會/通告）、其餘 view。
 > 全部可由 DC/超管喺權限矩陣或「卡片範圍」逐帳戶微調。
 
-### 2.1 卡片分類（done 已實作 / todo 加入中）
-- **已實作（done）**：`venueReg` 借場、`stockReg` 借物資、`activity` 知會、`training` 訓練班管理、
-  `courseRegs` 訓練班報名審批、`notices` 通告庫。
+### 2.1 卡片分類（done 已實作 / todo 加入中）— 最終定案
+- **已實作（done，4 張）**：
+  - `venueReg` 借場審批、`stockReg` 借物資審批、`activity` 活動知會、`training` 訓練班管理（區會目錄）。
 - **加入中（todo）**：visit / contacts / awards / annual / budget / meeting / committee / unit / incident。
+- **已刪除**：`courseRegs` 報名審批（批核由訓練班負責領袖喺各班自己嘅 Sheet 做）、
+  `notices` 通告庫（通告由通告圖書館提供，區無需管理）。
+- 成員系統（member app）唔登入，純讀主 Sheet + 提交；所有登入事務（開班登記/批核借場借物資/權限/scope/改密碼/卡開關）都喺呢邊。
 - Cards 表加 `category` 欄；admin 頁可**一鍵隱藏／顯示全部「加入中」**（`setCategoryEnabled`）。
 - 主控台「加入中」卡片會顯示「🚧 加入中」標籤。
 

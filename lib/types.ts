@@ -121,35 +121,6 @@ export interface CourseLink {
   createdAt?: string;
 }
 
-export type CourseRegStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
-
-export interface CourseReg {
-  id: string;
-  refCode?: string;
-  submittedAt?: string;
-  courseId?: string;
-  courseTitle?: string;
-  nameZh?: string;
-  nameEn?: string;
-  gender?: string;
-  dob?: string;
-  phone?: string;
-  email?: string;
-  section?: string;
-  scoutDistrict?: string;
-  troop?: string;
-  scoutId?: string;
-  payMethod?: string;
-  payerName?: string;
-  payAccount?: string;
-  receiptUrl?: string;
-  needReceipt?: string;
-  note?: string;
-  status?: CourseRegStatus | string;
-  reviewer?: string;
-  reviewedAt?: string;
-}
-
 // ===================== 一次性服務：借場 / 借物資 / 知會 =====================
 
 export interface Venue {
@@ -227,13 +198,4 @@ export interface ActivityNotice {
   leaderEmail?: string;
   note?: string;
   districtCode?: string;
-}
-export interface Notice {
-  id: string;
-  title: string;
-  category?: string;
-  url?: string;
-  body?: string;
-  postedAt?: string;
-  active?: boolean;
 }

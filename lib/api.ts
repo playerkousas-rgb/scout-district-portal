@@ -7,7 +7,7 @@ import { DISTRICT_STORAGE_KEY } from './district';
 import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
-  CourseLink, CourseReg, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, Notice,
+  CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice,
 } from './types';
 
 function getDistrictCode(): string {
@@ -115,10 +115,6 @@ export const api = {
     callPost('saveCourseLink', { token, link }),
   deleteCourseLink: (token: string, courseId: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteCourseLink', { token, courseId }),
-  listCourseRegs: (token: string, courseId: string): Promise<ApiResult<CourseReg[]>> =>
-    callGet('listCourseRegs', { token, courseId }),
-  setCourseRegStatus: (token: string, courseId: string, id: string, status: string): Promise<ApiResult<{ saved: boolean }>> =>
-    callPost('setCourseRegStatus', { token, courseId, id, status }),
 
   // 借場
   listVenues: (): Promise<ApiResult<Venue[]>> => callGet('listVenues'),
@@ -147,12 +143,4 @@ export const api = {
     callPost('submitActivityNotice', data),
   deleteActivityNotice: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteActivityNotice', { token, id }),
-
-  // 通告
-  listNotices: (params: Record<string, string> = {}): Promise<ApiResult<Notice[]>> =>
-    callGet('listNotices', params),
-  saveNotice: (token: string, notice: Partial<Notice> & { title: string }): Promise<ApiResult<{ saved: boolean; id: string }>> =>
-    callPost('saveNotice', { token, notice }),
-  deleteNotice: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
-    callPost('deleteNotice', { token, id }),
 };
