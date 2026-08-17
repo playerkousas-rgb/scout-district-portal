@@ -15,6 +15,7 @@ export interface CardDef {
   access?: AccessLevel;
   embed?: boolean;
   source?: string; // core / plugin
+  category?: string; // done=已實作 / todo=加入中
 }
 
 export interface RoleDef {

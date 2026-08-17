@@ -127,6 +127,7 @@ function doPost(e) {
       case 'deleteNotice':    return json(deleteNotice_(body.token, body.id));
       case 'setCardEnabled':  return json(setCardEnabled_(body.token, body.cardId, body.enabled));
       case 'changePassword':  return json(changePassword_(body.token, body.oldPassword, body.newPassword));
+      case 'setCategoryEnabled': return json(setCategoryEnabled_(body.token, body.category, body.enabled));
       default:                return json(err('未知的 action: ' + action));
     }
   } catch (ex) { return json(err('伺服器錯誤：' + ex)); }
@@ -349,6 +350,7 @@ function normalizeCard_(c) {
     description: c.description, order: Number(c.order) || 0,
     enabled: String(c.enabled).toUpperCase() !== 'FALSE',
     embed: String(c.embed).toUpperCase() === 'TRUE', source: c.source || 'core',
+    category: String(c.category || 'done').trim() === 'todo' ? 'todo' : 'done',
   };
 }
 
@@ -497,6 +499,28 @@ function setCardEnabled_(token, cardId, enabled) {
   if (idx < 0) return err('找不到該卡片');
   setCellByHeader_(sh, idx, 'enabled', enabled ? 'TRUE' : 'FALSE');
   return ok({ saved: true, cardId: cardId, enabled: !!enabled });
+}
+
+/**
+ * 一鍵開/關某分類（category）嘅所有卡片。
+ * category: 'done'（已實作） / 'todo'（加入中）
+ */
+function setCategoryEnabled_(token, category, enabled) {
+  var t = requireAdmin_(token); if (t.error) return err(t.error);
+  category = String(category || '').trim();
+  if (category !== 'done' && category !== 'todo') return err('分類不正確');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.CARDS);
+  var v = sh.getDataRange().getValues();
+  if (v.length < 2) return err('沒有卡片');
+  var head = v[0].map(function (h) { return String(h).trim(); });
+  var cCat = head.indexOf('category'), cEn = head.indexOf('enabled');
+  var count = 0;
+  for (var i = 1; i < v.length; i++) {
+    var cat = String(v[i][cCat] || '').trim();
+    if (cat === category) { sh.getRange(i + 1, cEn + 1).setValue(enabled ? 'TRUE' : 'FALSE'); count++; }
+  }
+  return ok({ saved: true, category: category, enabled: !!enabled, count: count });
 }
 function isProtectedRole_(role) { var r = getRoleObj_(String(role).trim()); return !!r && String(r.protected).toUpperCase() === 'TRUE'; }
 function userRowIndex_(email) {
@@ -655,7 +679,7 @@ function installPlugin_(token, plugin) {
   if (cards.some(function (c) { return String(c.cardId).trim() === String(plugin.id).trim(); })) return err('此 plugin 已安裝');
   var nextOrder = cards.reduce(function (m, c) { return Math.max(m, Number(c.order) || 0); }, 0) + 1;
   sh.appendRow([plugin.id, plugin.title, plugin.icon || '🧩', plugin.type || 'jump', plugin.url,
-    plugin.description || '', nextOrder, 'TRUE', plugin.embed ? 'TRUE' : 'FALSE', 'plugin']);
+    plugin.description || '', nextOrder, 'TRUE', plugin.embed ? 'TRUE' : 'FALSE', 'plugin', 'done']);
   var psh = ss.getSheetByName(SHEET.PERMS);
   if (psh) {
     var header = psh.getRange(1, 1, 1, psh.getLastColumn()).getValues()[0];
@@ -1146,22 +1170,22 @@ function setupSheets() {
     ['STAFF',        '區職員（受薪）',      'TRUE']]);
 
   ensureSheet_(ss, SHEET.CARDS, [
-    ['cardId','title','icon','type','url','description','order','enabled','embed','source'],
-    ['visit','旅團探訪','🏕','builtin','/awards','年度旅探訪（全區共有）','1','TRUE','FALSE','core'],
-    ['contacts','旅團聯絡簿','📇','builtin','/contacts','聯絡資料 · 分組 · 群發','2','TRUE','FALSE','core'],
-    ['awards','獎勵提名','🎖','builtin','/awards','讀獲獎名單 · 推下一級','3','TRUE','FALSE','core'],
-    ['annual','週年會議文件','📂','builtin','/annual-docs','議程 · 紀錄 · 6月前籌備','4','TRUE','FALSE','core'],
-    ['budget','區年度預算','📑','builtin','/budget','年度預算編列與追蹤','5','TRUE','FALSE','core'],
-    ['meeting','會議行事曆','📅','builtin','/meeting','幹部/執委/週年會議','6','TRUE','FALSE','core'],
-    ['committee','委任系統','🗂','builtin','/committee','委任 · 續任 · R02','7','TRUE','FALSE','core'],
-    ['unit','旅團管理系統','🧭','builtin','/unit','旅名冊 · 人數統計','8','TRUE','FALSE','core'],
-    ['venueReg','場地借用審批','🏛','builtin','/venue-regs','借場申請批核 · 場地清單','9','TRUE','FALSE','core'],
-    ['stockReg','物資借用審批','📦','builtin','/stock-regs','借物資批核 · 庫存管理','10','TRUE','FALSE','core'],
-    ['activity','活動知會','🗓','builtin','/activity-notices','旅團活動知會記錄 · 查閱','11','TRUE','FALSE','core'],
-    ['incident','意外 / 應變','🚨','builtin','/incident','通報 · 惡劣天氣','12','TRUE','FALSE','core'],
-    ['training','訓練班管理','🎓','builtin','/training','開班登記 · Script/Drive/通告','13','TRUE','FALSE','core'],
-    ['courseRegs','訓練班報名審批','📝','builtin','/course-regs','檢視名單 · 批核 status','14','TRUE','FALSE','core'],
-    ['notices','通告庫','📢','builtin','/notices','發佈及管理通告','15','TRUE','FALSE','core'],
+    ['cardId','title','icon','type','url','description','order','enabled','embed','source','category'],
+    ['visit','旅團探訪','🏕','builtin','/awards','年度旅探訪（全區共有）','1','TRUE','FALSE','core','todo'],
+    ['contacts','旅團聯絡簿','📇','builtin','/contacts','聯絡資料 · 分組 · 群發','2','TRUE','FALSE','core','todo'],
+    ['awards','獎勵提名','🎖','builtin','/awards','讀獲獎名單 · 推下一級','3','TRUE','FALSE','core','todo'],
+    ['annual','週年會議文件','📂','builtin','/annual-docs','議程 · 紀錄 · 6月前籌備','4','TRUE','FALSE','core','todo'],
+    ['budget','區年度預算','📑','builtin','/budget','年度預算編列與追蹤','5','TRUE','FALSE','core','todo'],
+    ['meeting','會議行事曆','📅','builtin','/meeting','幹部/執委/週年會議','6','TRUE','FALSE','core','todo'],
+    ['committee','委任系統','🗂','builtin','/committee','委任 · 續任 · R02','7','TRUE','FALSE','core','todo'],
+    ['unit','旅團管理系統','🧭','builtin','/unit','旅名冊 · 人數統計','8','TRUE','FALSE','core','todo'],
+    ['venueReg','場地借用審批','🏛','builtin','/venue-regs','借場申請批核 · 場地清單','9','TRUE','FALSE','core','done'],
+    ['stockReg','物資借用審批','📦','builtin','/stock-regs','借物資批核 · 庫存管理','10','TRUE','FALSE','core','done'],
+    ['activity','活動知會','🗓','builtin','/activity-notices','旅團活動知會記錄 · 查閱','11','TRUE','FALSE','core','done'],
+    ['incident','意外 / 應變','🚨','builtin','/incident','通報 · 惡劣天氣','12','TRUE','FALSE','core','todo'],
+    ['training','訓練班管理','🎓','builtin','/training','開班登記 · Script/Drive/通告','13','TRUE','FALSE','core','done'],
+    ['courseRegs','訓練班報名審批','📝','builtin','/course-regs','檢視名單 · 批核 status','14','TRUE','FALSE','core','done'],
+    ['notices','通告庫','📢','builtin','/notices','發佈及管理通告','15','TRUE','FALSE','core','done'],
   ]);
 
   var roles = ['DC','SYSADMIN','DDC_ADMIN','DDC_TRAINING','ADC_ROVER','ADC_VENTURE','ADC_SCOUT','ADC_CUBS','ADC_GH','DL','LEADER','AL','STAFF'];

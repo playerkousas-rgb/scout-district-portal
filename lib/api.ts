@@ -77,6 +77,9 @@ export const api = {
   changePassword: (token: string, oldPassword: string, newPassword: string):
     Promise<ApiResult<{ changed: boolean }>> =>
     callPost('changePassword', { token, oldPassword, newPassword }),
+  setCategoryEnabled: (token: string, category: string, enabled: boolean):
+    Promise<ApiResult<{ saved: boolean; category: string; enabled: boolean; count: number }>> =>
+    callPost('setCategoryEnabled', { token, category, enabled }),
 
   // 角色管理（DC / SYSADMIN）
   addRole: (token: string, role: string, label: string): Promise<ApiResult<{ saved: boolean }>> =>

@@ -34,6 +34,7 @@ export default function CardItem({ card, role }: { card: CardDef; role: string }
   return (
     <div className={`card t-${card.type}`} onClick={handleClick} role="button" tabIndex={0}>
       <span className={`pill ${card.type}`}>{typeLabel[card.type] || card.type}</span>
+      {card.category === 'todo' && <span className="plugin-tag">🚧 加入中</span>}
       <div className="ico">{card.icon}</div>
       {card.source === 'plugin' && <span className="plugin-tag">🧩 外掛</span>}
       <h3>{card.title}</h3>
