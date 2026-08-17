@@ -69,6 +69,8 @@ function doGet(e) {
       case 'getSystem':      return json(ok(getSystemState_()));
       case 'getRegistry':    return json(getRegistry_(p.token));
       case 'getCourseLinks': return json(getCourseLinks_(p.token));
+      // 公開訓練班目錄（只回傳公開欄位，絕不包含 Script URL / Key / Drive ID）
+      case 'listCourseLinks': return json(ok(listCourseLinks_()));
       // 一次性服務
       case 'listVenues':        return json(ok(listVenues_()));
       case 'listItems':         return json(ok(listItems_()));
@@ -108,7 +110,8 @@ function doPost(e) {
       case 'uninstallPlugin': return json(uninstallPlugin_(body.token, body.cardId));
       case 'saveCourseLink':  return json(saveCourseLink_(body.token, body.link));
       case 'deleteCourseLink':return json(deleteCourseLink_(body.token, body.courseId));
-      // 一次性服務 — 公開提交（intake）
+      // 公開提交（intake）
+      case 'submitCourseReg':     return json(submitCourseReg_(body));
       case 'submitVenueRequest':  return json(submitVenueRequest_(body));
       case 'submitStockRequest':  return json(submitStockRequest_(body));
       case 'submitActivityNotice': return json(submitActivityNotice_(body));
@@ -792,6 +795,137 @@ function getCourseLinks_(token) {
   return ok(links);
 }
 
+/** 公開端只可讀取呢批欄位；每班 Script URL / API Key / Drive ID 永不回傳。 */
+function publicCourseLink_(r) {
+  return {
+    courseId: String(r.courseId || '').trim(),
+    title: r.title || '', badgeName: r.badgeName || '', section: r.section || '',
+    courseNo: r.courseNo || '', sessionsText: r.sessionsText || '',
+    eligibility: r.eligibility || '', fee: r.fee || '', originalFee: r.originalFee || '',
+    subsidyNote: r.subsidyNote || '', deadline: formatCourseDeadline_(r.deadline),
+    quota: Number(r.quota) || 0, filled: Number(r.filled) || 0,
+    venue: r.venue || '', noticeUrl: r.noticeUrl || '', contact: r.contact || '',
+    active: true,
+  };
+}
+
+function isCourseActive_(r) {
+  return String(r.active).trim().toUpperCase() === 'TRUE';
+}
+
+function formatCourseDeadline_(value) {
+  if (!value) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  return String(value).trim();
+}
+
+function isCourseDeadlinePassed_(value) {
+  if (!value) return false;
+  var end;
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    end = new Date(value.getTime());
+    end.setHours(23, 59, 59, 999);
+  } else {
+    var raw = String(value).trim();
+    if (!raw) return false;
+    var dateOnly = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    end = dateOnly
+      ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]), 23, 59, 59, 999)
+      : new Date(raw);
+  }
+  return !isNaN(end.getTime()) && end.getTime() < Date.now();
+}
+
+function listCourseLinks_() {
+  return readSheet_(SHEET.COURSE_LINKS).filter(function (r) {
+    return String(r.courseId || '').trim() && String(r.title || '').trim()
+      && isCourseActive_(r) && !isCourseDeadlinePassed_(r.deadline);
+  }).map(publicCourseLink_);
+}
+
+function isAppsScriptExecUrl_(value) {
+  return /^https:\/\/script\.google\.com\/macros\/s\/[^/?#]+\/exec(?:\?[^#]*)?$/.test(String(value || '').trim());
+}
+
+var COURSE_REG_FIELDS = [
+  'memberType', 'nameZh', 'nameEn', 'gender', 'dob', 'phone', 'email',
+  'scoutDistrict', 'region', 'troop', 'scoutId', 'scoutPosition', 'extra',
+  'guardianConsent', 'guardianName', 'guardianRelation', 'guardianPhone', 'guardianEmail',
+  'leaderConsent', 'leaderName', 'leaderPosition', 'leaderEmail',
+  'payMethod', 'payerName', 'payAccount', 'needReceipt', 'note',
+  'receiptFileName', 'receiptMimeType', 'receiptDataUrl'
+];
+
+/**
+ * 公開訓練班報名：主後台驗證課程仍開放，再用 CourseLinks 內嘅私密資料
+ * server-to-server 轉發到該班 Script addReg。Script URL / Key 不會經 member-portal 前端。
+ */
+function submitCourseReg_(body) {
+  body = body || {};
+  if (!body.courseId || !body.nameZh || !body.phone || !body.email) return err('資料不完整');
+  if (!body.receiptDataUrl) return err('請上傳入數紙截圖。未繳費將不獲處理申請');
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return err('報名系統繁忙，請稍後再試。');
+
+  try {
+    // 鎖內重新讀取，避免最後一個名額同時被多人取得。
+    var course = getCourseLinkByCourseId_(body.courseId);
+    if (!course) return err('找不到該訓練班');
+    if (!isCourseActive_(course)) return err('該訓練班已停止報名');
+    if (isCourseDeadlinePassed_(course.deadline)) return err('該訓練班已截止報名');
+
+    var quota = Number(course.quota) || 0;
+    var filled = Number(course.filled) || 0;
+    if (quota > 0 && filled >= quota) return err('該訓練班名額已滿');
+
+    var execUrl = String(course.scriptExecUrl || '').trim();
+    var courseApiKey = String(course.scriptApiKey || '').trim();
+    if (!isAppsScriptExecUrl_(execUrl) || !courseApiKey) return err('該訓練班收表後台尚未完成設定');
+
+    var payload = { action: 'addReg', apiKey: courseApiKey };
+    COURSE_REG_FIELDS.forEach(function (field) {
+      if (body[field] !== undefined) payload[field] = body[field];
+    });
+    payload.courseId = String(course.courseId || '').trim();
+    payload.courseTitle = course.title || '';
+    payload.section = course.section || body.memberType || '';
+    payload.badgeCode = course.badgeName || '';
+
+    var response = UrlFetchApp.fetch(execUrl, {
+      method: 'post',
+      contentType: 'text/plain; charset=utf-8',
+      payload: JSON.stringify(payload),
+      followRedirects: true,
+      muteHttpExceptions: true,
+    });
+    var responseCode = response.getResponseCode();
+    var responseText = response.getContentText();
+    if (responseCode < 200 || responseCode >= 300) return err('訓練班收表後台暫時無法使用（HTTP ' + responseCode + '）');
+    if (/<!doctype html|<html/i.test(responseText)) return err('訓練班收表 Script 尚未設為「所有人」可執行');
+
+    var result;
+    try { result = JSON.parse(responseText); }
+    catch (parseError) { return err('訓練班收表後台回應格式不正確'); }
+    if (!result || result.ok !== true) return err((result && result.error) || '訓練班報名提交失敗');
+
+    // 只在每班 Script 確認寫入成功後更新公開名額。
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSE_LINKS);
+    var rowIndex = rowIndexByCol_(sh, 'courseId', course.courseId);
+    if (rowIndex > 0) setCellByHeader_(sh, rowIndex, 'filled', filled + 1);
+
+    var refCode = result.refCode || (result.data && result.data.refCode) || '';
+    return { ok: true, refCode: refCode };
+  } catch (ex) {
+    console.error('submitCourseReg_ failed', ex);
+    return err('訓練班報名轉發失敗，請稍後再試。');
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function saveCourseLink_(token, link) {
   var t = requireAdmin_(token); if (t.error) return err(t.error);
   if (!canManageCourses_(t.role)) return err('沒有權限管理訓練班');
@@ -805,11 +939,20 @@ function saveCourseLink_(token, link) {
   if (!sh) return err('尚未執行 setupSheets()');
   var headers = sheetHeadersBySheet_(sh);
   var idx = rowIndexByCol_(sh, 'courseId', courseId);
+  var existing = idx > 0 ? getCourseLinkByCourseId_(courseId) : null;
+  var scriptExecUrl = String(link.scriptExecUrl || '').trim();
+  // getCourseLinks 刻意唔回傳 Key；編輯舊班而欄位留空時必須保留原 Key。
+  var scriptApiKey = String(link.scriptApiKey || (existing && existing.scriptApiKey) || '').trim();
+  var active = String(link.active).trim().toUpperCase() === 'TRUE';
+  if (scriptExecUrl && !isAppsScriptExecUrl_(scriptExecUrl)) return err('收表 Script 網址格式不正確（必須為 Apps Script /exec）');
+  if (active && (!scriptExecUrl || !scriptApiKey)) return err('啟用訓練班前，必須設定收表 Script /exec 網址及 API Key');
   // 用 link 內提供的欄位對應；有 districtCode 就用，否則用 Config 區碼
   var districtCode = link.districtCode || getConfigValue_('districtCode') || '';
   var row = headers.map(function (h) {
     if (h === 'districtCode') return districtCode;
-    if (h === 'createdAt' && !link[h] && idx < 0) return new Date().toISOString();
+    if (h === 'scriptExecUrl') return scriptExecUrl;
+    if (h === 'scriptApiKey') return scriptApiKey;
+    if (h === 'createdAt' && !link[h]) return existing ? existing.createdAt : new Date().toISOString();
     return link[h] !== undefined ? link[h] : '';
   });
   if (idx > 0) { sh.getRange(idx, 1, 1, row.length).setValues([row]); }
