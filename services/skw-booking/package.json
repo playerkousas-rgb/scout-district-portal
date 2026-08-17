@@ -1,0 +1,13 @@
+{
+  "name": "skw-booking-system",
+  "version": "1.0.0",
+  "description": "筲箕灣區總部全自動預約系統",
+  "main": "api/approve.js",
+  "type": "module",
+  "scripts": {
+    "start": "node api/approve.js"
+  },
+  "dependencies": {
+    "nodemailer": "^6.9.13"
+  }
+}

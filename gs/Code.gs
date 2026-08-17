@@ -1017,6 +1017,8 @@ function deleteVenue_(token, venueId) {
 // ---------- 借場：提交 + 批核 ----------
 function submitVenueRequest_(b) {
   if (!b.venueId || !b.name || !b.phone) return err('資料不完整');
+  // 電郵必填：批准後需要寄入場密碼俾申請人
+  if (!b.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(b.email))) return err('請填寫有效的聯絡電郵（用於收取入場密碼）');
   var venue = readSheet_(SHEET.VENUES).filter(function (v) { return String(v.venueId).trim() === String(b.venueId).trim(); })[0];
   if (!venue) return err('場地不存在');
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
@@ -1039,14 +1041,250 @@ function getVenueBookings_(token) {
 function setVenueBookingStatus_(token, id, status) {
   var t = requireAdmin_(token); if (t.error) return err(t.error);
   if (!canOps_(t.role)) return err('沒有權限');
-  if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(String(status).toLowerCase()) < 0) return err('狀態不正確');
+  status = String(status).toLowerCase();
+  if (['pending', 'approved', 'rejected', 'cancelled'].indexOf(status) < 0) return err('狀態不正確');
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
   var idx = rowIndexByCol_(sh, 'id', String(id).trim());
   if (idx < 0) return err('找不到該申請');
-  setCellByHeader_(sh, idx, 'status', String(status).toLowerCase());
+  var req = readSheet_(SHEET.VENUE_REQ).filter(function (r) { return String(r.id).trim() === String(id).trim(); })[0] || {};
+  setCellByHeader_(sh, idx, 'status', status);
   setCellByHeader_(sh, idx, 'reviewer', t.email);
   setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
-  return ok({ saved: true });
+
+  // ★ 一步到位：批准 → 自動設定 TTLock 限時密碼 + Teamup 轉色 + 電郵申請人
+  var passcode = '';
+  if (status === 'approved') {
+    passcode = String(req.passcode || '').trim();
+    if (!passcode) {
+      try {
+        var pc = createTtlockPasscode_(req.phone || '0000', req.startDate, req.endDate || req.startDate, (req.name || '申請人'));
+        passcode = pc.passcode;
+      } catch (e) {
+        console.error('TTLock 建碼失敗，改用隨機密碼：' + e.message);
+        passcode = genPasscode_();
+      }
+      setCellByHeader_(sh, idx, 'passcode', passcode);
+    }
+    try { teamupOnApprove_(req, passcode); } catch (e) { console.error('Teamup 轉色失敗：' + e.message); }
+    sendVenueApprovalEmail_(req, passcode);
+  } else if (status === 'rejected' || status === 'cancelled') {
+    try { teamupOnReject_(req, status); } catch (e) { console.error('Teamup 拒絕事件建立失敗：' + e.message); }
+    sendVenueRejectionEmail_(req, status);
+  }
+  return ok({ saved: true, passcode: status === 'approved' ? passcode : undefined });
+}
+
+/** 生成 6 位數字密碼（避開已存在嘅 passcode，防撞碼） */
+function genPasscode_() {
+  var existing = {};
+  readSheet_(SHEET.VENUE_REQ).forEach(function (r) { if (r.passcode) existing[String(r.passcode).trim()] = true; });
+  for (var i = 0; i < 200; i++) {
+    var code = String(Math.floor(100000 + Math.random() * 900000));
+    if (!existing[code]) return code;
+  }
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function venueMailConfig_() {
+  var districtName = getConfigValue_('districtName') || '童軍區';
+  var fromName = getConfigValue_('notifyFrom') || (districtName + ' 管理系統');
+  return { districtName: districtName, fromName: fromName };
+}
+
+/** 批准 → 寄「已批准 + 入場密碼」俾申請人 */
+function sendVenueApprovalEmail_(req, passcode) {
+  var email = String(req.email || '').trim();
+  if (!email) { console.log('無申請人電郵，跳過批准通知。'); return; }
+  var cfg = venueMailConfig_();
+  var name = req.name || '申請人';
+  var html =
+    '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:20px;border:1px solid #e1e4e8;border-radius:8px;">'
+    + '<h2 style="color:#15803d;text-align:center;border-bottom:2px solid #bbf7d0;padding-bottom:10px;">✅ 場地借用已獲批准</h2>'
+    + '<p>你好 ' + esc_(name) + '，你所申請的場地借用已獲批核：</p>'
+    + '<div style="background:#f6f8fa;border-left:4px solid #16a34a;padding:14px 18px;margin:16px 0;font-size:14px;color:#444;line-height:1.8;">'
+    + '<b>場地：</b>' + esc_(req.venueName || req.venueId) + '<br/>'
+    + '<b>日期：</b>' + esc_(req.startDate || '') + (req.endDate ? ' → ' + esc_(req.endDate) : '') + '<br/>'
+    + '<b>申請編號：</b>' + esc_(req.refCode || '') + '<br/>'
+    + '<b>用途：</b>' + esc_(req.purpose || '—')
+    + '</div>'
+    + '<div style="background:#f0fdf4;border:2px dashed #bbf7d0;border-radius:8px;padding:22px;text-align:center;margin:18px 0;">'
+    + '<div style="font-size:13px;color:#166534;font-weight:bold;">🔑 入場密碼</div>'
+    + '<div style="font-size:40px;font-weight:800;letter-spacing:6px;color:#166534;font-family:monospace;margin:10px 0;">' + esc_(passcode) + '</div>'
+    + '<div style="font-size:13px;color:#374151;">請於借用時段使用此密碼進入場地。</div>'
+    + '</div>'
+    + '<div style="background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;font-size:13px;color:#78350f;line-height:1.7;">'
+    + '<b>使用守則：</b>使用完畢後請關閉所有電源、清走垃圾並鎖好場地。如有問題請聯絡區職員。'
+    + '</div>'
+    + '<p style="font-size:13px;color:#666;text-align:center;margin-top:26px;">' + esc_(cfg.districtName) + ' 敬啟</p>'
+    + '</div>';
+  try {
+    MailApp.sendEmail({ to: email, subject: '[' + cfg.districtName + '] 場地借用已獲批准 - 入場密碼 ' + passcode, htmlBody: html, name: cfg.fromName });
+  } catch (e) {
+    console.error('批准電郵寄送失敗：' + e);
+  }
+}
+
+/** 拒絕 / 取消 → 電郵通知申請人 */
+function sendVenueRejectionEmail_(req, status) {
+  var email = String(req.email || '').trim();
+  if (!email) { console.log('無申請人電郵，跳過拒絕通知。'); return; }
+  var cfg = venueMailConfig_();
+  var name = req.name || '申請人';
+  var title = status === 'cancelled' ? '已取消' : '未獲批准';
+  var html =
+    '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:20px;border:1px solid #e1e4e8;border-radius:8px;">'
+    + '<h2 style="color:#dc2626;text-align:center;border-bottom:2px solid #fecaca;padding-bottom:10px;">❌ 場地借用' + title + '</h2>'
+    + '<p>你好 ' + esc_(name) + '，你所申請的場地借用已' + title + '：</p>'
+    + '<div style="background:#f6f8fa;border-left:4px solid #dc2626;padding:14px 18px;margin:16px 0;font-size:14px;color:#444;line-height:1.8;">'
+    + '<b>場地：</b>' + esc_(req.venueName || req.venueId) + '<br/>'
+    + '<b>日期：</b>' + esc_(req.startDate || '') + (req.endDate ? ' → ' + esc_(req.endDate) : '')
+    + '</div>'
+    + '<p style="font-size:14px;color:#555;">如有疑問，請聯絡區職員查詢。</p>'
+    + '<p style="font-size:13px;color:#666;text-align:center;margin-top:26px;">' + esc_(cfg.districtName) + ' 敬啟</p>'
+    + '</div>';
+  try {
+    MailApp.sendEmail({ to: email, subject: '[' + cfg.districtName + '] 場地借用' + title, htmlBody: html, name: cfg.fromName });
+  } catch (e) {
+    console.error('拒絕電郵寄送失敗：' + e);
+  }
+}
+
+/** HTML 轉義，避免申請人名字含特殊字元破壞電郵樣式 */
+function esc_(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ===================== Teamup + TTLock 一條龍借場 =====================
+// 申請人喺成員系統填表（寫入 VenueBookings，status=pending）；
+// 管理系統 /venue-regs 批核 → 批准時自動：
+//   1) 通通鎖(TTLock) 設定限時密碼
+//   2) Teamup 建立「確認借用區總部」子日曆事件（轉顏色 藍→紅）
+//   3) 電郵密碼俾申請人
+// 拒絕/取消：Teamup 建立「拒絕」子日曆事件 + 電郵通知（如需）。
+
+function teamupCfg_() {
+  return {
+    apiKey: getConfigValue_('teamupApiKey'),
+    calendarId: getConfigValue_('teamupCalendarId'),
+    approvedSub: getConfigValue_('teamupApprovedSubId'),
+    rejectedSub: getConfigValue_('teamupRejectedSubId'),
+  };
+}
+function teamupReady_() {
+  var c = teamupCfg_();
+  return !!(c.apiKey && c.calendarId && c.approvedSub);
+}
+function teamupBase_() { return 'https://api.teamup.com/' + teamupCfg_().calendarId; }
+function teamupFetch_(url, options) {
+  var opt = options || {};
+  opt.headers = { 'Teamup-Token': teamupCfg_().apiKey, 'Content-Type': 'application/json' };
+  opt.muteHttpExceptions = true;
+  var res = UrlFetchApp.fetch(url, opt);
+  return { code: res.getResponseCode(), text: res.getContentText() };
+}
+
+/** 把申請資料寫成 Teamup 事件 notes */
+function buildTeamupNotes_(req) {
+  return '姓名：' + String(req.name || '') + '\n電話：' + String(req.phone || '')
+    + '\n電郵：' + String(req.email || '') + '\n旅團：' + String(req.troop || '')
+    + '\n申請編號：' + String(req.refCode || '') + '\n用途：' + String(req.purpose || '');
+}
+/** 正規化成 Teamup 需要嘅 ISO 起訖時間 */
+function toTeamupDt_(value, endOfDay) {
+  if (!value) return '';
+  var d = new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  if (endOfDay) { d.setHours(23, 59, 59, 999); }
+  return d.toISOString();
+}
+
+/** 建立 Teamup 事件到指定子日曆 */
+function createTeamupEvent_(subId, title, notes, startDt, endDt) {
+  if (!teamupReady_() || !subId) return { ok: false, error: 'Teamup 尚未設定' };
+  var body = JSON.stringify({
+    subcalendar_ids: [parseInt(subId)],
+    title: title,
+    notes: notes,
+    start_dt: startDt,
+    end_dt: endDt || startDt,
+  });
+  var r = teamupFetch_(teamupBase_() + '/events', { method: 'post', payload: body });
+  if (r.code < 200 || r.code >= 300) return { ok: false, error: 'Teamup 建立事件失敗 HTTP ' + r.code + '：' + r.text };
+  try { var data = JSON.parse(r.text); return { ok: true, eventId: data && data.event ? data.event.id : '' }; }
+  catch (e) { return { ok: true, eventId: '' }; }
+}
+
+/** 批准 → 喺「確認借用」子日曆建事件（轉色） */
+function teamupOnApprove_(req, passcode) {
+  if (!teamupReady_()) return;
+  var title = (req.venueName || req.venueId || '區總部') + '（已批准）';
+  var notes = buildTeamupNotes_(req)
+    + '\n✅ 已批准於 ' + new Date().toLocaleString('zh-HK')
+    + '\n🔑 密碼：' + passcode;
+  createTeamupEvent_(teamupCfg_().approvedSub, title, notes,
+    toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true));
+}
+/** 拒絕/取消 → 喺「拒絕」子日曆建事件 */
+function teamupOnReject_(req, status) {
+  if (!teamupReady_()) return;
+  if (!teamupCfg_().rejectedSub) return;
+  var label = status === 'cancelled' ? '已取消' : '已拒絕';
+  var title = (req.venueName || req.venueId || '區總部') + '（' + label + '）';
+  var notes = buildTeamupNotes_(req) + '\n❌ ' + label + '於 ' + new Date().toLocaleString('zh-HK');
+  createTeamupEvent_(teamupCfg_().rejectedSub, title, notes,
+    toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true));
+}
+
+// ---------- 通通鎖 TTLock ----------
+function ttlockBase_() {
+  var b = getConfigValue_('ttlockApiBase') || 'https://api.ttlock.com';
+  return String(b).replace(/\/+$/, '');
+}
+function md5_(s) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, s, Utilities.Charset.UTF_8)
+    .map(function (b) { var v = (b < 0 ? b + 256 : b).toString(16); return v.length === 1 ? '0' + v : v; }).join('');
+}
+function ttlockToken_() {
+  var clientId = getConfigValue_('ttlockClientId');
+  var secret = getConfigValue_('ttlockClientSecret');
+  var user = getConfigValue_('ttlockUsername');
+  var pw = getConfigValue_('ttlockPassword');
+  if (!clientId || !secret || !user || !pw) throw new Error('未設定 TTLock Config（ttlockClientId/Secret/Username/Password）');
+  var payload = { client_id: clientId, client_secret: secret, username: user, password: md5_(pw), grant_type: 'password' };
+  var res = UrlFetchApp.fetch(ttlockBase_() + '/oauth2/token', { method: 'post', payload: payload, muteHttpExceptions: true });
+  var data = JSON.parse(res.getContentText());
+  if (!data.access_token) throw new Error('TTLock 登入失敗 ' + JSON.stringify(data));
+  return data.access_token;
+}
+function ttlockDisabled_() { return String(getConfigValue_('ttlockDisabled')).toUpperCase() === 'TRUE'; }
+/** 建立限時密碼；ttlockDisabled=TRUE 時返回模擬密碼，其餘流程照跑 */
+function createTtlockPasscode_(phone, startDate, endDate, name) {
+  if (ttlockDisabled_()) return { passcode: genPasscode_(), simulated: true };
+  var token = ttlockToken_();
+  var lockId = getConfigValue_('ttlockLockId');
+  var clientId = getConfigValue_('ttlockClientId');
+  if (!lockId) throw new Error('未設定 ttlockLockId（Config）或設 ttlockDisabled=TRUE 先跳過');
+  var base = ttlockBase_();
+  var start = new Date(startDate); start.setMinutes(start.getMinutes() - 15);
+  var end = new Date(endDate); end.setMinutes(end.getMinutes() + 15);
+  var passcode = genPasscode_();
+  var lastErr = null;
+  for (var attempt = 0; attempt < 8; attempt++) {
+    var payload = {
+      clientId: clientId, accessToken: token, lockId: String(lockId),
+      keyboardPwd: passcode, keyboardPwdName: String(name || '申請人').substring(0, 30),
+      startDate: String(start.getTime()), endDate: String(end.getTime()),
+      addType: '2', date: String(Date.now())
+    };
+    var res = UrlFetchApp.fetch(base + '/v3/keyboardPwd/add', { method: 'post', payload: payload, muteHttpExceptions: true });
+    var data; try { data = JSON.parse(res.getContentText()); } catch (e) { data = {}; }
+    if (data.keyboardPwdId || data.errcode === 0) return { passcode: passcode, validFrom: start, validTo: end };
+    lastErr = data;
+    passcode = String(parseInt(passcode, 10) + 1).padStart(6, '0'); // 撞碼 +1 重試
+  }
+  throw new Error('TTLock 建碼多次失敗 ' + (lastErr.errmsg || JSON.stringify(lastErr)));
 }
 
 // ---------- 借物資：物資清單 ----------
@@ -1212,6 +1450,23 @@ function setupSheets() {
     configSheet.getRange(1, 3).setValue('說明');
   }
 
+  // ★ 借場一條龍（Teamup + TTLock）金鑰設定 — 舊版 Sheet 升級用
+  [
+    ['teamupApiKey', '', 'Teamup API Key'],
+    ['teamupCalendarId', '', 'Teamup 分享金鑰（形如 ks...）'],
+    ['teamupApprovedSubId', '', '「確認借用區總部」子日曆 ID（紅，批准後建事件）'],
+    ['teamupRejectedSubId', '', '(選填) 拒絕子日曆 ID'],
+    ['ttlockClientId', '', 'TTLock Client ID'],
+    ['ttlockClientSecret', '', 'TTLock Client Secret'],
+    ['ttlockUsername', '', 'TTLock App 登入帳號'],
+    ['ttlockPassword', '', 'TTLock App 登入密碼'],
+    ['ttlockLockId', '', '大門鎖 Lock ID'],
+    ['ttlockApiBase', 'https://api.ttlock.com', 'TTLock 區域 server（global/eu/cn）'],
+    ['ttlockDisabled', '', 'TRUE = 跳過 TTLock，只用 Teamup 轉色 + 電郵密碼'],
+    ['notifyFrom', '', '寄件人名稱（預設用區名）'],
+    ['approverEmail', '', '(選填) 收待審批通知信職員'],
+  ].forEach(function (row) { ensureConfigRow_(configSheet, row[0], row[1], row[2]); });
+
   ensureSheet_(ss, SHEET.SYSTEM, [['key', 'value'],
     ['locked', 'FALSE'], ['lockMessage', '系統維護中，請稍候再試。']]);
 
@@ -1241,7 +1496,7 @@ function setupSheets() {
     ['meeting','會議行事曆','📅','builtin','/meeting','幹部/執委/週年會議','6','TRUE','FALSE','core','todo'],
     ['committee','委任系統','🗂','builtin','/committee','委任 · 續任 · R02','7','TRUE','FALSE','core','todo'],
     ['unit','旅團管理系統','🧭','builtin','/unit','旅名冊 · 人數統計','8','TRUE','FALSE','core','todo'],
-    ['venueReg','場地借用審批','🏛','builtin','/venue-regs','借場申請批核 · 場地清單','9','TRUE','FALSE','core','done'],
+    ['venueReg','區總部借場批核','🏛','builtin','/venue-regs','Teamup 借場審批 · 批准自動轉色+TTLock 密碼+電郵','9','TRUE','FALSE','core','done'],
     ['stockReg','物資借用審批','📦','builtin','/stock-regs','借物資批核 · 庫存管理','10','TRUE','FALSE','core','done'],
     ['activity','活動知會','🗓','builtin','/activity-notices','旅團活動知會記錄 · 查閱','11','TRUE','FALSE','core','done'],
     ['incident','意外 / 應變','🚨','builtin','/incident','通報 · 惡劣天氣','12','TRUE','FALSE','core','todo'],
@@ -1282,7 +1537,7 @@ function setupSheets() {
   ensureSheet_(ss, SHEET.VENUES, [['venueId','name','location','capacity','note','active']]);
   ensureSheet_(ss, SHEET.VENUE_REQ, [
     ['id','refCode','submittedAt','venueId','venueName','purpose','startDate','endDate',
-     'name','phone','email','troop','position','status','reviewer','reviewedAt','createdAt'],
+     'name','phone','email','troop','position','status','reviewer','reviewedAt','passcode','createdAt'],
   ]);
   ensureSheet_(ss, SHEET.ITEMS, [['itemId','name','category','totalQty','availableQty','unit','note','active']]);
   ensureSheet_(ss, SHEET.STOCK_REQ, [
@@ -1324,6 +1579,7 @@ function setupSheets() {
     '已建立 Config / System / Roles / Cards / Perms / Users\n'
     + '＋ 一次性服務表（Venues/VenueBookings/Items/StockRequests/ActivityNotices）\n'
     + '＋ 訓練班目錄（CourseLinks）。\n'
+    + '🏛 借場：申請人於 member-portal 填表 → 你喺 /venue-regs 批核 → 自動設定 TTLock 限時密碼 + Teamup 轉色 + 電郵申請人。\n'
     + '示範密碼：scout1234\n\n'
     + '接下來：\n'
     + '1. 到 Config 填區名（districtName）\n'
