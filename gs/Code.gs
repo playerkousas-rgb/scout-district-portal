@@ -105,6 +105,10 @@ var DEFAULT_STOCK_RULES =
 
 var DEFAULT_TROOP_LIST = '';
 
+// ★ 轉數快收款戶口（FPS QR 製作預設值；其他區部署時請喺 Config 覆蓋）
+var DEFAULT_FPS_ACCOUNT_NAME = 'SCOUT ASSOCIATION OF HONG KONG - SHAU KEI WAN DISTRICT';
+var DEFAULT_FPS_ACCOUNT_NUMBER = '102866183';
+
 // ===================== HTTP 入口 =====================
 
 function doGet(e) {
@@ -116,7 +120,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.0',
+      version: '4.1.1',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -342,6 +346,9 @@ function getConfig_() {
     districtCode: districtCode_(),
     theme: getConfigValue_('theme') || '',
     logoText: getConfigValue_('logoText') || '🧭',
+    // FPS QR 製作卡片：綁定區會轉數快戶口（Config 未填會用內建預設）
+    fpsAccountName: getConfigValue_('FPS_ACCOUNT_NAME') || DEFAULT_FPS_ACCOUNT_NAME,
+    fpsAccountNumber: getConfigValue_('FPS_ACCOUNT_NUMBER') || DEFAULT_FPS_ACCOUNT_NUMBER,
   };
 }
 
@@ -359,14 +366,11 @@ function getPublicInfo_() {
     locked: getSystemState_().locked,
     lockMessage: getSystemState_().lockMessage,
     teamupBookingUrl: getConfigValue_('TEAMUP_BOOKING_URL') || '',
-    fpsAccountName: getConfigValue_('FPS_ACCOUNT_NAME') || '',
-    fpsAccountNumber: getConfigValue_('FPS_ACCOUNT_NUMBER') || '',
+    fpsAccountName: getConfigValue_('FPS_ACCOUNT_NAME') || DEFAULT_FPS_ACCOUNT_NAME,
+    fpsAccountNumber: getConfigValue_('FPS_ACCOUNT_NUMBER') || DEFAULT_FPS_ACCOUNT_NUMBER,
     venueRules: getConfigValue_('VENUE_RULES') || DEFAULT_VENUE_RULES,
-    venueRulesUrl: getConfigValue_('VENUE_RULES_URL') || '',
-    venueTermsUrl: getConfigValue_('VENUE_TERMS_URL') || '',
     cctvUrl: getConfigValue_('CCTV_URL') || '',
     stockRules: getConfigValue_('STOCK_RULES') || DEFAULT_STOCK_RULES,
-    stockRulesUrl: getConfigValue_('STOCK_RULES_URL') || '',
     troopList: getTroopList_(),
     features: FEATURE,
   };
@@ -1124,9 +1128,12 @@ function submitCourseReg_(b) {
   if (!b.memberType && !b.section) return err('請選擇所屬支部');
   if (!b.receiptDataUrl) return err('請上傳入數紙截圖。未繳費將不獲處理申請');
 
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   var link = readSheet_(SHEET.COURSE_LINKS).filter(function (x) {
+    var dl = String(x.deadline || '').trim();
     return String(x.courseId).trim() === String(b.courseId).trim()
-      && String(x.active).toUpperCase() !== 'FALSE';
+      && String(x.active).toUpperCase() !== 'FALSE'
+      && (!dl || dl >= today);
   })[0];
   if (!link) return err('找不到此訓練班或已截止報名');
 
@@ -1144,6 +1151,7 @@ function submitCourseReg_(b) {
     memberType: b.memberType || '', section: link.section || '', badgeCode: link.badgeCode || '',
     scoutDistrict: b.scoutDistrict || '', region: b.region || '', troop: b.troop || '',
     scoutId: b.scoutId || '', scoutPosition: b.scoutPosition || '',
+    extra: b.extra || '',
     guardianConsent: b.guardianConsent || '', guardianName: b.guardianName || '',
     guardianRelation: b.guardianRelation || '', guardianEmail: b.guardianEmail || '',
     guardianPhone: b.guardianPhone || '',
@@ -2075,6 +2083,7 @@ function blueprint_() {
     P.push(row('activity', opsEdit()));
     P.push(row('incident', ALL_VIEW));
     P.push(row('training', trainingEdit()));
+    P.push(row('fps', ALL_EDIT));
     return P;
   })();
 
@@ -2105,14 +2114,11 @@ function blueprint_() {
       ['notifyFrom', '', '電郵寄件人名稱（預設用區名）'],
       ['approverEmail', '', '(選填) 收待審批通知信職員'],
       // 付款 / 規定
-      ['FPS_ACCOUNT_NAME', '', '轉數快戶口名'],
-      ['FPS_ACCOUNT_NUMBER', '', '轉數快號碼'],
+      ['FPS_ACCOUNT_NAME', DEFAULT_FPS_ACCOUNT_NAME, '轉數快戶口名'],
+      ['FPS_ACCOUNT_NUMBER', DEFAULT_FPS_ACCOUNT_NUMBER, '轉數快號碼'],
       ['VENUE_RULES', '', '借場規定（留空用內建）'],
-      ['VENUE_RULES_URL', '', '借場規則 PDF'],
-      ['VENUE_TERMS_URL', '', '場地使用條件 PDF'],
       ['CCTV_URL', '', '閉路電視指引 PDF'],
       ['STOCK_RULES', '', '借物資規定（留空用內建）'],
-      ['STOCK_RULES_URL', '', '借物資規定 PDF'],
       // 服務轉發（留空 = 寫入本表）
       ['STOCK_SCRIPT_URL', '', '【借物資】外部收表 Script（留空=寫入本表）'],
       ['STOCK_SCRIPT_APIKEY', '', ''],
@@ -2160,6 +2166,7 @@ function blueprint_() {
       ['activity', '活動知會', '🗓', 'builtin', '/activity-notices', '旅團活動知會記錄', 11, 'TRUE', 'FALSE', 'core', 'done'],
       ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '通報 · 惡劣天氣', 12, 'TRUE', 'FALSE', 'core', 'todo'],
       ['training', '訓練班管理', '🎓', 'builtin', '/training', '開班登記 · 區會目錄', 13, 'TRUE', 'FALSE', 'core', 'done'],
+      ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
 
     { name: SHEET.PERMS, headerColor: '#ede9fe', frozenCols: 1, rows: permRows },
@@ -2267,6 +2274,8 @@ function setupSheets() {
   blueprint_()[0].rows.slice(1).forEach(function (r) { ensureConfigRow_(cfg, r[0], r[1], r[2]); });
 
   seedCourseParams_(ss);
+  ensureCardRows_(ss);
+  ensurePermsRows_(ss);
   protectSensitiveSheets_(ss);
 
   var key = generateApiKey_(ss);
@@ -2285,6 +2294,49 @@ function setupSheets() {
 
   if (key) showKeyDialog_('🔑 你的 API Key（只顯示一次）', key,
     '⚠️ 兩個前端都用呢一個 Key。而家就複製。');
+}
+
+/** 補建缺失卡片（Cards 表）：新版本新增咗卡片時，重跑 setup 就會自動補上，唔會掂已有行 */
+function ensureCardRows_(ss) {
+  var sh = ss.getSheetByName(SHEET.CARDS);
+  if (!sh) return;
+  var existing = {};
+  readSheet_(SHEET.CARDS).forEach(function (c) { existing[String(c.cardId).trim()] = true; });
+  var bp = blueprint_().filter(function (b) { return b.name === SHEET.CARDS; })[0];
+  if (!bp || bp.rows.length < 2) return;
+  var header = bp.rows[0].map(function (h) { return String(h).trim(); });
+  bp.rows.slice(1).forEach(function (r) {
+    var cid = String(r[0]).trim();
+    if (!cid || existing[cid]) return;
+    var obj = {};
+    header.forEach(function (h, j) { obj[h] = r[j] !== undefined ? r[j] : ''; });
+    appendRowObj_(sh, obj);
+  });
+}
+
+/** 補建缺失權限行（Perms 表）：新卡片自動按藍圖角色補權限，唔會掂已有行 */
+function ensurePermsRows_(ss) {
+  var sh = ss.getSheetByName(SHEET.PERMS);
+  if (!sh) return;
+  var v = sh.getDataRange().getValues();
+  if (v.length < 2) return;
+  var header = v[0].map(function (h) { return String(h).trim(); });
+  var existing = {};
+  for (var i = 1; i < v.length; i++) existing[String(v[i][0]).trim()] = true;
+  var bp = blueprint_().filter(function (b) { return b.name === SHEET.PERMS; })[0];
+  if (!bp || bp.rows.length < 2) return;
+  var bpHeader = bp.rows[0].map(function (h) { return String(h).trim(); });
+  bp.rows.slice(1).forEach(function (r) {
+    var cid = String(r[0]).trim();
+    if (!cid || existing[cid]) return;
+    var newRow = [cid];
+    for (var c = 1; c < header.length; c++) {
+      var role = header[c];
+      var bi = bpHeader.indexOf(role);
+      newRow.push(bi > 0 && bi < r.length ? r[bi] : '');
+    }
+    sh.appendRow(newRow);
+  });
 }
 
 /** 建立新表（每行長度可以唔同，自動補空白） */
