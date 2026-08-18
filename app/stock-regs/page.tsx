@@ -57,7 +57,7 @@ export default function StockRegsPage() {
     <>
       <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
       <h1 className="page-title">📦 物資借用審批</h1>
-      <p className="page-sub">批核借物資；批准自動扣庫存，拒絕/取消/歸還自動回補。</p>
+      <p className="page-sub">member-portal 填表寫入 StockRequests；呢邊批核。批准先扣庫存，拒絕／取消／歸還自動回補。</p>
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}
 
@@ -69,7 +69,7 @@ export default function StockRegsPage() {
           <article key={r.id} className="user-row" style={{ flexWrap: 'wrap' }}>
             <div className="user-identity">
               <b>{r.itemName || r.itemId} × {r.qty}</b>
-              <span>{r.name}{r.phone ? ` · ${r.phone}` : ''}{r.troop ? ` · ${r.troop}` : ''}</span>
+              <span>{r.name}{r.phone ? ` · ${r.phone}` : ''}{r.email ? ` · ${r.email}` : ''}{r.troop ? ` · ${r.troop}` : ''}</span>
               <span>{r.borrowDate}{r.returnDate ? ` → ${r.returnDate}` : ''} · {r.purpose}</span>
               <span className="rcode">{r.refCode}</span>
             </div>

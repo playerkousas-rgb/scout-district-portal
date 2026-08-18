@@ -9,8 +9,10 @@
 
 ## 🏛 借場系統 — 起動步驟（最常要做，照住做就得）
 
-架構：**申請人（member-portal）填表 → 寫入 Google Sheet（pending）→ 區職員喺 `/venue-regs` 批核 →
-批准時自動「TTLock 限時密碼 + Teamup 轉色 + 電郵申請人」。**
+架構：**申請人（member-portal）填表 → 寫入 Google Sheet（pending）＋ Teamup「申請中」事件 →
+區職員喺 `/venue-regs` 批准（Teamup 轉色）。** TTLock 一鍵密碼稍後再接。
+
+對接合約見 [`docs/member-gs-handshake.md`](docs/member-gs-handshake.md)。
 
 > `services/skw-booking/` 係**選用**嘅舊獨立方案，主流程唔使理佢。
 
@@ -47,7 +49,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 即通。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.2.0"` 即通。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -82,7 +84,8 @@
 
 | 文件 | 內容 |
 |---|---|
-| `docs/venue-booking-flow.md` | **借場一條龍流程**（申請→審批→TTLock+Teamup+電郵） |
+| `docs/member-gs-handshake.md` | **member-portal ↔ GS 合約**（借物資打通；借場填表→Teamup→批核） |
+| `docs/venue-booking-flow.md` | 借場流程（而家：填表+Teamup+批核；密碼稍後） |
 | `docs/booking-setup-merge-checklist.md` | 貼 Code.gs → setup → 填 Key → 驗證 → 測試 嘅逐步操作 |
 | `docs/keys-checklist.md` | **找回 + 驗證 Teamup / TTLock API Key**（你唔記得 Key 睇呢份） |
 | `docs/setup-guide.md` | 全平台部署及使用指南（區職員端） |

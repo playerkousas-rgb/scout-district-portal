@@ -33,11 +33,15 @@ export default function VenueRegsPage() {
     if (!session) return;
     setBusy(true); setError(''); setMsg('');
     if (status === 'approved') {
-      // v4.0 統一後台：批准走完整鏈（TTLock 限時密碼 → Teamup 轉色 → 電郵申請人）
-      const r = await api.approveVenueBooking(session.token, b.id);
+      // 而家先做聯調：批准 = Sheet 狀態 + Teamup 轉色。密碼／TTLock 稍後。
+      const r = await api.confirmVenueBooking(session.token, b.id);
       setBusy(false);
-      if (r.ok && r.data) {
-        setMsg(`已批准 ✓ 🔑 入場密碼 ${r.data.password}` + (r.data.warn ? `（提示：${r.data.warn}）` : ''));
+      if (r.ok) {
+        setMsg(
+          '已批准 ✓ Teamup 已轉去「確認借用」' +
+          (r.data?.teamupEventId ? `（事件 ${r.data.teamupEventId}）` : '') +
+          (r.data?.warn ? `（提示：${r.data.warn}）` : '')
+        );
         await load(session);
       } else setError(r.error || '批核失敗');
       return;
@@ -68,7 +72,8 @@ export default function VenueRegsPage() {
       <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
       <h1 className="page-title">🏛 場地借用審批</h1>
       <p className="page-sub">
-        批核借場申請（申請人於 member-portal 填表）；<b>批准後自動：設定 TTLock 限時密碼 → Teamup 轉色 → 電郵申請人</b>（統一後台 v4.0）。
+        申請人於 member-portal 填表 → 後台寫入 VenueBookings 並喺 Teamup「申請中」建事件。
+        <b>而家「✅ 批准」只做狀態 + Teamup 轉色</b>；一鍵設密碼／電郵申請人稍後再接。
       </p>
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}

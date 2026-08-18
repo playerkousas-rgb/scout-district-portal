@@ -121,7 +121,10 @@ export const api = {
   getVenueBookings: (token: string): Promise<ApiResult<VenueBooking[]>> => callGet('getVenueBookings', { token }),
   setVenueBookingStatus: (token: string, id: string, status: string): Promise<ApiResult<{ saved: boolean }>> =>
     callPost('setVenueBookingStatus', { token, id, status }),
-  // 完整批核：TTLock 限時密碼 + Teamup 轉色 + 電郵申請人（v4.0 統一後台）
+  // 聯調批核：狀態 approved + Teamup 轉色（唔掂鎖、唔寄密碼）
+  confirmVenueBooking: (token: string, id: string): Promise<ApiResult<{ saved: boolean; teamupEventId?: string; warn: string }>> =>
+    callPost('confirmVenueBooking', { token, id }),
+  // 完整批核：TTLock 限時密碼 + Teamup 轉色 + 電郵申請人（稍後先用）
   approveVenueBooking: (token: string, id: string): Promise<ApiResult<{ saved: boolean; password: string; warn: string }>> =>
     callPost('approveVenueBooking', { token, id }),
   saveVenue: (token: string, venue: Venue): Promise<ApiResult<{ saved: boolean }>> =>

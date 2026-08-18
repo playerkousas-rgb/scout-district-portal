@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.2
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -23,14 +23,19 @@
  *    兩者發出嘅 token 互通，權限各自檢查
  * 6. setupSheets() 改為「補建唔清空」，唔會夾死已有資料
  *
- * ── 借場一條龍（本版：通通鎖 TTLock）─────────────────────
- * 批准（approveVenueBooking）自動：
- *   ① TTLock 設定限時密碼（撞碼自動重試；ttlockDisabled=TRUE → 隨機密碼照跑）
- *   ② Teamup 轉色：有 pending 事件（teamupEventId）就搬去「確認借用」子日曆；
- *      冇就喺「確認借用」子日曆新建事件
- *   ③ 電郵「已批准 + 入場密碼」俾申請人
- * 拒絕/取消：Teamup 建「拒絕」事件（選填子日曆）+ 電郵通知。
+ * ── 借場（分兩步，方便先聯調）──────────────────────────
+ * A. 申請人喺 member-portal 填表 → submitVenueRequest
+ *    寫入 VenueBookings（pending）＋ 喺 Teamup「申請中」子日曆建事件
+ * B. 區職員喺管理系統批核：
+ *    confirmVenueBooking ＝ 狀態改 approved ＋ Teamup 轉去「確認借用」（唔掂鎖）
+ *    approveVenueBooking ＝ 上面嗰步 ＋ TTLock 限時密碼 ＋ 電郵密碼（稍後先用）
+ * 拒絕/取消：Teamup 搬去「拒絕」子日曆（或建事件）+ 電郵通知。
  * Teamup Config 金鑰主用 TEAMUP_*，同時兼容舊欄名 teamup*。
+ *
+ * ── 借物資 ────────────────────────────────────────────
+ * member-portal 填表 → submitStockRequest 寫入 StockRequests（pending）
+ * 管理系統 setStockRequestStatus：批准先扣庫存；拒絕／取消／歸還回補。
+ * 提交欄位兼容 qty/quantity、borrowDate/startDate、items[] 多件。
  *
  * ── 部署 ──────────────────────────────────────────────────
  * 擴充功能 → Apps Script → 貼上本檔 → 執行 setupSheets()
@@ -120,10 +125,13 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.1.1',
+      version: '4.2.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
+      teamupReady: teamupReady_(),
+      teamupPendingSet: !!(teamupCfg_().pendingSub),
+      teamupApprovedSet: !!(teamupCfg_().approvedSub),
     }));
   }
 
@@ -174,8 +182,7 @@ function doGet(e) {
 }
 
 function doPost(e) {
-  var b = {};
-  try { b = JSON.parse(e.postData.contents); } catch (x) {}
+  var b = parsePostBody_(e);
   var action = String(b.action || '');
 
   // ★ API Key 認證
@@ -188,8 +195,10 @@ function doPost(e) {
     switch (action) {
 
       // ---------- 公開提交（成員系統，唔使登入） ----------
-      case 'submitVenueRequest':   return json(submitVenueRequest_(b));
-      case 'submitStockRequest':   return json(submitStockRequest_(b));
+      case 'submitVenueRequest':
+      case 'addVenueRequest':      return json(submitVenueRequest_(b));
+      case 'submitStockRequest':
+      case 'addStockRequest':      return json(submitStockRequest_(b));
       case 'submitActivityNotice': return json(submitActivityNotice_(b));
       case 'submitCourseReg':      return json(submitCourseReg_(b));
 
@@ -202,6 +211,7 @@ function doPost(e) {
       // ---------- 批核（管理系統） ----------
       case 'setVenueBookingStatus': return json(setVenueBookingStatus_(b.token, b.id, b.status));
       case 'setStockRequestStatus': return json(setStockRequestStatus_(b.token, b.id, b.status));
+      case 'confirmVenueBooking':   return json(confirmVenueBooking_(b.token, b.id));
       case 'approveVenueBooking':   return json(approveVenueBooking_(b.token, b.id));
       case 'rejectVenueBooking':    return json(rejectVenueBooking_(b.token, b.id));
       case 'setCourseRegStatus':    return json(setCourseRegStatus_(b.token, b.courseId, b.id, b.status));
@@ -248,6 +258,48 @@ function doPost(e) {
 function ok(data)  { return { ok: true, data: data }; }
 function err(msg)  { return { ok: false, error: msg }; }
 function json(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
+
+/** member-portal 可能用 JSON 或 form POST；兩邊都收 */
+function parsePostBody_(e) {
+  e = e || {};
+  var b = {};
+  if (e.postData && e.postData.contents) {
+    try { b = JSON.parse(e.postData.contents) || {}; } catch (x) { b = {}; }
+  }
+  if ((!b || !b.action) && e.parameter) {
+    var p = e.parameter;
+    if (!b || typeof b !== 'object') b = {};
+    Object.keys(p).forEach(function (k) {
+      if (b[k] === undefined || b[k] === '') b[k] = p[k];
+    });
+  }
+  return b || {};
+}
+
+/** 由多個可能欄名攞第一個有值嘅 */
+function pick_(obj, keys) {
+  obj = obj || {};
+  for (var i = 0; i < keys.length; i++) {
+    var v = obj[keys[i]];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return v;
+  }
+  return '';
+}
+
+/**
+ * 提交成功回應：同時提供 data.refCode 同頂層 refCode，
+ * 方便 member-portal 舊前端 res.refCode / res.data.refCode 都讀到。
+ */
+function okSubmit_(data) {
+  var r = { ok: true, data: data || {} };
+  if (data) {
+    if (data.refCode) r.refCode = data.refCode;
+    if (data.refCodes) r.refCodes = data.refCodes;
+    if (data.teamupEventId) r.teamupEventId = data.teamupEventId;
+    if (data.warn) r.warn = data.warn;
+  }
+  return r;
+}
 
 function sha256_(str) {
   return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, str, Utilities.Charset.UTF_8)
@@ -666,22 +718,51 @@ function deleteVenue_(token, venueId) {
 
 // ===================== 借場：公開提交 =====================
 
+function normalizeVenuePayload_(b) {
+  b = b || {};
+  var start = pick_(b, ['startDate', 'start', 'start_dt', 'startDt', 'from', 'date']);
+  var end = pick_(b, ['endDate', 'end', 'end_dt', 'endDt', 'to']);
+  var startTime = pick_(b, ['startTime', 'fromTime']);
+  var endTime = pick_(b, ['endTime', 'toTime']);
+  if (start && startTime && String(start).indexOf('T') < 0 && !/\d{2}:\d{2}/.test(String(start))) {
+    start = String(start).trim() + 'T' + String(startTime).trim();
+  }
+  if (end && endTime && String(end).indexOf('T') < 0 && !/\d{2}:\d{2}/.test(String(end))) {
+    end = String(end).trim() + 'T' + String(endTime).trim();
+  }
+  if (!end) end = start;
+  return {
+    venueId: String(pick_(b, ['venueId', 'venue_id', 'venue'])).trim(),
+    name: String(pick_(b, ['name', 'applicant', 'applicantName', 'who'])).trim(),
+    phone: String(pick_(b, ['phone', 'tel', 'mobile'])).trim(),
+    email: String(pick_(b, ['email', 'mail'])).trim(),
+    troop: String(pick_(b, ['troop', 'unit', 'group'])).trim(),
+    position: String(pick_(b, ['position', 'rank', 'title'])).trim(),
+    purpose: String(pick_(b, ['purpose', 'reason', 'note', 'remarks'])).trim(),
+    startDate: start,
+    endDate: end,
+    agreeRules: b.agreeRules || b.agree || b.accepted,
+    teamupEventId: String(pick_(b, ['teamupEventId', 'eventId', 'teamup_event_id'])).trim(),
+  };
+}
+
 function submitVenueRequest_(b) {
   if (!isFeature_('venue')) return err('服務暫未開放');
   var g = guardLocked_(); if (g) return g;
-  if (!b.venueId || !b.name || !b.phone) return err('資料不完整');
-  if (!b.startDate || !b.endDate) return err('請填寫借用時段');
-  // 電郵選填；有填就要格式啱（批准後寄入場密碼用）
-  if (b.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(b.email))) return err('電郵格式不正確');
+  var req = normalizeVenuePayload_(b);
+  if (!req.venueId || !req.name || !req.phone) return err('資料不完整（需要場地、姓名、電話）');
+  if (!req.startDate || !req.endDate) return err('請填寫借用時段');
+  if (req.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(req.email))) return err('電郵格式不正確');
 
   var fwd = callService_('VENUE', 'addRequest', b);
   if (fwd) {
-    if (fwd.ok) return ok({ refCode: (fwd.data && fwd.data.refCode) || '' });
+    if (fwd.ok) return okSubmit_({ refCode: (fwd.data && fwd.data.refCode) || fwd.refCode || '' });
     return err(fwd.error || '借場轉發失敗');
   }
 
   var venue = readSheet_(SHEET.VENUES).filter(function (v) {
-    return String(v.venueId).trim() === String(b.venueId).trim();
+    return String(v.venueId).trim() === String(req.venueId).trim()
+      || String(v.name || '').trim() === String(req.venueId).trim();
   })[0];
   if (!venue) return err('場地不存在');
 
@@ -689,21 +770,41 @@ function submitVenueRequest_(b) {
   if (!sh) return err('尚未執行 setupSheets()');
 
   var rid = genId_('vr'), ref = genRef_('VR'), now = new Date().toISOString();
+  var teamupEventId = req.teamupEventId;
+  var warn = '';
+
+  // ★ 填表即喺 Teamup「申請中」子日曆建事件（唔使申請人自己去 Teamup 填）
+  if (!teamupEventId) {
+    try {
+      var created = createPendingTeamupEvent_({
+        venueName: venue.name || req.venueId,
+        venueId: String(venue.venueId).trim(),
+        name: req.name, phone: req.phone, email: req.email,
+        troop: req.troop, purpose: req.purpose, refCode: ref,
+        startDate: req.startDate, endDate: req.endDate,
+      });
+      if (created.ok && created.eventId) teamupEventId = created.eventId;
+      else warn = created.error || 'Teamup 未建立申請事件';
+    } catch (e) {
+      warn = 'Teamup 建立申請事件失敗：' + e.message;
+    }
+  }
+
   appendRowObj_(sh, {
     id: rid, districtCode: districtCode_(), refCode: ref,
     submittedAt: now, createdAt: now,
-    venueId: b.venueId, venueName: venue.name || '',
-    purpose: b.purpose || '', startDate: b.startDate, endDate: b.endDate,
-    name: b.name, phone: b.phone, email: b.email || '',
-    troop: b.troop || '', position: b.position || '',
-    agreeRules: isTrue_(b.agreeRules) ? 'TRUE' : '',
-    status: 'pending', teamupEventId: b.teamupEventId || '', pwdRef: '',
+    venueId: String(venue.venueId).trim(), venueName: venue.name || '',
+    purpose: req.purpose || '', startDate: req.startDate, endDate: req.endDate,
+    name: req.name, phone: req.phone, email: req.email || '',
+    troop: req.troop || '', position: req.position || '',
+    agreeRules: isTrue_(req.agreeRules) ? 'TRUE' : '',
+    status: 'pending', teamupEventId: teamupEventId || '', pwdRef: '',
     reviewer: '', reviewedAt: '',
   });
-  appendRecord_('venue', rid, ref, '🏛 借場：' + (venue.name || b.venueId), b.name, b.phone, b.troop || '', 'pending',
-    b.startDate + ' → ' + b.endDate);
-  notifyStaff_('🏛 新借場申請', '場地：' + (venue.name || b.venueId) + '\n申請人：' + b.name + '（' + b.phone + '）\n' + b.startDate + ' → ' + b.endDate);
-  return ok({ refCode: ref });
+  appendRecord_('venue', rid, ref, '🏛 借場：' + (venue.name || req.venueId), req.name, req.phone, req.troop || '', 'pending',
+    req.startDate + ' → ' + req.endDate);
+  notifyStaff_('🏛 新借場申請', '場地：' + (venue.name || req.venueId) + '\n申請人：' + req.name + '（' + req.phone + '）\n' + req.startDate + ' → ' + req.endDate);
+  return okSubmit_({ refCode: ref, id: rid, teamupEventId: teamupEventId || '', warn: warn });
 }
 
 // ===================== 借場：查閱／批核 =====================
@@ -737,6 +838,32 @@ function setVenueBookingStatus_(token, id, status) {
 }
 
 /**
+ * 聯調批核：只改狀態 + Teamup 轉色，唔掂 TTLock / 唔寄密碼。
+ * 用嚟測試「member 填表 → Teamup 登記 → 呢邊批核」。
+ */
+function confirmVenueBooking_(token, id) {
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
+  var booking = readSheet_(SHEET.VENUE_REQ).filter(function (x) { return String(x.id) === String(id); })[0];
+  if (!booking) return err('找不到申請');
+  if (String(booking.status).toLowerCase() === 'approved') return err('此申請已批核');
+
+  var tup = applyTeamupApproved_(booking, '');
+  var tupMsg = tup.warn || '';
+  var eventId = tup.eventId || booking.teamupEventId || '';
+
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx > 0) {
+    setCellByHeader_(sh, idx, 'status', 'approved');
+    setCellByHeader_(sh, idx, 'reviewer', t.email);
+    setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
+    if (eventId) setCellByHeader_(sh, idx, 'teamupEventId', eventId);
+  }
+  updateRecordStatus_(id, 'approved');
+  return ok({ saved: true, teamupEventId: eventId, warn: tupMsg || '' });
+}
+
+/**
  * 完整批核（一條龍）：TTLock 限時密碼 + Teamup 轉色 + 電郵。
  * - 已有 pending 事件（teamupEventId）→ 搬去「確認借用」子日曆
  * - 冇 → 喺「確認借用」子日曆新建事件
@@ -765,18 +892,9 @@ function approveVenueBooking_(token, id) {
   }
 
   // 2) Teamup 轉色
-  var tupMsg = '';
-  try {
-    if (booking.teamupEventId) {
-      tupMsg = teamupMoveToApproved_(booking.teamupEventId);
-    } else {
-      var ev = createTeamupEvent_(teamupCfg_().approvedSub,
-        (booking.venueName || booking.venueId || '區總部') + '（已批准）',
-        buildTeamupNotes_(booking) + '\n✅ 已批准於 ' + new Date().toLocaleString('zh-HK') + '\n🔑 密碼：' + passcode,
-        toTeamupDt_(booking.startDate, false), toTeamupDt_(booking.endDate || booking.startDate, true));
-      if (!ev.ok) tupMsg = ev.error;
-    }
-  } catch (e) { tupMsg = e.message; }
+  var tup = applyTeamupApproved_(booking, '\n🔑 密碼：' + passcode);
+  var tupMsg = tup.warn || '';
+  if (tup.eventId && !booking.teamupEventId) booking.teamupEventId = tup.eventId;
 
   // 3) 電郵密碼俾申請人
   var mailMsg = '';
@@ -788,6 +906,7 @@ function approveVenueBooking_(token, id) {
     setCellByHeader_(sh, idx, 'passcode', passcode);
     setCellByHeader_(sh, idx, 'reviewer', t.email);
     setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
+    if (booking.teamupEventId) setCellByHeader_(sh, idx, 'teamupEventId', booking.teamupEventId);
   }
   updateRecordStatus_(id, 'approved');
   return ok({ saved: true, password: passcode, warn: [warn, tupMsg, mailMsg].filter(Boolean).join('；') });
@@ -849,53 +968,111 @@ function deleteItem_(token, itemId) {
 
 // ===================== 借物資：公開提交 =====================
 
-function submitStockRequest_(b) {
-  if (!isFeature_('stock')) return err('服務暫未開放');
-  var g = guardLocked_(); if (g) return g;
-  if (!b.itemId || !b.qty || !b.name || !b.phone) return err('資料不完整');
+function normalizeStockApplicant_(b) {
+  b = b || {};
+  return {
+    name: String(pick_(b, ['name', 'applicant', 'applicantName', 'who'])).trim(),
+    phone: String(pick_(b, ['phone', 'tel', 'mobile'])).trim(),
+    email: String(pick_(b, ['email', 'mail'])).trim(),
+    troop: String(pick_(b, ['troop', 'unit', 'group'])).trim(),
+    position: String(pick_(b, ['position', 'rank', 'title'])).trim(),
+    purpose: String(pick_(b, ['purpose', 'reason', 'note', 'remarks'])).trim(),
+    borrowDate: pick_(b, ['borrowDate', 'startDate', 'start', 'date', 'from']),
+    returnDate: pick_(b, ['returnDate', 'endDate', 'end', 'to']),
+    agreeRules: b.agreeRules || b.agree || b.accepted,
+  };
+}
 
-  var fwd = callService_('STOCK', 'addRequest', b);
-  if (fwd) {
-    if (fwd.ok) return ok({ refCode: (fwd.data && fwd.data.refCode) || '' });
-    return err(fwd.error || '借物資轉發失敗');
+function stockLineItems_(b) {
+  var lines = b.items || b.cart || b.lines;
+  if (typeof lines === 'string') {
+    try { lines = JSON.parse(lines); } catch (e) { lines = null; }
   }
+  if (Array.isArray(lines) && lines.length) {
+    return lines.map(function (it) {
+      it = it || {};
+      return {
+        itemId: String(pick_(it, ['itemId', 'item_id', 'id', 'sku'])).trim(),
+        qty: Number(pick_(it, ['qty', 'quantity', 'amount', 'count'])) || 0,
+      };
+    });
+  }
+  var itemId = String(pick_(b, ['itemId', 'item_id', 'item'])).trim();
+  var qty = Number(pick_(b, ['qty', 'quantity', 'amount', 'count'])) || 0;
+  if (itemId) return [{ itemId: itemId, qty: qty }];
+  return [];
+}
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+function submitOneStockLine_(ss, applicant, line) {
   var item = readSheet_(SHEET.ITEMS).filter(function (v) {
-    return String(v.itemId).trim() === String(b.itemId).trim();
+    return String(v.itemId).trim() === String(line.itemId).trim()
+      || String(v.name || '').trim() === String(line.itemId).trim();
   })[0];
-  if (!item) return err('物資不存在');
+  if (!item) return { ok: false, error: '物資不存在：' + line.itemId };
 
-  var qty = Number(b.qty) || 0;
-  if (qty <= 0) return err('數量不正確');
+  var qty = Number(line.qty) || 0;
+  if (qty <= 0) return { ok: false, error: '數量不正確（' + (item.name || line.itemId) + '）' };
   var avail = Number(item.availableQty) || 0;
-  if (qty > avail) return err('數量超出可借數量（可借 ' + avail + '）');
+  if (qty > avail) return { ok: false, error: '「' + item.name + '」數量超出可借數量（可借 ' + avail + '）' };
 
   var sh = ss.getSheetByName(SHEET.STOCK_REQ);
-  if (!sh) return err('尚未執行 setupSheets()');
+  if (!sh) return { ok: false, error: '尚未執行 setupSheets()' };
 
   var rid = genId_('sr'), ref = genRef_('SR'), now = new Date().toISOString();
   appendRowObj_(sh, {
     id: rid, districtCode: districtCode_(), refCode: ref,
     submittedAt: now, createdAt: now,
-    itemId: b.itemId, itemName: item.name || '', category: item.category || '', qty: qty,
-    purpose: b.purpose || '', borrowDate: b.borrowDate || '', returnDate: b.returnDate || '',
-    name: b.name, phone: b.phone, email: b.email || '',
-    troop: b.troop || '', position: b.position || '',
-    agreeRules: isTrue_(b.agreeRules) ? 'TRUE' : '',
+    itemId: String(item.itemId).trim(), itemName: item.name || '', category: item.category || '', qty: qty,
+    purpose: applicant.purpose || '', borrowDate: applicant.borrowDate || '', returnDate: applicant.returnDate || '',
+    name: applicant.name, phone: applicant.phone, email: applicant.email || '',
+    troop: applicant.troop || '', position: applicant.position || '',
+    agreeRules: isTrue_(applicant.agreeRules) ? 'TRUE' : '',
     status: 'pending', reviewer: '', reviewedAt: '',
   });
 
-  // ★ 庫存扣減時機
   if (STOCK_DEDUCT_ON === 'submit') {
-    var iIdx = rowIndexByCol_(ss.getSheetByName(SHEET.ITEMS), 'itemId', String(b.itemId).trim());
+    var iIdx = rowIndexByCol_(ss.getSheetByName(SHEET.ITEMS), 'itemId', String(item.itemId).trim());
     if (iIdx > 0) setCellByHeader_(ss.getSheetByName(SHEET.ITEMS), iIdx, 'availableQty', avail - qty);
   }
 
-  appendRecord_('stock', rid, ref, '📦 借物資：' + item.name, b.name, b.phone, b.troop || '', 'pending',
-    item.name + ' x' + qty + ' · ' + (b.borrowDate || '') + ' → ' + (b.returnDate || ''));
-  notifyStaff_('📦 新借物資申請', '物資：' + item.name + ' x' + qty + '\n申請人：' + b.name + '（' + b.phone + '）\n' + (b.borrowDate || '') + ' → ' + (b.returnDate || ''));
-  return ok({ refCode: ref });
+  appendRecord_('stock', rid, ref, '📦 借物資：' + item.name, applicant.name, applicant.phone, applicant.troop || '', 'pending',
+    item.name + ' x' + qty + ' · ' + (applicant.borrowDate || '') + ' → ' + (applicant.returnDate || ''));
+  return { ok: true, refCode: ref, id: rid, itemName: item.name, qty: qty };
+}
+
+function submitStockRequest_(b) {
+  if (!isFeature_('stock')) return err('服務暫未開放');
+  var g = guardLocked_(); if (g) return g;
+  var applicant = normalizeStockApplicant_(b);
+  var lines = stockLineItems_(b);
+  if (!applicant.name || !applicant.phone) return err('資料不完整（需要姓名、電話）');
+  if (!lines.length) return err('資料不完整（需要物資及數量）');
+
+  var fwd = callService_('STOCK', 'addRequest', b);
+  if (fwd) {
+    if (fwd.ok) return okSubmit_({ refCode: (fwd.data && fwd.data.refCode) || fwd.refCode || '' });
+    return err(fwd.error || '借物資轉發失敗');
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss.getSheetByName(SHEET.STOCK_REQ)) return err('尚未執行 setupSheets()');
+
+  var refs = [], names = [];
+  for (var i = 0; i < lines.length; i++) {
+    var one = submitOneStockLine_(ss, applicant, lines[i]);
+    if (!one.ok) return err(one.error);
+    refs.push(one.refCode);
+    names.push((one.itemName || lines[i].itemId) + ' x' + one.qty);
+  }
+
+  notifyStaff_('📦 新借物資申請',
+    '物資：' + names.join('、') + '\n申請人：' + applicant.name + '（' + applicant.phone + '）\n'
+    + (applicant.borrowDate || '') + ' → ' + (applicant.returnDate || ''));
+  return okSubmit_({
+    refCode: refs[0],
+    refCodes: refs,
+    count: refs.length,
+  });
 }
 
 // ===================== 借物資：查閱／批核（庫存只扣一次） =====================
@@ -942,11 +1119,21 @@ function setStockRequestStatus_(token, id, status) {
   setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
   updateRecordStatus_(id, status);
 
-  if (status === 'approved' && req.email) {
+  if (req.email) {
     try {
-      MailApp.sendEmail(req.email, '✅ 借物資申請已批核',
-        '你申請借用「' + req.itemName + '」x' + req.qty + ' 已獲批核。\n'
-        + '借用期：' + req.borrowDate + ' 至 ' + req.returnDate + '。\n請於約定時間到區總部領取。');
+      var subject = '', body = '';
+      if (status === 'approved') {
+        subject = '✅ 借物資申請已批核';
+        body = '你申請借用「' + req.itemName + '」x' + req.qty + ' 已獲批核。\n'
+          + '借用期：' + (req.borrowDate || '') + ' 至 ' + (req.returnDate || '') + '。\n請於約定時間到區總部領取。\n申請編號：' + (req.refCode || '');
+      } else if (status === 'rejected') {
+        subject = '❌ 借物資申請未獲批准';
+        body = '你申請借用「' + req.itemName + '」x' + req.qty + ' 未獲批准。如有疑問請聯絡區職員。\n申請編號：' + (req.refCode || '');
+      } else if (status === 'returned') {
+        subject = '📥 借物資已登記歸還';
+        body = '你借用的「' + req.itemName + '」x' + req.qty + ' 已登記歸還，多謝。\n申請編號：' + (req.refCode || '');
+      }
+      if (subject) MailApp.sendEmail(req.email, subject, body);
     } catch (e) {}
   }
   return ok({ saved: true });
@@ -1387,13 +1574,59 @@ function buildTeamupNotes_(req) {
     + '\n電郵：' + String(req.email || '') + '\n旅團：' + String(req.troop || '')
     + '\n申請編號：' + String(req.refCode || '') + '\n用途：' + String(req.purpose || '');
 }
-/** 正規化成 Teamup 需要嘅 ISO 起訖時間 */
+/** 正規化成 Teamup 需要嘅 ISO 起訖時間（香港 +08:00） */
 function toTeamupDt_(value, endOfDay) {
   if (!value) return '';
-  var d = new Date(value);
-  if (isNaN(d.getTime())) return String(value);
-  if (endOfDay) { d.setHours(23, 59, 59, 999); }
+  var raw = String(value).trim();
+  if (/[zZ]|[+-]\d{2}:\d{2}$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw + (endOfDay ? 'T23:59:00+08:00' : 'T00:00:00+08:00');
+  }
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}/.test(raw)) {
+    var t = raw.replace(' ', 'T');
+    var parts = t.split('T');
+    var hm = parts[1];
+    if (/^\d:\d{2}/.test(hm)) hm = '0' + hm;
+    if (hm.length === 5) hm += ':00';
+    return parts[0] + 'T' + hm.slice(0, 8) + '+08:00';
+  }
+  var d = new Date(raw);
+  if (isNaN(d.getTime())) return raw;
+  if (endOfDay && raw.indexOf(':') < 0) { d.setHours(23, 59, 59, 999); }
   return d.toISOString();
+}
+
+/** 申請人填表 → 喺「申請中」子日曆建事件 */
+function createPendingTeamupEvent_(req) {
+  var c = teamupCfg_();
+  if (!teamupReady_()) return { ok: false, error: 'Teamup 尚未設定（TEAMUP_API_KEY / TEAMUP_CALENDAR_KEY）' };
+  if (!c.pendingSub) return { ok: false, error: '未設定 TEAMUP_PENDING_SUBCAL_ID（申請中子日曆）' };
+  var title = '【申請】' + (req.venueName || req.venueId || '區總部') + (req.name ? ' · ' + req.name : '');
+  return createTeamupEvent_(c.pendingSub, title, buildTeamupNotes_(req),
+    toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true));
+}
+
+/** 批准：有 pending 事件就搬去確認子日曆；冇就新建。回傳 {warn, eventId} */
+function applyTeamupApproved_(booking, extraNotes) {
+  var out = { warn: '', eventId: String(booking.teamupEventId || '').trim() };
+  try {
+    var extra = extraNotes || '';
+    var stamp = '\n✅ 已批准於 ' + new Date().toLocaleString('zh-HK') + extra;
+    if (out.eventId) {
+      var moved = teamupMoveToApproved_(out.eventId, booking, stamp);
+      if (moved) out.warn = moved;
+    } else {
+      var ev = createTeamupEvent_(teamupCfg_().approvedSub,
+        (booking.venueName || booking.venueId || '區總部') + '（已批准）',
+        buildTeamupNotes_(booking) + stamp,
+        toTeamupDt_(booking.startDate, false), toTeamupDt_(booking.endDate || booking.startDate, true));
+      if (!ev.ok) out.warn = ev.error || 'Teamup 建立確認事件失敗';
+      else out.eventId = ev.eventId || '';
+    }
+  } catch (e) {
+    out.warn = e.message;
+  }
+  return out;
 }
 /** 建立 Teamup 事件到指定子日曆 */
 function createTeamupEvent_(subId, title, notes, startDt, endDt) {
@@ -1411,20 +1644,49 @@ function createTeamupEvent_(subId, title, notes, startDt, endDt) {
   catch (e) { return { ok: true, eventId: '' }; }
 }
 /** 將 pending 事件搬去「確認借用」子日曆（轉色） */
-function teamupMoveToApproved_(eventId) {
+function teamupMoveToApproved_(eventId, booking, extraNotes) {
   var c = teamupCfg_();
-  if (!c.approvedSub || !eventId) return '';
-  var r = teamupApi_('put', c.calendarId + '/events/' + eventId, { subcalendar_ids: [Number(c.approvedSub)] });
+  if (!eventId) return '冇 Teamup 事件 ID';
+  if (!c.approvedSub) return '未設定 TEAMUP_APPROVED_SUBCAL_ID';
+  var cur = teamupApi_('get', c.calendarId + '/events/' + eventId);
+  var ev = cur && cur.event ? cur.event : {};
+  var title = (booking && (booking.venueName || booking.venueId))
+    ? String(booking.venueName || booking.venueId) + '（已批准）'
+    : ((ev.title || '區總部').replace('【申請】', '').replace('（已批准）', '').trim() + '（已批准）');
+  var notes = ev.notes || (booking ? buildTeamupNotes_(booking) : '');
+  if (extraNotes && notes.indexOf(extraNotes) < 0) notes = String(notes || '') + extraNotes;
+  var body = {
+    subcalendar_ids: [Number(c.approvedSub)],
+    title: title,
+    notes: notes,
+    start_dt: ev.start_dt,
+    end_dt: ev.end_dt,
+  };
+  var r = teamupApi_('put', c.calendarId + '/events/' + eventId, body);
   return (r && r.event) ? '' : 'TeamUp 更新失敗';
 }
-/** 拒絕/取消 → 喺「拒絕」子日曆建事件（選填） */
+/** 拒絕/取消：有原事件就搬去拒絕子日曆，否則選填新建 */
 function teamupOnReject_(req, status) {
   if (!teamupReady_()) return;
-  if (!teamupCfg_().rejectedSub) return;
   var label = status === 'cancelled' ? '已取消' : '已拒絕';
   var title = (req.venueName || req.venueId || '區總部') + '（' + label + '）';
   var notes = buildTeamupNotes_(req) + '\n❌ ' + label + '於 ' + new Date().toLocaleString('zh-HK');
-  createTeamupEvent_(teamupCfg_().rejectedSub, title, notes,
+  var c = teamupCfg_();
+  if (req.teamupEventId) {
+    var cur = teamupApi_('get', c.calendarId + '/events/' + req.teamupEventId);
+    var ev = cur && cur.event ? cur.event : {};
+    var body = {
+      subcalendar_ids: c.rejectedSub ? [Number(c.rejectedSub)] : (ev.subcalendar_ids || []),
+      title: title,
+      notes: notes,
+      start_dt: ev.start_dt,
+      end_dt: ev.end_dt,
+    };
+    teamupApi_('put', c.calendarId + '/events/' + req.teamupEventId, body);
+    return;
+  }
+  if (!c.rejectedSub) return;
+  createTeamupEvent_(c.rejectedSub, title, notes,
     toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true));
 }
 
