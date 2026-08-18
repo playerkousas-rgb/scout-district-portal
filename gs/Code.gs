@@ -116,7 +116,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.0.1',
+      version: '4.1.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -342,6 +342,9 @@ function getConfig_() {
     districtCode: districtCode_(),
     theme: getConfigValue_('theme') || '',
     logoText: getConfigValue_('logoText') || '🧭',
+    // FPS QR 製作卡片：綁定區會轉數快戶口
+    fpsAccountName: getConfigValue_('FPS_ACCOUNT_NAME') || '',
+    fpsAccountNumber: getConfigValue_('FPS_ACCOUNT_NUMBER') || '',
   };
 }
 
@@ -2079,6 +2082,7 @@ function blueprint_() {
     P.push(row('activity', opsEdit()));
     P.push(row('incident', ALL_VIEW));
     P.push(row('training', trainingEdit()));
+    P.push(row('fps', ALL_EDIT));
     return P;
   })();
 
@@ -2164,6 +2168,7 @@ function blueprint_() {
       ['activity', '活動知會', '🗓', 'builtin', '/activity-notices', '旅團活動知會記錄', 11, 'TRUE', 'FALSE', 'core', 'done'],
       ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '通報 · 惡劣天氣', 12, 'TRUE', 'FALSE', 'core', 'todo'],
       ['training', '訓練班管理', '🎓', 'builtin', '/training', '開班登記 · 區會目錄', 13, 'TRUE', 'FALSE', 'core', 'done'],
+      ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
 
     { name: SHEET.PERMS, headerColor: '#ede9fe', frozenCols: 1, rows: permRows },
@@ -2271,6 +2276,8 @@ function setupSheets() {
   blueprint_()[0].rows.slice(1).forEach(function (r) { ensureConfigRow_(cfg, r[0], r[1], r[2]); });
 
   seedCourseParams_(ss);
+  ensureCardRows_(ss);
+  ensurePermsRows_(ss);
   protectSensitiveSheets_(ss);
 
   var key = generateApiKey_(ss);
@@ -2289,6 +2296,49 @@ function setupSheets() {
 
   if (key) showKeyDialog_('🔑 你的 API Key（只顯示一次）', key,
     '⚠️ 兩個前端都用呢一個 Key。而家就複製。');
+}
+
+/** 補建缺失卡片（Cards 表）：新版本新增咗卡片時，重跑 setup 就會自動補上，唔會掂已有行 */
+function ensureCardRows_(ss) {
+  var sh = ss.getSheetByName(SHEET.CARDS);
+  if (!sh) return;
+  var existing = {};
+  readSheet_(SHEET.CARDS).forEach(function (c) { existing[String(c.cardId).trim()] = true; });
+  var bp = blueprint_().filter(function (b) { return b.name === SHEET.CARDS; })[0];
+  if (!bp || bp.rows.length < 2) return;
+  var header = bp.rows[0].map(function (h) { return String(h).trim(); });
+  bp.rows.slice(1).forEach(function (r) {
+    var cid = String(r[0]).trim();
+    if (!cid || existing[cid]) return;
+    var obj = {};
+    header.forEach(function (h, j) { obj[h] = r[j] !== undefined ? r[j] : ''; });
+    appendRowObj_(sh, obj);
+  });
+}
+
+/** 補建缺失權限行（Perms 表）：新卡片自動按藍圖角色補權限，唔會掂已有行 */
+function ensurePermsRows_(ss) {
+  var sh = ss.getSheetByName(SHEET.PERMS);
+  if (!sh) return;
+  var v = sh.getDataRange().getValues();
+  if (v.length < 2) return;
+  var header = v[0].map(function (h) { return String(h).trim(); });
+  var existing = {};
+  for (var i = 1; i < v.length; i++) existing[String(v[i][0]).trim()] = true;
+  var bp = blueprint_().filter(function (b) { return b.name === SHEET.PERMS; })[0];
+  if (!bp || bp.rows.length < 2) return;
+  var bpHeader = bp.rows[0].map(function (h) { return String(h).trim(); });
+  bp.rows.slice(1).forEach(function (r) {
+    var cid = String(r[0]).trim();
+    if (!cid || existing[cid]) return;
+    var newRow = [cid];
+    for (var c = 1; c < header.length; c++) {
+      var role = header[c];
+      var bi = bpHeader.indexOf(role);
+      newRow.push(bi > 0 && bi < r.length ? r[bi] : '');
+    }
+    sh.appendRow(newRow);
+  });
 }
 
 /** 建立新表（每行長度可以唔同，自動補空白） */
