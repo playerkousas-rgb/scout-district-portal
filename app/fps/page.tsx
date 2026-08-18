@@ -152,6 +152,7 @@ export default function FpsPage() {
         </div>
         <p style={{ fontSize: 12.5, color: '#888', margin: '8px 0 0' }}>
           * 銀碼留空 = 生成「靜態 QR」（由付款人自填銀碼）。有填銀碼 = 動態 QR，付款人唔使再打銀碼。
+          <br />備註建議用簡短英文／數字（部分銀行 app 對中文備註支援不一）。
         </p>
       </section>
 
