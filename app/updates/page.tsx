@@ -5,6 +5,13 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.0.1 — 訓練班報名修正</h3>
+        <ul>
+          <li>轉發報名 payload 補回「附加資料」欄（extra），每班收表 Script 現在會如常收到</li>
+          <li>報名時後端重新檢查截止日期（deadline）：截止後直接 POST 亦會被拒絕，唔再淨係靠前端過濾</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.0 — 統一後台</h3>
         <ul>
           <li>管理系統 + 成員系統共用一張 Sheet、一份 Code.gs、一個 /exec、一個 API Key</li>

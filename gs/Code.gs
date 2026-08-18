@@ -116,7 +116,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.0',
+      version: '4.0.1',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -1124,9 +1124,12 @@ function submitCourseReg_(b) {
   if (!b.memberType && !b.section) return err('請選擇所屬支部');
   if (!b.receiptDataUrl) return err('請上傳入數紙截圖。未繳費將不獲處理申請');
 
+  var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   var link = readSheet_(SHEET.COURSE_LINKS).filter(function (x) {
+    var dl = String(x.deadline || '').trim();
     return String(x.courseId).trim() === String(b.courseId).trim()
-      && String(x.active).toUpperCase() !== 'FALSE';
+      && String(x.active).toUpperCase() !== 'FALSE'
+      && (!dl || dl >= today);
   })[0];
   if (!link) return err('找不到此訓練班或已截止報名');
 
@@ -1144,6 +1147,7 @@ function submitCourseReg_(b) {
     memberType: b.memberType || '', section: link.section || '', badgeCode: link.badgeCode || '',
     scoutDistrict: b.scoutDistrict || '', region: b.region || '', troop: b.troop || '',
     scoutId: b.scoutId || '', scoutPosition: b.scoutPosition || '',
+    extra: b.extra || '',
     guardianConsent: b.guardianConsent || '', guardianName: b.guardianName || '',
     guardianRelation: b.guardianRelation || '', guardianEmail: b.guardianEmail || '',
     guardianPhone: b.guardianPhone || '',
