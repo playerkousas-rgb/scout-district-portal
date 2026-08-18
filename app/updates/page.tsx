@@ -5,6 +5,13 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.1.1 — FPS 戶口內建 + 清理規則 URL</h3>
+        <ul>
+          <li>FPS QR 卡片內建區會戶口（SCOUT ASSOCIATION OF HONG KONG - SHAU KEI WAN DISTRICT / 102866183），Config 可覆蓋</li>
+          <li>移除後台 VENUE_RULES_URL / VENUE_TERMS_URL / STOCK_RULES_URL（成員系統已內建，後台唔使再轉發）</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.1.0 — FPS QR 製作卡片</h3>
         <ul>
           <li>新增「💳 FPS QR 製作」卡片：綁定區會轉數快戶口（Config 的 FPS_ACCOUNT_NAME / FPS_ACCOUNT_NUMBER），填銀碼即生成收款 QR，可下載 PNG／複製內容</li>

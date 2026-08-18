@@ -105,6 +105,10 @@ var DEFAULT_STOCK_RULES =
 
 var DEFAULT_TROOP_LIST = '';
 
+// ★ 轉數快收款戶口（FPS QR 製作預設值；其他區部署時請喺 Config 覆蓋）
+var DEFAULT_FPS_ACCOUNT_NAME = 'SCOUT ASSOCIATION OF HONG KONG - SHAU KEI WAN DISTRICT';
+var DEFAULT_FPS_ACCOUNT_NUMBER = '102866183';
+
 // ===================== HTTP 入口 =====================
 
 function doGet(e) {
@@ -116,7 +120,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.1.0',
+      version: '4.1.1',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -342,9 +346,9 @@ function getConfig_() {
     districtCode: districtCode_(),
     theme: getConfigValue_('theme') || '',
     logoText: getConfigValue_('logoText') || '🧭',
-    // FPS QR 製作卡片：綁定區會轉數快戶口
-    fpsAccountName: getConfigValue_('FPS_ACCOUNT_NAME') || '',
-    fpsAccountNumber: getConfigValue_('FPS_ACCOUNT_NUMBER') || '',
+    // FPS QR 製作卡片：綁定區會轉數快戶口（Config 未填會用內建預設）
+    fpsAccountName: getConfigValue_('FPS_ACCOUNT_NAME') || DEFAULT_FPS_ACCOUNT_NAME,
+    fpsAccountNumber: getConfigValue_('FPS_ACCOUNT_NUMBER') || DEFAULT_FPS_ACCOUNT_NUMBER,
   };
 }
 
@@ -362,14 +366,11 @@ function getPublicInfo_() {
     locked: getSystemState_().locked,
     lockMessage: getSystemState_().lockMessage,
     teamupBookingUrl: getConfigValue_('TEAMUP_BOOKING_URL') || '',
-    fpsAccountName: getConfigValue_('FPS_ACCOUNT_NAME') || '',
-    fpsAccountNumber: getConfigValue_('FPS_ACCOUNT_NUMBER') || '',
+    fpsAccountName: getConfigValue_('FPS_ACCOUNT_NAME') || DEFAULT_FPS_ACCOUNT_NAME,
+    fpsAccountNumber: getConfigValue_('FPS_ACCOUNT_NUMBER') || DEFAULT_FPS_ACCOUNT_NUMBER,
     venueRules: getConfigValue_('VENUE_RULES') || DEFAULT_VENUE_RULES,
-    venueRulesUrl: getConfigValue_('VENUE_RULES_URL') || '',
-    venueTermsUrl: getConfigValue_('VENUE_TERMS_URL') || '',
     cctvUrl: getConfigValue_('CCTV_URL') || '',
     stockRules: getConfigValue_('STOCK_RULES') || DEFAULT_STOCK_RULES,
-    stockRulesUrl: getConfigValue_('STOCK_RULES_URL') || '',
     troopList: getTroopList_(),
     features: FEATURE,
   };
@@ -2113,14 +2114,11 @@ function blueprint_() {
       ['notifyFrom', '', '電郵寄件人名稱（預設用區名）'],
       ['approverEmail', '', '(選填) 收待審批通知信職員'],
       // 付款 / 規定
-      ['FPS_ACCOUNT_NAME', '', '轉數快戶口名'],
-      ['FPS_ACCOUNT_NUMBER', '', '轉數快號碼'],
+      ['FPS_ACCOUNT_NAME', DEFAULT_FPS_ACCOUNT_NAME, '轉數快戶口名'],
+      ['FPS_ACCOUNT_NUMBER', DEFAULT_FPS_ACCOUNT_NUMBER, '轉數快號碼'],
       ['VENUE_RULES', '', '借場規定（留空用內建）'],
-      ['VENUE_RULES_URL', '', '借場規則 PDF'],
-      ['VENUE_TERMS_URL', '', '場地使用條件 PDF'],
       ['CCTV_URL', '', '閉路電視指引 PDF'],
       ['STOCK_RULES', '', '借物資規定（留空用內建）'],
-      ['STOCK_RULES_URL', '', '借物資規定 PDF'],
       // 服務轉發（留空 = 寫入本表）
       ['STOCK_SCRIPT_URL', '', '【借物資】外部收表 Script（留空=寫入本表）'],
       ['STOCK_SCRIPT_APIKEY', '', ''],

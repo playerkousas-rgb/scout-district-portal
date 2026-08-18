@@ -39,6 +39,7 @@
 | 電郵 | `notifyFrom` | 寄件人名稱（預設用區名） |
 
 > 唔記得 Key 喺邊度攞 → 睇 [`docs/keys-checklist.md`](docs/keys-checklist.md) 逐條倒返出嚟＋驗證。
+> ℹ️ 借場/借物資規則（VENUE_RULES_URL / VENUE_TERMS_URL / STOCK_RULES_URL）已改由成員系統內建，後台唔使再填。
 
 ### 第 3 步：加場地
 - 「Venues」工作表加一行（`venueId` 代碼 + `name` 名稱），或直接喺平台 `/venue-regs` 頁底「＋ 新增場地」。
@@ -65,7 +66,8 @@
 
 ## 💳 FPS QR 製作（v4.1.0 新卡片）
 
-喺 Google Sheet 嘅 Config 表填兩格：
+收款戶口已內建預設：**SCOUT ASSOCIATION OF HONG KONG - SHAU KEI WAN DISTRICT**（FPS ID `102866183`），唔填 Config 都用到。
+要換戶口先喺 Google Sheet 嘅 Config 表改：
 - `FPS_ACCOUNT_NAME`：區會轉數快戶口名（顯示用）
 - `FPS_ACCOUNT_NUMBER`：轉數快收款識別碼（FPS ID：電話 / 電郵 / FPS 帳號）
 

@@ -39,6 +39,12 @@ function buildFpsPayload(fpsId: string, amount: string, ref: string): string {
   return s + '6304' + crc16(s + '6304');                           // CRC
 }
 
+// 區會轉數快戶口（內建預設；後台 Config 有填會優先覆蓋）
+const DEFAULT_FPS_ACCOUNT = {
+  name: 'SCOUT ASSOCIATION OF HONG KONG - SHAU KEI WAN DISTRICT',
+  id: '102866183',
+};
+
 export default function FpsPage() {
   const router = useRouter();
   const { withDistrict } = useDistrict();
@@ -57,8 +63,8 @@ export default function FpsPage() {
     if (!session) return;
     api.getConfig().then(r => {
       if (r.ok && r.data) {
-        setAccountName(r.data.fpsAccountName || '');
-        setFpsId(r.data.fpsAccountNumber || '');
+        setAccountName(r.data.fpsAccountName || DEFAULT_FPS_ACCOUNT.name);
+        setFpsId(r.data.fpsAccountNumber || DEFAULT_FPS_ACCOUNT.id);
       }
       setCfgLoaded(true);
     });
@@ -121,8 +127,8 @@ export default function FpsPage() {
           </div>
         )}
         <p style={{ fontSize: 12.5, color: '#888', margin: '6px 0 0' }}>
-          ⚙️ 呢度讀取自後台 Config 嘅 <code>FPS_ACCOUNT_NAME</code> / <code>FPS_ACCOUNT_NUMBER</code>，
-          要改戶口去 Google Sheet 嘅 Config 表改。
+          ⚙️ 預設綁定區會戶口（SCOUT ASSOCIATION OF HONG KONG - SHAU KEI WAN DISTRICT）。
+          要換戶口，去 Google Sheet 嘅 Config 表改 <code>FPS_ACCOUNT_NAME</code> / <code>FPS_ACCOUNT_NUMBER</code>。
         </p>
       </section>
 
