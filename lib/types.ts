@@ -37,6 +37,7 @@ export interface UserSession {
   roleLabel: string;
   isAdmin: boolean;       // 可進管理頁（DC / SYSADMIN）
   isDC: boolean;          // 是否區總監（最高，可改 SYSADMIN）
+  canManageAccounts?: boolean; // DDC 或以上：可開區長／區領袖／助理區領袖
   scopes: string[];
   token: string;
 }

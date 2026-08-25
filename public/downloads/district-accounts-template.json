@@ -1,0 +1,26 @@
+[
+  {
+    "displayName": "陳一鳴",
+    "email": "dl.scout1@example.com",
+    "role": "DL",
+    "password": "ChangeMe2026",
+    "scopes": "scout",
+    "cards": ""
+  },
+  {
+    "displayName": "李二華",
+    "email": "leader.cubs@example.com",
+    "role": "LEADER",
+    "password": "ChangeMe2026",
+    "scopes": "cubs",
+    "cards": ""
+  },
+  {
+    "displayName": "黃三",
+    "email": "al.example@example.com",
+    "role": "AL",
+    "password": "ChangeMe2026",
+    "scopes": "",
+    "cards": ""
+  }
+]
