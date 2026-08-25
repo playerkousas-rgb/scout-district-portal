@@ -142,15 +142,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-<<<<<<< HEAD
-<<<<<<< HEAD
-      version: '4.2.0',
-=======
-      version: '4.2.1',
->>>>>>> eb0d74e (feat: DDC 以上批量開戶模版（只准開區長／區領袖／助理區領袖）)
-=======
       version: '4.2.2',
->>>>>>> 673001f (feat: Sciener Lock ID 放 Config 一列，審批頁可讀鎖列表填入)
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
