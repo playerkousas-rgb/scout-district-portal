@@ -2547,8 +2547,7 @@ function blueprint_() {
       ['ttlockLockId', '', '（舊名）等同 SCIENER_LOCK_ID'],
       ['ttlockApiBase', '', '（舊名）等同 SCIENER_API_BASE'],
       ['ttlockDisabled', '', 'TRUE = 跳過寫鎖，改用模擬密碼'],
-      ['notifyFrom', '', '電郵寄件人名稱（預設用區名）'],
-      ['approverEmail', '', '(選填) 收待審批通知信職員'],
+      ['notifyFrom', '', '寄件人顯示名稱（不是 Gmail 地址；留空用區名）'],
       // 付款 / 規定
       ['FPS_ACCOUNT_NAME', DEFAULT_FPS_ACCOUNT_NAME, '轉數快戶口名'],
       ['FPS_ACCOUNT_NUMBER', DEFAULT_FPS_ACCOUNT_NUMBER, '轉數快號碼'],

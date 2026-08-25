@@ -58,7 +58,9 @@ node get-lock-id.js
 ## C. 其他（可選）
 | Config 欄位 | 說明 |
 |---|---|
-| `notifyFrom` | 電郵寄件人名稱（唔填就預設用區名） |
+| `NOTIFY_STAFF_EMAIL` | 新申請通知收件人（可多個，以逗號分隔） |
+| `notifyFrom` | 選填：電郵寄件人顯示名稱（唔填就預設用區名，不是 Gmail 地址） |
+| `approverEmail` | 不用填；現行 Code.gs 沒有使用 |
 | `ttlockDisabled` | 留空。想先跳過 TTLock 先跑其餘流程就填 `TRUE` |
 
 ---

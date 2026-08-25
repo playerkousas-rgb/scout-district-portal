@@ -27,6 +27,8 @@
 5. **部署 → 新增部署 → 網頁應用程式**（執行身分：我自己；存取：**任何人**）→ 攞 `/exec` 網址。
 
 ### 第 2 步：填 Config 金鑰（喺「Config」工作表）
+
+> **簡潔版設定表：** 請先看 [`docs/config-simple.md`](docs/config-simple.md)。電郵只需填 `NOTIFY_STAFF_EMAIL`；`notifyFrom` 只是顯示名稱，`approverEmail` 現行不用填。
 | 區塊 | 欄位 | 備註 |
 |---|---|---|
 | Teamup | `TEAMUP_API_KEY` | 兼容舊欄名 `teamupApiKey` |
