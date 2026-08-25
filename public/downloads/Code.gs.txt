@@ -142,11 +142,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-<<<<<<< HEAD
-      version: '4.2.0',
-=======
       version: '4.2.1',
->>>>>>> eb0d74e (feat: DDC 以上批量開戶模版（只准開區長／區領袖／助理區領袖）)
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
