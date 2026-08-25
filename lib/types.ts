@@ -133,6 +133,7 @@ export interface Venue {
   capacity?: string;
   note?: string;
   active?: string;
+  scienerLockId?: string; // 呢個場地嘅 Sciener/TTLock Lock ID（數字）
 }
 export interface VenueBooking {
   id: string;

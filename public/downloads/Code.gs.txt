@@ -142,7 +142,15 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
+<<<<<<< HEAD
+<<<<<<< HEAD
+      version: '4.2.0',
+=======
       version: '4.2.1',
+>>>>>>> eb0d74e (feat: DDC 以上批量開戶模版（只准開區長／區領袖／助理區領袖）)
+=======
+      version: '4.2.2',
+>>>>>>> 673001f (feat: Sciener Lock ID 放 Config 一列，審批頁可讀鎖列表填入)
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -181,6 +189,7 @@ function doGet(e) {
       case 'getRegistry':         return json(getRegistry_(p.token));
       case 'getCourseLinks':      return json(getCourseLinks_(p.token));
       case 'getVenueBookings':    return json(getVenueBookings_(p.token));
+      case 'getLockList':         return json(getLockList_(p.token));
       case 'getStockRequests':    return json(getStockRequests_(p.token));
       case 'getActivityNotices':  return json(getActivityNotices_(p.token));
       case 'getAllRecords':       return json(getAllRecords_(p.token));
@@ -705,6 +714,7 @@ function listVenues_() {
       return {
         venueId: String(v.venueId).trim(), name: v.name || '',
         location: v.location || '', capacity: v.capacity || '', note: v.note || '',
+        scienerLockId: v.scienerLockId || '',
       };
     });
 }
@@ -907,7 +917,14 @@ function approveVenueBooking_(token, id) {
   var warn = '';
   if (!passcode) {
     try {
-      var pc = createTtlockPasscode_(booking.phone || '0000', booking.startDate, booking.endDate || booking.startDate, booking.name || '申請人');
+      var venueLock = '';
+      try {
+        var vrow = readSheet_(SHEET.VENUES).filter(function (v) {
+          return String(v.venueId).trim() === String(booking.venueId || '').trim();
+        })[0];
+        venueLock = vrow ? String(vrow.scienerLockId || '').trim() : '';
+      } catch (x) { venueLock = ''; }
+      var pc = createTtlockPasscode_(booking.phone || '0000', booking.startDate, booking.endDate || booking.startDate, booking.name || '申請人', venueLock);
       passcode = pc.passcode;
     } catch (e) {
       console.error('TTLock 建碼失敗，改用隨機密碼：' + e.message);
@@ -1505,21 +1522,43 @@ function md5_(s) {
   return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, s, Utilities.Charset.UTF_8)
     .map(function (b) { var v = (b < 0 ? b + 256 : b).toString(16); return v.length === 1 ? '0' + v : v; }).join('');
 }
+function cfgFirst_() {
+  for (var i = 0; i < arguments.length; i++) {
+    var v = getConfigValue_(arguments[i]);
+    if (v) return String(v).trim();
+  }
+  return '';
+}
+/** Sciener / TTLock 共用：Config 主用 SCIENER_*，兼容 ttlock* */
+function lockCfg_() {
+  return {
+    clientId: cfgFirst_('SCIENER_CLIENT_ID', 'ttlockClientId'),
+    clientSecret: cfgFirst_('SCIENER_CLIENT_SECRET', 'ttlockClientSecret'),
+    username: cfgFirst_('SCIENER_USERNAME', 'ttlockUsername'),
+    password: cfgFirst_('SCIENER_PASSWORD', 'ttlockPassword'),
+    lockId: cfgFirst_('SCIENER_LOCK_ID', 'ttlockLockId'),
+    apiBase: cfgFirst_('SCIENER_API_BASE', 'ttlockApiBase'),
+    pwdMode: cfgFirst_('PWD_MODE', 'pwdMode') || 'phone4',
+  };
+}
 function ttlockBase_() {
-  var b = getConfigValue_('ttlockApiBase') || 'https://api.ttlock.com';
-  return String(b).replace(/\/+$/, '');
+  var b = lockCfg_().apiBase || 'https://api.sciener.com';
+  b = String(b).replace(/\/+$/, '');
+  // 開放平台網站 ≠ API；自動改去正確主機
+  if (/^https?:\/\/(www\.)?open\.sciener\.com$/i.test(b)) return 'https://api.sciener.com';
+  if (/^https?:\/\/(www\.)?open\.ttlock\.com$/i.test(b)) return 'https://api.ttlock.com';
+  return b;
 }
 function ttlockDisabled_() { return String(getConfigValue_('ttlockDisabled')).toUpperCase() === 'TRUE'; }
 function ttlockToken_() {
-  var clientId = getConfigValue_('ttlockClientId');
-  var secret = getConfigValue_('ttlockClientSecret');
-  var user = getConfigValue_('ttlockUsername');
-  var pw = getConfigValue_('ttlockPassword');
-  if (!clientId || !secret || !user || !pw) throw new Error('未設定 TTLock Config（ttlockClientId/Secret/Username/Password）');
-  var payload = { client_id: clientId, client_secret: secret, username: user, password: md5_(pw), grant_type: 'password' };
+  var c = lockCfg_();
+  if (!c.clientId || !c.clientSecret || !c.username || !c.password) {
+    throw new Error('未設定電子鎖 Config（SCIENER_CLIENT_ID/SECRET/USERNAME/PASSWORD 或 ttlock*）');
+  }
+  var payload = { client_id: c.clientId, client_secret: c.clientSecret, username: c.username, password: md5_(c.password), grant_type: 'password' };
   var res = UrlFetchApp.fetch(ttlockBase_() + '/oauth2/token', { method: 'post', payload: payload, muteHttpExceptions: true });
   var data = JSON.parse(res.getContentText());
-  if (!data.access_token) throw new Error('TTLock 登入失敗 ' + JSON.stringify(data));
+  if (!data.access_token) throw new Error('Sciener/TTLock 登入失敗 ' + JSON.stringify(data));
   return data.access_token;
 }
 
@@ -1534,17 +1573,58 @@ function genPasscode_() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-/** 建立 TTLock 限時密碼；ttlockDisabled=TRUE 時返回模擬密碼，其餘流程照跑 */
-function createTtlockPasscode_(phone, startDate, endDate, name) {
-  if (ttlockDisabled_()) return { passcode: genPasscode_(), simulated: true };
+/** phone4=電話頭4位（你而家用緊）；phone4tail=尾4位；random=隨機6位 */
+function buildKeyboardPwd_(phone) {
+  var mode = String(lockCfg_().pwdMode || 'phone4').toLowerCase();
+  var digits = String(phone || '').replace(/\D/g, '');
+  if (mode === 'phone4' || mode === 'phone4head') return (digits + '0000').slice(0, 4);
+  if (mode === 'phone4tail') return digits.length >= 4 ? digits.slice(-4) : ('0000' + digits).slice(-4);
+  return genPasscode_();
+}
+
+/** 從 Sciener 撈鎖列表，方便抄 Lock ID 填入 Config */
+function getLockList_(token) {
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  try {
+    var access = ttlockToken_();
+    var c = lockCfg_();
+    var res = UrlFetchApp.fetch(ttlockBase_() + '/v3/lock/list', {
+      method: 'post',
+      payload: { clientId: c.clientId, accessToken: access, pageNo: '1', pageSize: '50', date: String(Date.now()) },
+      muteHttpExceptions: true,
+    });
+    var data = {};
+    try { data = JSON.parse(res.getContentText()); } catch (e) { data = {}; }
+    if (!data.list) return err('讀鎖列表失敗：' + res.getContentText());
+    return ok({
+      apiBase: ttlockBase_(),
+      configuredLockId: c.lockId,
+      locks: data.list.map(function (lock) {
+        return {
+          lockId: lock.lockId,
+          name: lock.lockAlias || lock.lockName || '',
+          mac: lock.lockMac || '',
+          hasGateway: lock.hasGateway === 1 || lock.hasGateway === true,
+        };
+      }),
+    });
+  } catch (e) {
+    return err(String(e.message || e));
+  }
+}
+
+/** 建立限時密碼；ttlockDisabled=TRUE 時返回模擬密碼，其餘流程照跑 */
+function createTtlockPasscode_(phone, startDate, endDate, name, venueLockId) {
+  if (ttlockDisabled_()) return { passcode: buildKeyboardPwd_(phone), simulated: true };
   var token = ttlockToken_();
-  var lockId = getConfigValue_('ttlockLockId');
-  var clientId = getConfigValue_('ttlockClientId');
-  if (!lockId) throw new Error('未設定 ttlockLockId（Config）或設 ttlockDisabled=TRUE 先跳過');
+  var c = lockCfg_();
+  var lockId = String(venueLockId || '').trim() || c.lockId;
+  var clientId = c.clientId;
+  if (!lockId) throw new Error('未設定 SCIENER_LOCK_ID / ttlockLockId（Config 工作表 key 欄），或喺場地填 Lock ID');
   var base = ttlockBase_();
   var start = new Date(startDate); start.setMinutes(start.getMinutes() - 15);
   var end = new Date(endDate); end.setMinutes(end.getMinutes() + 15);
-  var passcode = genPasscode_();
+  var passcode = buildKeyboardPwd_(phone);
   var lastErr = null;
   for (var attempt = 0; attempt < 8; attempt++) {
     var payload = {
@@ -1557,7 +1637,7 @@ function createTtlockPasscode_(phone, startDate, endDate, name) {
     var data; try { data = JSON.parse(res.getContentText()); } catch (e) { data = {}; }
     if (data.keyboardPwdId || data.errcode === 0) return { passcode: passcode, validFrom: start, validTo: end };
     lastErr = data;
-    passcode = String(parseInt(passcode, 10) + 1).padStart(6, '0'); // 撞碼 +1 重試
+    passcode = String(parseInt(passcode, 10) + 1).padStart(String(passcode).length, '0'); // 撞碼 +1 重試
   }
   throw new Error('TTLock 建碼多次失敗 ' + (lastErr.errmsg || JSON.stringify(lastErr)));
 }
@@ -2401,13 +2481,20 @@ function blueprint_() {
       ['TEAMUP_APPROVED_SUBCAL_ID', '', '紅色（已批）子日曆（兼容舊 teamupApprovedSubId）'],
       ['TEAMUP_REJECTED_SUBCAL_ID', '', '(選填) 拒絕子日曆（兼容舊 teamupRejectedSubId）'],
       ['TEAMUP_BOOKING_URL', '', '公開登記連結'],
-      ['ttlockClientId', '', '通通鎖 TTLock Client ID'],
-      ['ttlockClientSecret', '', 'TTLock Client Secret'],
-      ['ttlockUsername', '', 'TTLock App 登入帳號'],
-      ['ttlockPassword', '', 'TTLock App 登入密碼'],
-      ['ttlockLockId', '', '大門鎖 Lock ID'],
-      ['ttlockApiBase', 'https://api.ttlock.com', 'TTLock 區域 server（global/eu/cn）'],
-      ['ttlockDisabled', '', 'TRUE = 跳過 TTLock，改用隨機密碼（聯調用）'],
+      ['SCIENER_CLIENT_ID', '', 'Sciener 開放平台 app_id（兼容 ttlockClientId）'],
+      ['SCIENER_CLIENT_SECRET', '', 'Sciener app_secret（兼容 ttlockClientSecret）'],
+      ['SCIENER_USERNAME', '', '管鎖帳號（lock2.sciener.com / App，唔係開放平台帳）'],
+      ['SCIENER_PASSWORD', '', '管鎖密碼'],
+      ['SCIENER_LOCK_ID', '', '大門 Lock ID（數字；Config 係「一列 key」唔係欄。可用審批頁「讀取鎖列表」）'],
+      ['SCIENER_API_BASE', 'https://api.sciener.com', 'API 主機（唔好填 open.sciener.com 網站）'],
+      ['PWD_MODE', 'phone4', 'phone4=電話頭4位；phone4tail=尾4位；random=隨機6位'],
+      ['ttlockClientId', '', '（舊名）等同 SCIENER_CLIENT_ID'],
+      ['ttlockClientSecret', '', '（舊名）等同 SCIENER_CLIENT_SECRET'],
+      ['ttlockUsername', '', '（舊名）等同 SCIENER_USERNAME'],
+      ['ttlockPassword', '', '（舊名）等同 SCIENER_PASSWORD'],
+      ['ttlockLockId', '', '（舊名）等同 SCIENER_LOCK_ID'],
+      ['ttlockApiBase', '', '（舊名）等同 SCIENER_API_BASE'],
+      ['ttlockDisabled', '', 'TRUE = 跳過寫鎖，改用模擬密碼'],
       ['notifyFrom', '', '電郵寄件人名稱（預設用區名）'],
       ['approverEmail', '', '(選填) 收待審批通知信職員'],
       // 付款 / 規定

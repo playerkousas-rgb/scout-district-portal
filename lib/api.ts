@@ -118,6 +118,11 @@ export const api = {
 
   // 借場（申請由 member-portal 公開端提交；呢度只做批核）
   listVenues: (): Promise<ApiResult<Venue[]>> => callGet('listVenues'),
+  getLockList: (token: string): Promise<ApiResult<{
+    apiBase: string;
+    configuredLockId: string;
+    locks: { lockId: number | string; name: string; mac: string; hasGateway: boolean }[];
+  }>> => callGet('getLockList', { token }),
   getVenueBookings: (token: string): Promise<ApiResult<VenueBooking[]>> => callGet('getVenueBookings', { token }),
   setVenueBookingStatus: (token: string, id: string, status: string): Promise<ApiResult<{ saved: boolean }>> =>
     callPost('setVenueBookingStatus', { token, id, status }),

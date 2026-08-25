@@ -18,7 +18,9 @@ export default function VenueRegsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
-  const [vDraft, setVDraft] = useState<Venue>({ venueId: '', name: '', location: '', capacity: '', note: '', active: 'TRUE' });
+  const [vDraft, setVDraft] = useState<Venue>({ venueId: '', name: '', location: '', capacity: '', note: '', scienerLockId: '', active: 'TRUE' });
+  const [locks, setLocks] = useState<{ lockId: number | string; name: string; mac: string; hasGateway: boolean }[]>([]);
+  const [lockHint, setLockHint] = useState('');
 
   async function load(s: UserSession) {
     setLoading(true); setError('');
@@ -56,8 +58,25 @@ export default function VenueRegsPage() {
     setError(''); setMsg('');
     if (!vDraft.venueId.trim() || !vDraft.name.trim()) { setError('場地代碼與名稱必填'); return; }
     const r = await api.saveVenue(session.token, vDraft);
-    if (r.ok) { setMsg('場地已儲存 ✓'); setVDraft({ venueId: '', name: '', location: '', capacity: '', note: '', active: 'TRUE' }); await load(session); }
+    if (r.ok) { setMsg('場地已儲存 ✓'); setVDraft({ venueId: '', name: '', location: '', capacity: '', note: '', scienerLockId: '', active: 'TRUE' }); await load(session); }
     else setError(r.error || '儲存失敗');
+  }
+  async function loadLocks() {
+    if (!session) return;
+    setBusy(true); setError(''); setLockHint('');
+    const r = await api.getLockList(session.token);
+    setBusy(false);
+    if (!r.ok || !r.data) { setError(r.error || '讀取鎖列表失敗（請確認 Config 已填 SCIENER 帳密）'); return; }
+    setLocks(r.data.locks || []);
+    setLockHint(
+      `API：${r.data.apiBase}` +
+      (r.data.configuredLockId ? ` · Config 已填 Lock ID ${r.data.configuredLockId}` : ' · Config 尚未填 SCIENER_LOCK_ID')
+    );
+    setMsg(`讀到 ${r.data.locks?.length || 0} 把鎖。點「填入」寫入場地／記住去 Config 加一列 key=SCIENER_LOCK_ID`);
+  }
+  function useLockId(id: string | number) {
+    setVDraft(d => ({ ...d, scienerLockId: String(id) }));
+    setMsg(`已填入場地 Lock ID：${id}。儲存場地後生效。整區共用亦可喺 Config 加 key=SCIENER_LOCK_ID、value=${id}`);
   }
   async function delVenue(v: Venue) {
     if (!session || !confirm(`確定刪除場地「${v.name}」？`)) return;
