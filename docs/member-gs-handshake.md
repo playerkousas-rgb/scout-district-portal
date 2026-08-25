@@ -1,4 +1,4 @@
-# member-portal ↔ 統一後台（GS）對接合約 v4.2
+# member-portal ↔ 統一後台（GS）對接合約 v4.2.3
 
 兩邊共用同一份 `gs/Code.gs`、同一張 Sheet、同一個 `/exec` + API Key。
 
@@ -57,12 +57,14 @@ member-portal 填表
              （Teamup 失敗唔擋收表，warn 會回傳）
         │
         ▼
-區職員 /venue-regs → confirmVenueBooking
-   狀態 → approved
-   Teamup 事件搬去「確認借用」子日曆（轉色）
+區職員 /venue-regs
+   DDC+ → approveVenueBooking（一鍵：鎖密碼 + Teamup 轉色 + 電郵；鎖失敗 fallback 密碼）
+   其他有權限 → confirmVenueBooking（狀態 + Teamup，唔掂鎖）
+   拒絕 → rejectVenueBooking
+   編輯內容 → updateVenueBooking（而家只改 Sheet，未同步 Teamup 時段）
 ```
 
-**未做（你話稍後）**：`approveVenueBooking` 一鍵 TTLock 限時密碼 + 電郵密碼俾申請人。函式留低，而家批准掣唔會行呢條。
+**已接前端（4.2.3）**：DDC+「⚡ 一鍵批准」行 `approveVenueBooking`。鎖未通唔擋批核。
 
 ### 提交欄位
 
@@ -96,10 +98,10 @@ member-portal 填表
 健康檢查 `?action=getHealthCheck`（免 Key）會回：
 
 ```json
-{ "version": "4.2.0", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
+{ "version": "4.2.3", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
 ```
 
-`version` 要係 `4.2.0` 先代表呢版 GS 已貼上線。
+`version` 要係 `4.2.3` 先代表呢版 GS 已貼上線。
 
 ## 部署
 
