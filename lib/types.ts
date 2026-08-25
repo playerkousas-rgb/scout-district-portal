@@ -37,6 +37,7 @@ export interface UserSession {
   roleLabel: string;
   isAdmin: boolean;       // 可進管理頁（DC / SYSADMIN）
   isDC: boolean;          // 是否區總監（最高，可改 SYSADMIN）
+  canManageAccounts?: boolean; // DDC 或以上：可開區長／區領袖／助理區領袖
   scopes: string[];
   token: string;
 }
@@ -132,6 +133,7 @@ export interface Venue {
   capacity?: string;
   note?: string;
   active?: string;
+  scienerLockId?: string; // 呢個場地嘅 Sciener/TTLock Lock ID（數字）
 }
 export interface VenueBooking {
   id: string;
@@ -150,9 +152,9 @@ export interface VenueBooking {
   status?: string;
   reviewer?: string;
   reviewedAt?: string;
-  passcode?: string; // 批准後自動生成並電郵俾申請人嘅入場密碼（v4.0）
-  pwdRef?: string; // 電子鎖密碼記錄 ID（v4.0）
-  teamupEventId?: string; // 申請人經 Teamup 建立嘅 pending 事件（v4.0）
+  passcode?: string; // 批准後自動生成並電郵俾申請人嘅入場密碼（稍後）
+  pwdRef?: string; // 電子鎖密碼記錄 ID
+  teamupEventId?: string; // 填表時 GS 喺 Teamup「申請中」建嘅事件 ID
   agreeRules?: string; // 已同意借用守則（v4.0）
 }
 export interface StockItem {

@@ -69,7 +69,8 @@ master GS 檔（已附標準 Script，只有區會存）
 
 ### 登入
 - 揀區 → 用帳戶登入（帳號密碼由該區 Users 表控制）。
-- 角色：DC / SYSADMIN（全管）、DDC_ADMIN / DDC_TRAINING、ADC_*、DL（區長）、LEADER（職領袖）。
+- 角色：DC / SYSADMIN（全管）、DDC_ADMIN / DDC_TRAINING、ADC_*、DL（區長）、LEADER（區領袖）、AL、STAFF。
+- **批量開戶**：DDC 或以上先可以開；只可以開區長／區領袖／助理區領袖（可多人）。下載 `/users` 頁 CSV／JSON 模版 → 填好上傳 → 轉 JSON 寫入 Users 表。DC／DDC／ADC／STAFF 係專用預設位，唔經批量開。
 
 ### 卡片對照
 | 卡片 | 路徑 | 用途 | 開一次? |

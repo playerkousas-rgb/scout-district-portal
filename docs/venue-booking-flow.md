@@ -1,7 +1,8 @@
 # 🏛 區總部借場 — 一條龍流程（統一後台 v4.0）
 
-**申請人喺成員系統 (member-portal) 填表（唔使跳去 Teamup）→ 管理系統審批 → 批准時自動完成：**
-**① 通通鎖(TTLock) 設定限時密碼 → ② Teamup 轉色（建「確認借用」事件）→ ③ 電郵密碼俾申請人。**
+**申請人喺成員系統 (member-portal) 填表（唔使跳去 Teamup）→ GS 寫入 VenueBookings 並喺 Teamup「申請中」建事件 → 管理系統審批轉色。**
+
+而家先測呢一步。TTLock 一鍵密碼 + 電郵申請人（`approveVenueBooking`）留低稍後再接。
 
 全部由同一個 Apps Script 後台（`gs/Code.gs` v4.0 統一後台：管理系統 + 成員系統共用）完成，
 唔需要另起 Vercel service。
@@ -9,19 +10,17 @@
 ## 流程
 ```
 申請人（member-portal）填借用申請表
-      │  公開 action：submitVenueRequest → 寫入 VenueBookings（status=pending）
+      │  公開 action：submitVenueRequest
+      │  → 寫入 VenueBookings（status=pending）
+      │  → Teamup「申請中」子日曆建【申請】事件（寫入 teamupEventId）
       ▼
 區職員登入管理系統 → 場地借用審批 (/venue-regs)
-      │  點「✅ 批准」→ 前端 call approveVenueBooking
+      │  點「✅ 批准」→ 前端 call confirmVenueBooking
       ▼
-後台 approveVenueBooking_（status=approved）自動：
-   1. TTLock 建立限時密碼（提前/延後 15 分鐘；撞碼自動 +1 重試；
-      TTLock 未設定 / ttlockDisabled=TRUE → 改用隨機 6 位密碼，其餘流程照跑）
-   2. Teamup 轉色：
-      - 申請有 pending 事件（teamupEventId）→ 搬去「確認借用」子日曆（藍→紅）
-      - 冇 → 喺「確認借用」子日曆新建事件（標題標「已批准」+ 密碼）
-   3. 電郵「已批准 + 入場密碼」俾申請人（MailApp，HTML）
-      密碼同時寫入 VenueBookings.passcode，審批頁可翻查
+後台 confirmVenueBooking_（status=approved）：
+   Teamup 轉色：有 teamupEventId → 搬去「確認借用」子日曆；冇就新建
+
+（稍後）approveVenueBooking_ = 上面 + TTLock 限時密碼 + 電郵密碼
 
 拒絕 / 取消（setVenueBookingStatus_ status=rejected/cancelled）：
    → 喺「拒絕」子日曆建事件（選填子日曆）+ 電郵通知申請人

@@ -41,10 +41,11 @@
 
 ---
 
-## 第 3 步：批核入口（改咗 action）
-- 管理系統 `/venue-regs` 點「✅ 批准」→ 後台 **`approveVenueBooking`**（一條龍）。
-- 點「✕ 拒絕」/「↩ 取消」→ `setVenueBookingStatus`（狀態 + 電郵 + 選填 Teamup 拒絕事件）。
-- 批准後密碼會寫入 `VenueBookings.passcode`，審批頁可翻查。
+## 第 3 步：批核入口
+- 管理系統 `/venue-regs` 點「✅ 批准」→ 後台 **`confirmVenueBooking`**（狀態 + Teamup 轉色，唔掂鎖）。
+- 點「✕ 拒絕」/「↩ 取消」→ `setVenueBookingStatus`（狀態 + 電郵 + Teamup 拒絕事件）。
+- `approveVenueBooking`（TTLock 密碼 + 電郵）留低，稍後先接。
+- 借物資 `/stock-regs` → `setStockRequestStatus`（批准先扣庫存）。
 
 ---
 

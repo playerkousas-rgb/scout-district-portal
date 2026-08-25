@@ -118,12 +118,31 @@ export const api = {
 
   // 借場（申請由 member-portal 公開端提交；呢度只做批核）
   listVenues: (): Promise<ApiResult<Venue[]>> => callGet('listVenues'),
+  getLockList: (token: string): Promise<ApiResult<{
+    apiBase: string;
+    configuredLockId: string;
+    locks: { lockId: number | string; name: string; mac: string; hasGateway: boolean }[];
+  }>> => callGet('getLockList', { token }),
   getVenueBookings: (token: string): Promise<ApiResult<VenueBooking[]>> => callGet('getVenueBookings', { token }),
   setVenueBookingStatus: (token: string, id: string, status: string): Promise<ApiResult<{ saved: boolean }>> =>
     callPost('setVenueBookingStatus', { token, id, status }),
-  // 完整批核：TTLock 限時密碼 + Teamup 轉色 + 電郵申請人（v4.0 統一後台）
+  // 聯調批核：狀態 approved + Teamup 轉色（唔掂鎖、唔寄密碼）
+  confirmVenueBooking: (token: string, id: string): Promise<ApiResult<{ saved: boolean; teamupEventId?: string; warn: string }>> =>
+    callPost('confirmVenueBooking', { token, id }),
+  // 完整批核：TTLock 限時密碼 + Teamup 轉色 + 電郵申請人（稍後先用）
   approveVenueBooking: (token: string, id: string): Promise<ApiResult<{ saved: boolean; password: string; warn: string }>> =>
     callPost('approveVenueBooking', { token, id }),
+  rejectVenueBooking: (token: string, id: string): Promise<ApiResult<{ saved: boolean }>> =>
+    callPost('rejectVenueBooking', { token, id }),
+  updateVenueBooking: (token: string, id: string, patch: Record<string, string>): Promise<ApiResult<{ saved: boolean }>> =>
+    callPost('updateVenueBooking', { token, id, patch }),
+  submitVenueRequest: (body: Record<string, string>): Promise<ApiResult<{ refCode: string; id?: string; teamupEventId?: string; warn?: string }>> =>
+    callPost('submitVenueRequest', body),
+  getPendingInbox: (token: string): Promise<ApiResult<{
+    venue: { id: string; type: string; refCode: string; title: string; name: string; startDate: string; endDate: string; purpose: string }[];
+    stock: { id: string; type: string; refCode: string; title: string; name: string; startDate: string; endDate: string; purpose: string }[];
+    total: number;
+  }>> => callGet('getPendingInbox', { token }),
   saveVenue: (token: string, venue: Venue): Promise<ApiResult<{ saved: boolean }>> =>
     callPost('saveVenue', { token, venue }),
   deleteVenue: (token: string, venueId: string): Promise<ApiResult<{ deleted: boolean }>> =>
