@@ -35,7 +35,9 @@
 | TTLock | `ttlockLockId` | 大門鎖 Lock ID |
 | TTLock | `ttlockApiBase` | 預設 `https://api.ttlock.com` |
 | TTLock | `ttlockDisabled` | 未就緒先填 `TRUE`（改用隨機密碼，其餘流程照跑） |
-| 電郵 | `notifyFrom` | 寄件人名稱（預設用區名） |
+| 電郵 | `NOTIFY_STAFF_EMAIL` | 新申請通知收件人（可多個，以逗號分隔） |
+| 電郵 | `notifyFrom` | 選填：寄件人顯示名稱，不是 Gmail 地址 |
+| 電郵 | `approverEmail` | 不用填；現行 Code.gs 沒有使用 |
 
 > 由 v3.0 升上嚟嘅區：舊 `teamup*` 欄名照用，程式自動 fallback，唔使搬。
 
