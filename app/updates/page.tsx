@@ -5,6 +5,14 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.2.3 — 補建唔洗資料 + DDC 一鍵批場 + 主控台走馬燈</h3>
+        <ul>
+          <li><code>setupSheets()</code> 只補缺失表／欄／Config 列，唔清空、唔覆寫你已填嘅格</li>
+          <li>DDC 或以上：一鍵批准（試寫鎖＋電郵，失敗自動改密碼）、職員代借、編輯、拒絕</li>
+          <li>有權限登入後，主控台 HERO 有好明顯嘅待批走馬燈</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.1.1 — FPS 戶口內建 + 清理規則 URL</h3>
         <ul>
           <li>FPS QR 卡片內建區會戶口（SCOUT ASSOCIATION OF HONG KONG - SHAU KEI WAN DISTRICT / 102866183），Config 可覆蓋</li>
@@ -37,7 +45,7 @@ export default function UpdatesPage() {
       </div>
       <div className="info-card">
         <h3>後台程式碼</h3>
-        <p style={{ fontSize: 13.5 }}>各區接入所需的 <code>Code.gs</code> 由平台管理員提供（見 apps-script/Code.gs）。日後可在此提供下載連結。</p>
+        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.2.3</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
       </div>
     </>
   );

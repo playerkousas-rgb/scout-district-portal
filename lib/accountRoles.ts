@@ -16,6 +16,11 @@ export function canManageAccounts(s: UserSession | null | undefined): boolean {
   return (ACCOUNT_MANAGER_ROLES as readonly string[]).includes(s.role);
 }
 
+/** DDC 或以上：可一鍵批區總部借場 */
+export function canApproveHq(s: UserSession | null | undefined): boolean {
+  return canManageAccounts(s);
+}
+
 export function isCreatableRole(role: string): boolean {
   const u = String(role || '').trim().toUpperCase();
   return CREATABLE_ROLES.some(r => r.role === u);

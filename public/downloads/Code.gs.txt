@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.2
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.2.3
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -142,7 +142,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.2.2',
+      version: '4.2.3',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -183,6 +183,7 @@ function doGet(e) {
       case 'getVenueBookings':    return json(getVenueBookings_(p.token));
       case 'getLockList':         return json(getLockList_(p.token));
       case 'getStockRequests':    return json(getStockRequests_(p.token));
+      case 'getPendingInbox':     return json(getPendingInbox_(p.token));
       case 'getActivityNotices':  return json(getActivityNotices_(p.token));
       case 'getAllRecords':       return json(getAllRecords_(p.token));
 
@@ -232,6 +233,7 @@ function doPost(e) {
       case 'confirmVenueBooking':   return json(confirmVenueBooking_(b.token, b.id));
       case 'approveVenueBooking':   return json(approveVenueBooking_(b.token, b.id));
       case 'rejectVenueBooking':    return json(rejectVenueBooking_(b.token, b.id));
+      case 'updateVenueBooking':    return json(updateVenueBooking_(b.token, b.id, b.patch || b));
       case 'setCourseRegStatus':    return json(setCourseRegStatus_(b.token, b.courseId, b.id, b.status));
       case 'setRegFeePaid':         return json(setRegFeePaid_(b.token, b.courseId, b.id, b.paid));
 
@@ -949,6 +951,64 @@ function approveVenueBooking_(token, id) {
 function rejectVenueBooking_(token, id) {
   return setVenueBookingStatus_(token, id, 'rejected');
 }
+
+/** 職員改申請內容（唔改 status） */
+function updateVenueBooking_(token, id, patch) {
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  patch = patch || {};
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該申請');
+  var allow = ['venueId', 'venueName', 'purpose', 'startDate', 'endDate', 'name', 'phone', 'email', 'troop', 'position'];
+  if (patch.venueId) {
+    var venue = readSheet_(SHEET.VENUES).filter(function (v) {
+      return String(v.venueId).trim() === String(patch.venueId).trim()
+        || String(v.name || '').trim() === String(patch.venueId).trim();
+    })[0];
+    if (venue) {
+      patch.venueId = String(venue.venueId).trim();
+      patch.venueName = venue.name || patch.venueName;
+    }
+  }
+  allow.forEach(function (k) {
+    if (patch[k] !== undefined && patch[k] !== null) setCellByHeader_(sh, idx, k, patch[k]);
+  });
+  return ok({ saved: true });
+}
+
+/** 主控台走馬燈：待批借場 + 待批借物資 */
+function getPendingInbox_(token) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  var p = staffPerms_(t.email, t.role);
+  var venue = [];
+  var stock = [];
+  if (p.canVenue) {
+    venue = readSheet_(SHEET.VENUE_REQ).filter(function (r) {
+      return String(r.status || 'pending').toLowerCase() === 'pending';
+    }).map(function (r) {
+      return {
+        id: r.id, type: 'venue', refCode: r.refCode || '',
+        title: r.venueName || r.venueId || '區總部',
+        name: r.name || '', startDate: r.startDate || '', endDate: r.endDate || '',
+        purpose: r.purpose || '',
+      };
+    });
+  }
+  if (p.canStock) {
+    stock = readSheet_(SHEET.STOCK_REQ).filter(function (r) {
+      return String(r.status || 'pending').toLowerCase() === 'pending';
+    }).map(function (r) {
+      return {
+        id: r.id, type: 'stock', refCode: r.refCode || '',
+        title: (r.itemName || r.itemId || '物資') + (r.qty ? (' ×' + r.qty) : ''),
+        name: r.name || '', startDate: r.borrowDate || '', endDate: r.returnDate || '',
+        purpose: r.purpose || '',
+      };
+    });
+  }
+  return ok({ venue: venue, stock: stock, total: venue.length + stock.length });
+}
+
 
 // ===================== 借物資：物資清單 =====================
 
@@ -2656,8 +2716,9 @@ function setupSheets() {
 
   var key = generateApiKey_(ss);
 
-  uiAlert_('✅ 建表完成',
-    '新建工作表：' + (created.length ? created.join('、') : '無') + '\n'
+  uiAlert_('✅ 補建完成（已有資料全部保留）',
+    '★ 只補缺失表／欄／Config 列，唔清空、唔覆寫已填格。\n\n'
+    + '新建工作表：' + (created.length ? created.join('、') : '無') + '\n'
     + '補上欄位：' + (patched.length ? patched.join('、') : '無') + '\n'
     + 'API Key：' + (key ? '已新生成（下一個視窗顯示）' : '原有設定保持不變') + '\n\n'
     + '示範密碼：' + DEFAULT_PASSWORD + '\n\n'
@@ -2717,7 +2778,9 @@ function ensurePermsRows_(ss) {
 
 /** 建立新表（每行長度可以唔同，自動補空白） */
 function ensureSheet_(ss, name, rows, headerColor, frozenCols) {
-  var sh = ss.getSheetByName(name) || ss.insertSheet(name);
+  var sh = ss.getSheetByName(name);
+  if (sh && sh.getLastRow() > 0) return sh; // 已有內容：絕對唔洗
+  sh = sh || ss.insertSheet(name);
   sh.clear();
   var width = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 0);
   if (!width) return sh;

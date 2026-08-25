@@ -7,6 +7,7 @@ import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession, CardDef } from '@/lib/types';
 import { canManageAccounts } from '@/lib/accountRoles';
 import CardItem from '@/components/CardItem';
+import PendingTicker from '@/components/PendingTicker';
 
 export default function HomePage() {
   const router = useRouter();
@@ -101,24 +102,28 @@ export default function HomePage() {
     );
   }
 
-  // 已登入 → 卡片陣列
+  // 已登入 → HERO + 卡片陣列
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <h1 className="page-title">主控台</h1>
-          <p className="page-sub" style={{ margin: '4px 0 0' }}>
-            {session.roleLabel}，歡迎。以下是你權限範圍內的功能（由該區 Google Sheet 控制）。
-          </p>
+      <section className="dash-hero">
+        <div className="dash-hero-top">
+          <div>
+            <p className="dash-hero-kicker">區管理系統</p>
+            <h1 className="page-title" style={{ color: '#fff', fontSize: 26 }}>主控台</h1>
+            <p className="dash-hero-sub">
+              {session.roleLabel}，歡迎。以下是你權限範圍內的功能（由該區 Google Sheet 控制）。
+            </p>
+          </div>
+          <div className="dash-hero-actions">
+            {canManageAccounts(session) && <button className="admin-btn hero-ghost" onClick={() => router.push(withDistrict('/users'))}>👥 帳戶管理</button>}
+            {session.isAdmin && <button className="admin-btn hero-ghost" onClick={() => router.push(withDistrict('/plugins'))}>🧩 外掛市集</button>}
+            {session.isAdmin && <button className="admin-btn hero-ghost" onClick={() => router.push(withDistrict('/admin'))}>⚙️ 權限/角色</button>}
+            <button className="admin-btn hero-ghost" onClick={() => setShowPw(v => !v)}>🔑 改密碼</button>
+            <button className="admin-btn hero-ghost" onClick={logout}>登出</button>
+          </div>
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {canManageAccounts(session) && <button className="admin-btn" onClick={() => router.push(withDistrict('/users'))}>👥 帳戶管理</button>}
-          {session.isAdmin && <button className="admin-btn" onClick={() => router.push(withDistrict('/plugins'))}>🧩 外掛市集</button>}
-          {session.isAdmin && <button className="admin-btn" onClick={() => router.push(withDistrict('/admin'))}>⚙️ 權限/角色</button>}
-          <button className="admin-btn" onClick={() => setShowPw(v => !v)}>🔑 改密碼</button>
-          <button className="admin-btn" onClick={logout}>登出</button>
-        </div>
-      </div>
+        <PendingTicker session={session} />
+      </section>
 
       {showPw && (
         <div className="info-card" style={{ marginTop: 14, borderColor: '#fbbf24' }}>
