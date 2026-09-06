@@ -5,6 +5,14 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.2.4 — FPS QR 即時生成 + 圖片分享</h3>
+        <ul>
+          <li>主控台「💳 FPS QR Code 製作」：輸入銀碼後即時產生收款 QR，不用再前往外部產生器</li>
+          <li>指定預設 FPS ID <code>102866183</code>；兼容 Google Sheet 將純數字帳戶回傳為數字的情況</li>
+          <li>可直接複製 QR 圖片、手機系統分享、下載 PNG，並保留複製付款資料作備用</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.2.3 — 補建唔洗資料 + DDC 一鍵批場 + 主控台走馬燈</h3>
         <ul>
           <li><code>setupSheets()</code> 只補缺失表／欄／Config 列，唔清空、唔覆寫你已填嘅格</li>
