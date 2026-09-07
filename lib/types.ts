@@ -22,6 +22,7 @@ export interface RoleDef {
   role: string;
   label: string;
   protected?: boolean; // 受保護角色（DC + 8 真實角色）不可被 SYSADMIN 改/刪
+  level?: number;      // 層級：0 超管 / 1 DC / 2 DDC / 3 ADC / 4 STAFF / 5 其他
 }
 
 export interface PermsBundle {
@@ -40,6 +41,10 @@ export interface UserSession {
   canManageAccounts?: boolean; // DDC 或以上：可開區長／區領袖／助理區領袖
   scopes: string[];
   token: string;
+  level?: number;              // 0 超管（隱藏、最高）/ 1 DC / 2 DDC / 3 ADC / 4 STAFF / 5 其他
+  levelLabel?: string;
+  isSuper?: boolean;           // level 0：隱藏卡片仍然可見
+  mustChangePassword?: boolean; // 首次登入（預設密碼）必須先改密碼
 }
 
 export interface PortalUser {
@@ -49,6 +54,19 @@ export interface PortalUser {
   scopes: string;
   cards?: string; // 每帳戶 scope 覆寫（逗號分隔 cardId；留空 = 用角色矩陣）
   active: boolean;
+  level?: number;
+  levelLabel?: string;
+  mustChangePassword?: boolean;
+  delegatedBy?: string;
+}
+
+/** 授權面板（getDelegation）：我可授出嘅卡片權限 × 層級較低嘅角色 */
+export interface DelegationBundle {
+  me: { email: string; role: string; level: number; levelLabel: string };
+  myAccess: Record<string, AccessLevel>;
+  roles: { role: string; label: string; level: number }[];
+  cards: { cardId: string; title: string; icon: string; enabled: boolean }[];
+  matrix: Record<string, Record<string, AccessLevel>>;
 }
 
 export interface BatchUserInput {

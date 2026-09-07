@@ -1,5 +1,7 @@
-# 下一手 Agent 交接備忘（v4.3.0）
+# 下一手 Agent 交接備忘（v4.4.0）
 
+> 2026-09-07（第二輪）v4.4.0：天氣決策（`lib/weatherDecision.ts` + `components/WeatherDecisionPanel.tsx` + `components/WeatherDecisionBanner.tsx`，天文台 warnsum 由瀏覽器直接拉；sandbox 無法對外連線，只能 mock JSON 測邏輯）、聯結簿三分頁（`lib/contactsDirectory.ts`；旅團資料待用戶提供，格式見 `TroopRow`）、刪除 meeting 卡（`patchCardRows_` 移除舊行）、`components/BackLink.tsx`（每頁頂＋`BackBar` 頁尾）、帳戶層級 `level`（`lib/levels.ts`；後台 `levelOfRole_`/`levelOfUser_`）、`PRESET_USERS` 密碼 1234 + `mustChangePassword`、`requestPasswordReset`/`resetPassword`（token = base64(reset|email|exp|sig)，sig 含舊 passwordHash → 單次有效）、`/delegate` 授權／收回（`getDelegation`/`delegatePerms`/`revokePerms` 寫 Perms 表）、隱藏卡片只有 level 0 見（`getCards_`）。mock 後台 `/tmp/mockgs/server.js` seed 登入改用 `dc@skwscout.org.hk` / `1234`；emulator 測試 `/tmp/gstest/run44.js`（56 assertions）。
+>
 > 2026-09-07 更新：v4.3.0 加咗「意外／應變」三分頁（`app/incident/page.tsx`、`lib/incidentGuide.ts`、`lib/incidentPrint.ts`）、訓練班每班收費 FPS QR（`components/CourseFpsBlock.tsx`、`lib/fps.ts`）、主控台完成標示（藍框 done／虛線 todo）、GS `IncidentReports` 表 + 4 個 action、CourseLinks 6 個 FPS 欄。
 > member-portal（`playerkousas-rgb/member-portal`）**而家讀得到**；佢個 proxy 有公開欄位白名單，要顯示課程 QR 就要照 `docs/member-gs-handshake.md` 改嗰 4 個檔。
 > 意外報告草稿只存 localStorage（key `portal_incident_draft_{區碼}`），按「確定提交」先 POST，唔好改做逐鍵 autosave。列印格式以總會 ACC-RPT (2019/07) 為準，唔好照抄 event repo 嘅 AR-1 mock。

@@ -7,6 +7,7 @@ import { useDistrict } from '@/lib/useDistrict';
 import type { CourseLink, UserSession } from '@/lib/types';
 import CourseFpsBlock, { type CourseFpsResult } from '@/components/CourseFpsBlock';
 import { DEFAULT_FPS_ACCOUNT, normalizeFpsId } from '@/lib/fps';
+import BackLink, { BackBar } from '@/components/BackLink';
 
 const EMPTY: CourseLink = {
   courseId: '', title: '', badgeName: '', section: '', courseNo: '', sessionsText: '',
@@ -96,7 +97,7 @@ export default function TrainingPage() {
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">🎓 訓練班管理</h1>
       <p className="page-sub">開班登記：每班 1 張專屬 Sheet + 1 份標準收表 Script + 1 個 Drive 資料夾。公開端只做報名寫入；每班可另生成收費 FPS QR，成員系統會顯示俾未交費者。</p>
       {error && <div className="err">{error}</div>}
@@ -187,6 +188,7 @@ export default function TrainingPage() {
           </table>
         )}
       </section>
+      <BackBar />
     </>
   );
 }

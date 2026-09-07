@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession, StockItem, StockRequest } from '@/lib/types';
+import BackLink, { BackBar } from '@/components/BackLink';
 
 const STATUS: Record<string, string> = { pending: '待批', approved: '已批', rejected: '已拒絕', returned: '已歸還', cancelled: '已取消' };
 
@@ -55,7 +56,7 @@ export default function StockRegsPage() {
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">📦 物資借用審批</h1>
       <p className="page-sub">member-portal 填表寫入 StockRequests；呢邊批核。批准先扣庫存，拒絕／取消／歸還自動回補。</p>
       {error && <div className="err">{error}</div>}
@@ -110,6 +111,7 @@ export default function StockRegsPage() {
           {!items.length && <p className="empty">尚未有物資。</p>}
         </div>
       </section>
+      <BackBar />
     </>
   );
 }

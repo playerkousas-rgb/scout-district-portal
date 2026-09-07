@@ -6,6 +6,7 @@ import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import { canApproveHq } from '@/lib/accountRoles';
 import type { UserSession, Venue, VenueBooking } from '@/lib/types';
+import BackLink, { BackBar } from '@/components/BackLink';
 
 const STATUS: Record<string, string> = { pending: '待批', approved: '已批', rejected: '已拒絕', cancelled: '已取消' };
 
@@ -183,7 +184,7 @@ export default function VenueRegsPage() {
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">🏛 場地借用審批</h1>
       <p className="page-sub">
         申請人於 member-portal 填表 → VenueBookings + Teamup「申請中」。
@@ -312,6 +313,7 @@ export default function VenueRegsPage() {
           {!venues.length && <p className="empty">尚未有場地。</p>}
         </div>
       </section>
+      <BackBar />
     </>
   );
 }

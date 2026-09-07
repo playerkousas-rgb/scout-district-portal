@@ -10,6 +10,7 @@ import { useDistrict } from '@/lib/useDistrict';
 import {
   DEFAULT_FPS_ACCOUNT, FPS_ID_PATTERN, buildFpsPayload, checkAmount, checkReference, formatFileName,
 } from '@/lib/fps';
+import BackLink, { BackBar } from '@/components/BackLink';
 
 type Feedback = { tone: 'success' | 'error' | 'info'; text: string } | null;
 
@@ -190,7 +191,7 @@ export default function FpsPage() {
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">💳 FPS QR Code 製作</h1>
       <p className="page-sub">輸入銀碼後即時生成轉數快收款 QR Code，可複製、分享或下載，不再需要前往外部網站。</p>
 
@@ -298,6 +299,7 @@ export default function FpsPage() {
           </div>
         </section>
       )}
+      <BackBar />
     </>
   );
 }

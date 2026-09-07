@@ -5,6 +5,20 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.4.0 — 天氣決策 + 聯結簿 + 帳戶層級／授權 + 隱藏卡片</h3>
+        <ul>
+          <li>🌦 <b>天氣決策</b>（意外／應變第一個分頁 + 主控台橫額）：自動拉天文台「現正生效警告」，揀戶內／戶外／海上即刻見到 ✅ 如常／⚠️ 留意／⛔ 取消同原因（活動指引通告 04/2018 表一）；可模擬「如果掛黃雨／3 號…」預先睇；AQHI 人手揀</li>
+          <li>📇「旅團聯絡簿」改名 <b>聯結簿</b>，分 <b>旅團／港島地域／總會</b> 三個分頁：地域職員直線電話、總監架構、各區區總監、總會 11 個署電話電郵、五個地域辦事處、緊急通報電話；按電話即撥。旅團資料待區方提供後匯入</li>
+          <li>🗑 刪除「會議行事曆」卡片（<code>setupSheets()</code> 會同步移除 Cards／Perms 舊行）</li>
+          <li>↩️ 每張卡片頁頂及頁尾都有「← 返回主控台」</li>
+          <li>👤 <b>帳戶層級</b>：L0 超管（隱藏）→ L1 區總監 → L2 副區總監 → L3 助理區總監 → L4 區職員 → L5 區長／領袖。預設 9 個 @skwscout.org.hk 帳戶（info／dc／ddc.admin／ddc.training／adc.gh／adc.cub／adc.scout／adc.venture／adc.rover），密碼 <code>1234</code>，<b>首次登入必須改密碼</b></li>
+          <li>🔑 忘記密碼：寄重設連結去該帳戶登記電郵（24 小時有效、用一次即失效）；登入頁「記住我」；上級可把下級密碼重設回 1234</li>
+          <li>🤝 <b>授權／收回</b>：上級把自己現有嘅卡片權限授予層級較低嘅角色協助處理；一鍵收回某角色或全部下級權限</li>
+          <li>🙈 <b>卡片開啟／隱藏</b>：超管喺主控台每張卡直接切換；隱藏後其他人一律睇唔到，超管仍可進入（方便私下加功能／升級）</li>
+          <li>後台新增 action：<code>requestPasswordReset</code>／<code>resetPassword</code>／<code>getDelegation</code>／<code>delegatePerms</code>／<code>revokePerms</code>；Users 表補 <code>level</code>／<code>mustChangePassword</code>／<code>delegatedBy</code>，Roles 表補 <code>level</code>（只補唔洗）</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.3.0 — 意外／應變完成 + 訓練班收費 QR + 主控台完成標示</h3>
         <ul>
           <li>🚨「意外／應變」卡片完成：<b>即時應變</b>（情境卡＋電話通報清單＋天氣警告對照表＋熱線，全部依總會通告）、<b>完整指引</b>（總會官方 PDF 全部連結）、<b>意外報告</b>（手機直接填，草稿只存本機，按「確定提交」先入後台 <code>IncidentReports</code>）</li>
@@ -64,7 +78,7 @@ export default function UpdatesPage() {
       </div>
       <div className="info-card">
         <h3>後台程式碼</h3>
-        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.3.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
+        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.4.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
       </div>
     </>
   );

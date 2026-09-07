@@ -2,13 +2,14 @@
 /**
  * 🚨 意外／應變
  * ─────────────────────────────────────────────────────────────────────
+ * 分頁 0 天氣決策：拉天文台實時警告 → 戶內／戶外／海上活動應唔應該取消（04/2018 表一）
  * 分頁 1 即時應變：活動出事時，領袖打開即知道點做（情境卡 + 電話通報清單 + 天氣對照表 + 熱線）
  * 分頁 2 完整指引：香港童軍總會官方通告／表格全部連結
  * 分頁 3 意外報告：手機直接填總會行政署「意外報告」(ACC-RPT 2019/07)；
  *        草稿只存本機（localStorage），按「確定提交」先送後台；可依官方兩頁版面列印。
  */
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
@@ -17,9 +18,12 @@ import {
   HOTLINES, OFFICIAL_DOCS, PHONE_REPORT_ITEMS, PRE_TRIP_CHECKLIST, SCENARIOS, WEATHER_NOTE, WEATHER_TABLE,
 } from '@/lib/incidentGuide';
 import { downloadIncidentHtml, openIncidentPrint, parseRows } from '@/lib/incidentPrint';
+import WeatherDecisionPanel from '@/components/WeatherDecisionPanel';
+import BackLink, { BackBar } from '@/components/BackLink';
 
-type Tab = 'now' | 'docs' | 'report';
+type Tab = 'weather' | 'now' | 'docs' | 'report';
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'weather', label: '🌦 天氣決策' },
   { id: 'now', label: '🚨 即時應變' },
   { id: 'docs', label: '📚 完整指引' },
   { id: 'report', label: '📝 意外報告' },
@@ -61,8 +65,7 @@ function fmtDT(iso?: string) {
 }
 
 export default function IncidentPage() {
-  const router = useRouter();
-  const { withDistrict, districtCode, district } = useDistrict();
+  const { districtCode, district } = useDistrict();
   const session = useRequireCard('incident');
   const searchParams = useSearchParams();
   const initialTab = searchParams.get('tab') as Tab | null;
@@ -72,9 +75,9 @@ export default function IncidentPage() {
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">🚨 意外／應變</h1>
-      <p className="page-sub">依香港童軍總會通告整理：出事即刻知道點做 → 查官方指引 → 手機直接填「意外報告」並依總會格式列印。</p>
+      <p className="page-sub">依香港童軍總會通告整理：天氣一睇就知取唔取消 → 出事即刻知道點做 → 查官方指引 → 手機直接填「意外報告」並依總會格式列印。</p>
 
       <div className="inc-tabs" role="tablist">
         {TABS.map(t => (
@@ -82,9 +85,11 @@ export default function IncidentPage() {
         ))}
       </div>
 
+      {tab === 'weather' && <WeatherDecisionPanel />}
       {tab === 'now' && <NowTab />}
       {tab === 'docs' && <DocsTab />}
       {tab === 'report' && <ReportTab session={session} districtCode={districtCode || ''} districtName={district?.name || ''} />}
+      <BackBar />
     </>
   );
 }

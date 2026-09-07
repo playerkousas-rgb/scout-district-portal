@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { loadSession } from '@/lib/session';
 import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession, PluginItem } from '@/lib/types';
+import BackLink, { BackBar } from '@/components/BackLink';
 
 export default function PluginsPage() {
   const router = useRouter();
@@ -57,7 +58,7 @@ export default function PluginsPage() {
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">🧩 外掛市集</h1>
       <p className="page-sub">官方外掛名錄（讀遠端轉駁器）。安裝後成為卡片，預設只有區總監可見，可到權限管理設定誰看得到。</p>
       {registryUrl && <p style={{ fontSize: 11, color: '#94a3b8', marginBottom: 14, wordBreak: 'break-all' }}>來源：{registryUrl}</p>}
@@ -91,6 +92,7 @@ export default function PluginsPage() {
           ))}
         </div>
       )}
+      <BackBar />
     </>
   );
 }

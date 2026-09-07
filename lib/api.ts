@@ -7,7 +7,7 @@ import { DISTRICT_STORAGE_KEY } from './district';
 import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
-  CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport,
+  CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
 } from './types';
 
 function getDistrictCode(): string {
@@ -51,10 +51,12 @@ async function callPost<T = any>(action: string, body: Record<string, unknown> =
 }
 
 export const api = {
-  login: (email: string, password: string): Promise<ApiResult<UserSession>> =>
-    callPost('login', { email, password }),
+  login: (email: string, password: string, remember = false): Promise<ApiResult<UserSession>> =>
+    callPost('login', { email, password, remember }),
 
   getConfig: (): Promise<ApiResult<DistrictConfig>> => callGet('getConfig'),
+  /** 公開設定（成員系統同一份）：旅號清單 troopList 等 */
+  getPublicInfo: (): Promise<ApiResult<{ districtName: string; districtCode: string; troopList?: string[]; locked?: boolean }>> => callGet('getPublicInfo'),
 
   getCards: (token: string): Promise<ApiResult<CardDef[]>> =>
     callGet('getCards', { token }),
@@ -74,6 +76,17 @@ export const api = {
   setCardEnabled: (token: string, cardId: string, enabled: boolean):
     Promise<ApiResult<{ saved: boolean; cardId: string; enabled: boolean }>> =>
     callPost('setCardEnabled', { token, cardId, enabled }),
+  // 密碼（v4.4.0）：忘記密碼寄重設連結去帳戶電郵；用重設代碼設定新密碼
+  requestPasswordReset: (email: string, resetUrlBase: string): Promise<ApiResult<{ sent: boolean; message: string }>> =>
+    callPost('requestPasswordReset', { email, resetUrlBase }),
+  resetPassword: (resetToken: string, newPassword: string): Promise<ApiResult<{ reset: boolean; email: string }>> =>
+    callPost('resetPassword', { resetToken, newPassword }),
+  // 授權／收回（v4.4.0）
+  getDelegation: (token: string): Promise<ApiResult<DelegationBundle>> => callGet('getDelegation', { token }),
+  delegatePerms: (token: string, targetRole: string, grants: Record<string, AccessLevel>): Promise<ApiResult<{ applied: number; rejected: string[] }>> =>
+    callPost('delegatePerms', { token, targetRole, grants }),
+  revokePerms: (token: string, targetRole: string): Promise<ApiResult<{ revoked: number; roles: string[] }>> =>
+    callPost('revokePerms', { token, targetRole }),
   changePassword: (token: string, oldPassword: string, newPassword: string):
     Promise<ApiResult<{ changed: boolean }>> =>
     callPost('changePassword', { token, oldPassword, newPassword }),
@@ -92,7 +105,7 @@ export const api = {
   // 前端帳戶管理
   getUsers: (token: string): Promise<ApiResult<PortalUser[]>> => callGet('getUsers', { token }),
   batchCreateUsers: (token: string, users: BatchUserInput[]): Promise<ApiResult<{ created: number; skipped: number; rejected: { row: number; email: string; reason: string }[] }>> => callPost('batchCreateUsers', { token, users }),
-  updateUser: (token: string, email: string, patch: Partial<PortalUser> & { password?: string }): Promise<ApiResult<{ saved: boolean }>> => callPost('updateUser', { token, email, patch }),
+  updateUser: (token: string, email: string, patch: Partial<PortalUser> & { password?: string; resetToDefault?: boolean }): Promise<ApiResult<{ saved: boolean }>> => callPost('updateUser', { token, email, patch }),
   deleteUser: (token: string, email: string): Promise<ApiResult<{ deleted: boolean }>> => callPost('deleteUser', { token, email }),
 
   // 系統鎖定
