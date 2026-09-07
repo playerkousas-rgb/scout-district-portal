@@ -9,6 +9,8 @@ import type {
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
   CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
 } from './types';
+import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers';
+import type { IcsEvent } from './ics';
 
 function getDistrictCode(): string {
   if (typeof window === 'undefined') return '';
@@ -29,6 +31,20 @@ async function callGet<T = any>(action: string, params: Record<string, string> =
   } catch (error) {
     console.error('GET Error:', error);
     return { ok: false, error: '連線失敗：請確認該區後台已部署且 API Key 已設定。' };
+  }
+}
+
+/** v4.5.0：外部公開資料（港島地域／總會網頁、預算 Sheet、房間日曆）— 由 /api/external 伺服器端代抓，唔經 Apps Script */
+async function callExternal<T = any>(kind: string, params: Record<string, string> = {}): Promise<ApiResult<T>> {
+  const url = new URL('/api/external', window.location.origin);
+  url.searchParams.set('kind', kind);
+  Object.entries(params).forEach(([k, v]) => { if (v !== '') url.searchParams.set(k, v); });
+  try {
+    const res = await fetch(url.toString(), { cache: 'no-store' });
+    return await res.json();
+  } catch (error) {
+    console.error('External Error:', error);
+    return { ok: false, error: '連線失敗：暫時未能讀取外部資料。' };
   }
 }
 
@@ -188,4 +204,30 @@ export const api = {
     callPost('updateIncidentReport', { token, id, patch }),
   deleteIncidentReport: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteIncidentReport', { token, id }),
+
+  // ── v4.5.0 外部同步（/api/external）──
+  /** 港島地域職員直線電話（hkirscout.org.hk 專業領袖及受薪職員） */
+  extRegionStaff: (): Promise<ApiResult<ExternalMeta & { rows: StaffRow[]; updated: string }>> => callExternal('regionStaff'),
+  /** 港島地域總監架構 */
+  extRegionOrg: (): Promise<ApiResult<ExternalMeta & { groups: OrgGroup[]; updated: string }>> => callExternal('regionOrg'),
+  /** 總會香港總監諮議會 */
+  extHksaCouncil: (): Promise<ApiResult<ExternalMeta & { members: OrgMember[] }>> => callExternal('hksaCouncil'),
+  /** 總會 11 個署聯絡 */
+  extHksaDepts: (): Promise<ApiResult<ExternalMeta & { depts: (DeptContact & { ok: boolean })[] }>> => callExternal('hksaDepts'),
+  /** 區年度預算（Google Sheet gviz CSV） */
+  extBudget: (sheetUrl = ''): Promise<ApiResult<ExternalMeta & { rows: BudgetRow[]; summary: BudgetSummary[]; sheetUrl: string }>> =>
+    callExternal('budget', { sheet: sheetUrl }),
+  /** 地域房間日曆（公開 ICS）；room 留空 = 全部 */
+  extRooms: (room = '', from = '', days = 14): Promise<ApiResult<ExternalMeta & { from: number; to: number; days: number; rooms: RoomEvents[] }>> =>
+    callExternal('rooms', { room, from, days: String(days) }),
 };
+
+/** /api/external 共同欄位 */
+export interface ExternalMeta {
+  fetchedAt: string;     // 伺服器抓取時間（ISO）
+  cached?: boolean;      // 命中伺服器快取
+  stale?: boolean;       // 上游失敗，回傳最後一次成功結果
+  staleReason?: string;
+  source?: string;
+}
+export interface RoomEvents { id: string; ok: boolean; error?: string; events: IcsEvent[] }

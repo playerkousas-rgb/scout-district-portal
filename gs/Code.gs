@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.4.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.5.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -57,6 +57,13 @@
  *   delegatePerms：上級把自己「現有」卡片權限授予下級（Perms 表寫 edit/view）
  *   revokePerms：上級一鍵收回下級全部卡片權限
  *   setCardEnabled / getCards：卡片 enabled=FALSE 時只有 level 0 超管仍可見（供私下升級）
+ *
+ * ── 區年度預算 / 地域房間 / 架構（v4.5.0）───────────────────
+ * 預算、港島地域職員／總監架構、總會各署、房間日曆全部係公開網頁／Sheet／日曆，
+ * 由前端 Vercel `/api/external` 伺服器端代抓，本檔唔使抓網頁。
+ * 本檔只負責：Config `BUDGET_SHEET_URL`（區年度預算 Google Sheet 網址，getConfig 回傳 budgetSheetUrl）、
+ * 新卡片 rooms（/rooms 地域房間使用情況）／orgchart（/orgchart 地域及總會架構），
+ * 以及 budget 卡片由 todo → done（patchCardRows_ 只改仍係舊預設值嘅行）。
  *
  * ── 部署 ──────────────────────────────────────────────────
  * 擴充功能 → Apps Script → 貼上本檔 → 執行 setupSheets()
@@ -217,7 +224,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.4.0',
+      version: '4.5.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -507,6 +514,8 @@ function getConfig_() {
     // FPS QR 製作卡片：綁定區會轉數快戶口（Config 未填會用內建預設）
     fpsAccountName: getConfigValue_('FPS_ACCOUNT_NAME') || DEFAULT_FPS_ACCOUNT_NAME,
     fpsAccountNumber: getConfigValue_('FPS_ACCOUNT_NUMBER') || DEFAULT_FPS_ACCOUNT_NUMBER,
+    // v4.5.0 區年度預算：Google Sheet 網址（含 gid）；留空 = 前端內建預設（筲箕灣區 2025-26 Year Plan）
+    budgetSheetUrl: getConfigValue_('BUDGET_SHEET_URL') || '',
   };
 }
 
@@ -2967,6 +2976,8 @@ function blueprint_() {
     P.push(row('incident', ALL_VIEW));
     P.push(row('training', trainingEdit()));
     P.push(row('fps', ALL_EDIT));
+    P.push(row('rooms', ALL_VIEW));
+    P.push(row('orgchart', ALL_VIEW));
     return P;
   })();
 
@@ -3005,6 +3016,7 @@ function blueprint_() {
       // 付款 / 規定
       ['FPS_ACCOUNT_NAME', DEFAULT_FPS_ACCOUNT_NAME, '轉數快戶口名'],
       ['FPS_ACCOUNT_NUMBER', DEFAULT_FPS_ACCOUNT_NUMBER, '轉數快號碼'],
+      ['BUDGET_SHEET_URL', '', '區年度預算 Google Sheet 網址（連 gid=分頁；Sheet 要設「知道連結可查看」；留空用前端內建）'],
       ['VENUE_RULES', '', '借場規定（留空用內建）'],
       ['CCTV_URL', '', '閉路電視指引 PDF'],
       ['STOCK_RULES', '', '借物資規定（留空用內建）'],
@@ -3046,7 +3058,7 @@ function blueprint_() {
       ['contacts', '聯結簿', '📇', 'builtin', '/contacts', '旅團 · 港島地域 · 總會 聯絡資料', 2, 'TRUE', 'FALSE', 'core', 'done'],
       ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '讀獲獎名單 · 推下一級', 3, 'TRUE', 'FALSE', 'core', 'todo'],
       ['annual', '週年會議文件', '📂', 'builtin', '/annual-docs', '議程 · 紀錄', 4, 'TRUE', 'FALSE', 'core', 'todo'],
-      ['budget', '區年度預算', '📑', 'builtin', '/budget', '預算編列與追蹤', 5, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['budget', '區年度預算', '📑', 'builtin', '/budget', '直讀區方預算 Sheet · 按月／支部 · 資助合計', 5, 'TRUE', 'FALSE', 'core', 'done'],
       ['committee', '委任系統', '🗂', 'builtin', '/committee', '委任 · 續任 · R02', 7, 'TRUE', 'FALSE', 'core', 'todo'],
       ['unit', '旅團管理系統', '🧭', 'builtin', '/unit', '旅名冊 · 人數統計', 8, 'TRUE', 'FALSE', 'core', 'todo'],
       ['venueReg', '場地借用審批', '🏛', 'builtin', '/venue-regs', '借場申請批核 · 場地清單', 9, 'TRUE', 'FALSE', 'core', 'done'],
@@ -3055,6 +3067,8 @@ function blueprint_() {
       ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '天氣決策 · 即時應變 · 總會指引 · 意外報告', 12, 'TRUE', 'FALSE', 'core', 'done'],
       ['training', '訓練班管理', '🎓', 'builtin', '/training', '開班登記 · 區會目錄', 13, 'TRUE', 'FALSE', 'core', 'done'],
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
+      ['rooms', '地域房間使用情況', '🏢', 'builtin', '/rooms', '17／18／19 樓逐間房睇用途時段 · 今日總覽', 15, 'TRUE', 'FALSE', 'core', 'done'],
+      ['orgchart', '地域及總會架構', '🏛', 'builtin', '/orgchart', '港島地域總監架構 · 總會領導層，自動跟官網更新', 16, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
 
     { name: SHEET.PERMS, headerColor: '#ede9fe', frozenCols: 1, rows: permRows },
@@ -3226,6 +3240,8 @@ function patchCardRows_(ss) {
   var patches = {
     incident: { oldDesc: '通報 · 惡劣天氣', desc: '即時應變 · 總會指引 · 意外報告' },
     contacts: { oldTitle: '旅團聯絡簿', title: '聯結簿', oldDesc: '聯絡資料 · 分組 · 群發', desc: '旅團 · 港島地域 · 總會 聯絡資料' },
+    // v4.5.0 區年度預算已完成（直讀區方 Google Sheet）
+    budget: { oldDesc: '預算編列與追蹤', desc: '直讀區方預算 Sheet · 按月／支部 · 資助合計' },
   };
   var descOnly = { incident: { oldDesc: '即時應變 · 總會指引 · 意外報告', desc: '天氣決策 · 即時應變 · 總會指引 · 意外報告' } };
   var removeIds = { meeting: true }; // v4.4.0：會議行事曆卡片已刪除

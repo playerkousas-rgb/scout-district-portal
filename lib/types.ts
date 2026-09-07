@@ -84,6 +84,7 @@ export interface DistrictConfig {
   logoText?: string;
   fpsAccountName?: string;            // 轉數快戶口名（FPS QR 製作卡片用）
   fpsAccountNumber?: string | number; // Apps Script 會把純數字 Sheet 儲存格回傳為 number
+  budgetSheetUrl?: string;            // v4.5.0：區年度預算 Google Sheet 網址（Config BUDGET_SHEET_URL；留空用內建）
 }
 
 export interface SystemState {

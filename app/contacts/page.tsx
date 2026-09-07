@@ -2,16 +2,34 @@
 /**
  * 📇 聯結簿 — 三個分頁：旅團 / 港島地域 / 總會
  * 旅團資料由區方稍後提供（先保留結構 + Config TROOP_LIST 旅號清單）；
- * 地域／總會資料整理自官方網站（lib/contactsDirectory.ts 列明來源及日期）。
+ * 港島地域分頁只放「職員直線電話」（v4.5.0：總監架構搬去 /orgchart），
+ * 職員表及總會各署電話由 /api/external 即時讀官方網頁，讀唔到先用 lib/contactsDirectory.ts 備援。
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
+import { useDistrict } from '@/lib/useDistrict';
 import BackLink, { BackBar } from '@/components/BackLink';
+import { SOURCES } from '@/lib/externalSources';
 import {
-  HQ_GROUPS, HQ_OFFICE, REGION_GROUPS, REGION_OFFICE, TROOP_ROWS, type ContactGroup, type ContactRow,
+  HQ_GROUPS, HQ_OFFICE, REGION_GROUPS, REGION_OFFICE, TROOP_ROWS, staffEmailFor, type ContactGroup, type ContactRow,
 } from '@/lib/contactsDirectory';
+
+interface LiveState { live: boolean; updated?: string; fetchedAt?: string; stale?: string }
+
+function SyncLine({ st, source, label }: { st: LiveState; source: string; label: string }) {
+  return (
+    <p className="fps-help">
+      {st.live ? `🟢 ${label}已由官方網頁即時同步` : `⚪ ${label}官方網頁暫時讀唔到，顯示內建備援資料`}
+      {st.updated ? ` · 網頁更新日期 ${st.updated}` : ''}
+      {st.fetchedAt ? ` · 同步 ${new Date(st.fetchedAt).toLocaleString('zh-HK', { hour12: false })}` : ''}
+      {st.stale ? ` · ⚠️ 上次成功結果（${st.stale}）` : ''}
+      {' · '}<a href={source} target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>來源 ↗</a>
+    </p>
+  );
+}
 
 type Tab = 'troop' | 'region' | 'hq';
 const TABS: { id: Tab; label: string }[] = [
@@ -84,11 +102,16 @@ function OfficeCard({ o }: { o: { name: string; address: string; tel: string; fa
 
 export default function ContactsPage() {
   const session = useRequireCard('contacts');
+  const { withDistrict } = useDistrict();
   const searchParams = useSearchParams();
   const initial = searchParams.get('tab') as Tab | null;
   const [tab, setTab] = useState<Tab>(initial && TABS.some(t => t.id === initial) ? initial : 'troop');
   const [q, setQ] = useState('');
   const [troopList, setTroopList] = useState<string[]>([]);
+  const [regionGroups, setRegionGroups] = useState<ContactGroup[]>(REGION_GROUPS);
+  const [regionSync, setRegionSync] = useState<LiveState>({ live: false, updated: REGION_OFFICE.updated });
+  const [hqGroups, setHqGroups] = useState<ContactGroup[]>(HQ_GROUPS);
+  const [hqSync, setHqSync] = useState<LiveState>({ live: false });
 
   // 旅號清單：先讀 Config TROOP_LIST（活動知會表同一份）
   useEffect(() => {
@@ -100,8 +123,41 @@ export default function ContactsPage() {
     })();
   }, []);
 
-  const regionCount = useMemo(() => REGION_GROUPS.reduce((n, g) => n + g.rows.filter(r => matches(r, q)).length, 0), [q]);
-  const hqCount = useMemo(() => HQ_GROUPS.reduce((n, g) => n + g.rows.filter(r => matches(r, q)).length, 0), [q]);
+  // 港島地域職員表 + 總會各署：由官方網頁即時同步（失敗保留靜態備援）
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    (async () => {
+      const [rs, rd] = await Promise.all([api.extRegionStaff(), api.extHksaDepts()]);
+      if (cancelled) return;
+      if (rs.ok && rs.data && rs.data.rows.length) {
+        const staticStaff = REGION_GROUPS.find(g => g.id === 'staff');
+        const rows: ContactRow[] = rs.data.rows.map((r) => {
+          const prev = staticStaff?.rows.find(x => x.tel === r.tel && x.post === r.post);
+          return { post: r.post, name: r.name || '—', tel: r.tel, email: staffEmailFor(r.post) || undefined, note: prev?.note };
+        });
+        setRegionGroups(REGION_GROUPS.map(g => (g.id === 'staff' ? { ...g, rows } : g)));
+        setRegionSync({ live: true, updated: rs.data.updated || undefined, fetchedAt: rs.data.fetchedAt, stale: rs.data.stale ? (rs.data.staleReason || '') : undefined });
+      }
+      if (rd.ok && rd.data && rd.data.depts.some(d => d.ok)) {
+        const staticDepts = HQ_GROUPS.find(g => g.id === 'depts');
+        const rows: ContactRow[] = rd.data.depts.map((d) => {
+          const prev = staticDepts?.rows.find(x => x.post.startsWith(d.name));
+          if (!d.ok) return prev || { post: d.name };
+          return {
+            post: prev?.post || d.name, name: undefined, tel: d.tel || prev?.tel, fax: d.fax || prev?.fax, email: d.email || prev?.email,
+            note: [d.address ? d.address.replace(/^.*?童軍中心/, '童軍中心') : '', prev?.note?.replace(/^\d+ 樓 \d+ 室(?: · )?/, '') || ''].filter(Boolean).join(' · ') || undefined,
+          };
+        });
+        setHqGroups(HQ_GROUPS.map(g => (g.id === 'depts' ? { ...g, rows } : g)));
+        setHqSync({ live: true, fetchedAt: rd.data.fetchedAt, stale: rd.data.stale ? (rd.data.staleReason || '') : undefined });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [session]);
+
+  const regionCount = useMemo(() => regionGroups.reduce((n, g) => n + g.rows.filter(r => matches(r, q)).length, 0), [regionGroups, q]);
+  const hqCount = useMemo(() => hqGroups.reduce((n, g) => n + g.rows.filter(r => matches(r, q)).length, 0), [hqGroups, q]);
 
   if (!session) return <div className="center"><div className="spinner" /></div>;
 
@@ -158,19 +214,21 @@ export default function ContactsPage() {
 
       {tab === 'region' && (
         <>
-          <OfficeCard o={REGION_OFFICE} />
+          <OfficeCard o={{ ...REGION_OFFICE, updated: regionSync.updated || REGION_OFFICE.updated }} />
           {q && <p className="fps-help">符合「{q}」：{regionCount} 項</p>}
-          {REGION_GROUPS.map(g => <GroupTable key={g.id} g={g} q={q} />)}
-          <p className="fps-help">來源：港島地域網站「專業領袖及受薪職員」（2026-07-16 更新）及「總監架構」（2026-08-13 更新）。地域職員及總監個人電郵未有公開，一律經 hkir@scout.org.hk。</p>
+          {regionGroups.map(g => <GroupTable key={g.id} g={g} q={q} />)}
+          <SyncLine st={regionSync} source={SOURCES.hkirStaff} label="職員表" />
+          <p className="fps-help">呢頁只放搵人解決問題用嘅職員直線電話；地域總監／區總監等架構請睇 <Link href={withDistrict('/orgchart')} style={{ textDecoration: 'underline' }}>🏛 地域及總會架構</Link>。地域職員個人電郵未有公開，一律經 hkir@scout.org.hk。</p>
         </>
       )}
 
       {tab === 'hq' && (
         <>
-          <OfficeCard o={HQ_OFFICE} />
+          <OfficeCard o={{ ...HQ_OFFICE, updated: hqSync.fetchedAt ? hqSync.fetchedAt.slice(0, 10) : HQ_OFFICE.updated }} />
           {q && <p className="fps-help">符合「{q}」：{hqCount} 項</p>}
-          {HQ_GROUPS.map(g => <GroupTable key={g.id} g={g} q={q} />)}
-          <p className="fps-help">來源：香港童軍總會網站「總部」各署頁面（2026-09 查閱）。</p>
+          {hqGroups.map(g => <GroupTable key={g.id} g={g} q={q} />)}
+          <SyncLine st={hqSync} source={SOURCES.hksaHq} label="總會各署電話" />
+          <p className="fps-help">其他總部單位／五個地域辦事處／緊急電話為內建資料（2026-09 查閱）；總會領導層架構請睇 <Link href={withDistrict('/orgchart?tab=hksa')} style={{ textDecoration: 'underline' }}>🏛 地域及總會架構</Link>。</p>
         </>
       )}
       <BackBar />

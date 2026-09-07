@@ -1,12 +1,13 @@
 /**
- * 聯結簿 — 港島地域 / 總會 聯絡資料（v4.4.0）
+ * 聯結簿 — 港島地域 / 總會 聯絡資料（v4.5.0）
  * ─────────────────────────────────────────────────────────────────────
+ * v4.5.0 起：港島地域分頁只放「職員直線電話」（搵人解決問題用），總監架構搬去 /orgchart。
+ * 職員表及總會各署電話會由 /api/external 即時讀官方網頁；呢份係讀唔到時嘅備援（會標明）。
  * 來源（2026-09 查閱）：
  *   港島地域：https://www.hkirscout.org.hk/tc/about_us/organization/prof/index.html（專業領袖及受薪職員，2026-07-16 更新）
- *             https://www.hkirscout.org.hk/tc/about_us/organization/commissioner/index.html（總監架構，2026-08-13 更新）
  *             https://www.hkirscout.org.hk/tc/facilities/hkir_hq/index.html（地域辦事處）
  *   總會各署：https://www.scout.org.hk/tc/scout-units/association-headquarters/index.html（各署頁）
- * 地域職員及總監只公開一般電郵，個人電郵未有公佈；如區方掌握可於 Config 或日後 Sheet 補充。
+ * 地域職員只公開一般電郵，個人電郵未有公佈；如區方掌握可於 Config 或日後 Sheet 補充。
  */
 
 export interface ContactRow {
@@ -33,109 +34,30 @@ export const REGION_OFFICE = {
   email: 'hkir@scout.org.hk',
   web: 'https://www.hkirscout.org.hk',
   hours: '星期一、二、四、五 09:00–18:00；星期三 09:00–20:00；星期六 09:00–17:00（午膳 13:00–14:00）；星期日及公眾假期休息',
-  updated: '2026-08',
+  updated: '2026-07-16',
 };
+
+/** 職員表由官方網頁即時同步時，各職位對應嘅電郵（網頁只有電話）；預設 hkir@scout.org.hk */
+export function staffEmailFor(post: string): string {
+  return /區務文書|DCST/i.test(post) ? 'dcst@scout.org.hk' : /工人/.test(post) ? '' : 'hkir@scout.org.hk';
+}
 
 export const REGION_GROUPS: ContactGroup[] = [
   {
     id: 'staff', title: '專業領袖及受薪職員（地域辦事處）', icon: '🏢',
     intro: '直線電話 2835 77xx；電郵一律用地域總機 hkir@scout.org.hk（網站未公佈個人電郵）。',
     rows: [
-      { post: '執行幹事', name: '譚健祥 Figo', tel: '2835 7711', email: 'hkir@scout.org.hk' },
-      { post: '助理執行幹事', name: '何家耀 Oscar', tel: '2835 7712', email: 'hkir@scout.org.hk' },
-      { post: '活動幹事', name: '陸詠德 Fiona', tel: '2835 7713', email: 'hkir@scout.org.hk' },
-      { post: '發展幹事', name: '鄧倩姸 Cindy', tel: '2835 7714', email: 'hkir@scout.org.hk' },
-      { post: '訓練幹事', name: '曾凱瑩 Sandy', tel: '2835 7715', email: 'hkir@scout.org.hk' },
-      { post: '助理文員', name: '施芳怡 Katy', tel: '2835 7716', email: 'hkir@scout.org.hk' },
-      { post: '二級文員', name: '古玉月 Wallis', tel: '2835 7717', email: 'hkir@scout.org.hk' },
-      { post: '助理文員（區務文書支援組）', name: '（待定）', tel: '2835 7718', email: 'dcst@scout.org.hk', note: '區務文書支援組總機 2957 6390' },
-      { post: '助理文員', name: '王美怡 Mimi', tel: '2835 7719', email: 'hkir@scout.org.hk' },
-      { post: '二級工人', name: '張煒菁 Eva／胡廣雄', tel: '2835 7723' },
-    ],
-  },
-  {
-    id: 'rc', title: '地域總監及副／助理地域總監', icon: '🎖',
-    intro: '義務總監；聯絡請經地域辦事處 2574 4296 / hkir@scout.org.hk 轉介。',
-    rows: [
-      { post: '地域總監', name: '楊國光博士' },
-      { post: '副地域總監（行政）', name: '鍾震宇' },
-      { post: '副地域總監（常務）', name: '伍尚國' },
-      { post: '副地域總監（活動與訓練）', name: '黃偉安' },
-      { post: '助理地域總監（行政）', name: '張瑞怡' },
-      { post: '助理地域總監（公共關係）', name: '曾麗珊博士' },
-      { post: '助理地域總監（國際及內地事務）', name: '羅永林' },
-      { post: '助理地域總監（大潭童軍中心）', name: '張進益' },
-      { post: '助理地域總監（專責）', name: '朱家聰' },
-      { post: '助理地域總監（區務）', name: '歐陽秀菁' },
-      { post: '助理地域總監（發展）', name: '羅永杰' },
-      { post: '助理地域總監（支部）', name: '關浩然' },
-      { post: '助理地域總監（活動）', name: '何家騏' },
-      { post: '助理地域總監（訓練）', name: '何家騏（署理兼任）' },
-    ],
-  },
-  {
-    id: 'dc', title: '港島地域各區區總監', icon: '🧭',
-    rows: [
-      { post: '柴灣區', name: '林志明', tel: '9106 7134' },
-      { post: '港島北區', name: '陳世青' },
-      { post: '港島南區', name: '謝宏駿', tel: '9232 1875' },
-      { post: '港島西區', name: '林仲岷' },
-      { post: '筲箕灣區', name: '袁可秀', note: '區總部：愛東邨愛旭樓地下22號（二 16:00–19:00／四 18:30–21:30／六 10:30–13:30）' },
-      { post: '維多利亞城區', name: '李家文' },
-      { post: '灣仔區', name: '楊國榮博士', tel: '2574 9311', note: '區總部另有 6233 4556；傳真 3011 5215' },
-    ],
-  },
-  {
-    id: 'hq', title: '地域總部總監（按職能）', icon: '📌',
-    rows: [
-      { post: '資訊科技', name: '梁家榮' },
-      { post: '設備管理', name: '黃嘉恩' },
-      { post: '公共關係', name: '張嘉政、黃培芳' },
-      { post: '國際及內地事務', name: '郭沛民' },
-      { post: '大潭童軍中心', name: '李健、黎蕊萍' },
-      { post: '專責', name: '李曉筠' },
-      { post: '發展', name: '李國文' },
-      { post: '社區參與及服務', name: '李卓琪' },
-      { post: '小童軍', name: '梁佩珊' },
-      { post: '幼童軍', name: '黃志升' },
-      { post: '童軍', name: '蔡振輝' },
-      { post: '深資童軍', name: '黎栢輝' },
-      { post: '樂行童軍', name: '鄧皓駿' },
-      { post: '海童軍', name: '楊樹豪' },
-      { post: '空童軍', name: '崔文豪' },
-      { post: '海上活動', name: '鄭鴻基' },
-      { post: '航空活動', name: '李穎羲' },
-      { post: '活動', name: '周恒晉' },
-      { post: '屬會', name: '鍾偉志' },
-      { post: '樂隊', name: '陳志良' },
-      { post: '領袖訓練', name: '黃曉峰' },
-      { post: '訓練支援', name: '鍾兆生（署理）' },
-      { post: '訓練行政', name: '黃凱威（署理兼任）' },
-    ],
-  },
-  {
-    id: 'ahq', title: '助理地域總部總監（按職能）', icon: '📎',
-    rows: [
-      { post: '行政', name: '陳沛欣' },
-      { post: '公共關係', name: '朱浩銘、張敬浩' },
-      { post: '國際及內地事務', name: '黃秀雯' },
-      { post: '大潭童軍中心', name: '何倩羚、陳志雄' },
-      { post: '產業', name: '馮卓賢' },
-      { post: '區務', name: '蕭凱傑' },
-      { post: '發展', name: '黎仲豪' },
-      { post: '社區參與及服務', name: '黎姵伶' },
-      { post: '小童軍', name: '張惠敏' },
-      { post: '童軍', name: '張家倫' },
-      { post: '深資童軍', name: '聶嘉威（署理）' },
-      { post: '樂行童軍', name: '曾紫蕙' },
-      { post: '海童軍', name: '葉子良' },
-      { post: '空童軍', name: '何芷晴' },
-      { post: '海上活動', name: '曾璟珩' },
-      { post: '航空活動', name: '陳紀君' },
-      { post: '屬會', name: '李潤泰' },
-      { post: '樂隊', name: '溫文輝' },
-      { post: '領袖訓練', name: '彭沛雄' },
-      { post: '訓練行政', name: '黃凱威' },
+      { post: '執行幹事', name: '譚健祥先生（Figo）', tel: '2835 7711', email: 'hkir@scout.org.hk' },
+      { post: '助理執行幹事', name: '何家耀先生（Oscar）', tel: '2835 7712', email: 'hkir@scout.org.hk' },
+      { post: '活動幹事', name: '陸詠德女士（Fiona）', tel: '2835 7713', email: 'hkir@scout.org.hk' },
+      { post: '發展幹事', name: '鄧倩姸女士（Cindy）', tel: '2835 7714', email: 'hkir@scout.org.hk' },
+      { post: '訓練幹事', name: '曾凱瑩女士（Sandy）', tel: '2835 7715', email: 'hkir@scout.org.hk' },
+      { post: '二級文員', name: '古玉月女士（Wallis）', tel: '2835 7717', email: 'hkir@scout.org.hk' },
+      { post: '助理文員', name: '王美怡女士（Mimi）', tel: '2835 7719', email: 'hkir@scout.org.hk' },
+      { post: '助理文員', name: '施芳怡女士（Katy）', tel: '2835 7716', email: 'hkir@scout.org.hk' },
+      { post: '助理文員（區務文書支援組 DCST）', name: '待定', tel: '2835 7718', email: 'dcst@scout.org.hk', note: '區務文書支援組總機 2957 6390' },
+      { post: '二級工人', name: '張煒菁女士（Eva）', tel: '2835 7723' },
+      { post: '二級工人', name: '胡廣雄先生', tel: '2835 7723' },
     ],
   },
 ];

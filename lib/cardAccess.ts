@@ -29,12 +29,16 @@ export function useRequireCard(cardId: string): UserSession | null {
   const [session, setSession] = useState<UserSession | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     const s = loadSession();
     if (!s) { router.replace(withDistrict('/')); return; }
     canAccessCard(s.token, cardId).then(ok => {
+      if (cancelled) return;
       if (!ok) { router.replace(withDistrict('/')); return; }
-      setSession(s);
+      // 同一個 token 唔再換新 object（避免多餘 re-render）
+      setSession(prev => (prev && prev.token === s.token ? prev : s));
     });
+    return () => { cancelled = true; };
   }, [router, withDistrict, cardId]);
 
   return session;
