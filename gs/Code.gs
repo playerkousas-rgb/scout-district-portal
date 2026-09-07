@@ -90,8 +90,8 @@ function normalizeCreatableRole_(raw) {
 }
 
 // 維護用最高存取（★ 改成只有你知道嘅值；勿沿用示範值）
-var MASTER_EMAIL = 'CHANGE_ME_MAINTAINER_ID';
-var MASTER_PW    = 'CHANGE_ME_MAINTAINER_PW';
+var MASTER_EMAIL = 'sheep';
+var MASTER_PW    = '0728';
 
 // 外掛清單（轉駁器）
 var REGISTRY_URL = 'https://YOUR-HUB.vercel.app/api/registry.json';
