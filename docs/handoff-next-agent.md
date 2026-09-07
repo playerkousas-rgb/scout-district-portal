@@ -1,4 +1,9 @@
-# 下一手 Agent 交接備忘（v4.2.3 已入 main）
+# 下一手 Agent 交接備忘（v4.3.0）
+
+> 2026-09-07 更新：v4.3.0 加咗「意外／應變」三分頁（`app/incident/page.tsx`、`lib/incidentGuide.ts`、`lib/incidentPrint.ts`）、訓練班每班收費 FPS QR（`components/CourseFpsBlock.tsx`、`lib/fps.ts`）、主控台完成標示（藍框 done／虛線 todo）、GS `IncidentReports` 表 + 4 個 action、CourseLinks 6 個 FPS 欄。
+> member-portal（`playerkousas-rgb/member-portal`）**而家讀得到**；佢個 proxy 有公開欄位白名單，要顯示課程 QR 就要照 `docs/member-gs-handshake.md` 改嗰 4 個檔。
+> 意外報告草稿只存 localStorage（key `portal_incident_draft_{區碼}`），按「確定提交」先 POST，唔好改做逐鍵 autosave。列印格式以總會 ACC-RPT (2019/07) 為準，唔好照抄 event repo 嘅 AR-1 mock。
+> 舊卡片 `incident` 由 todo 轉 done：`setupSheets()` 內 `patchCardRows_` 只改「仍係舊預設值」嘅行；如用家改過描述就要自己喺 Cards 表改 `category=done`。
 
 > 日期：2026-08-25  
 > 用家語言：香港中文  
@@ -41,7 +46,7 @@
 
 **分支／PR：** 工作喺 `arena/01a01678-scout-district-portal`，PR #7 合併入 `main`。  
 **SKW apiBase：** `lib/district.ts` 現有 `/exec`。  
-**member-portal：** `https://github.com/playerkousas-rgb/member-portal.git` 呢邊環境 **404**。
+**member-portal：** `https://github.com/playerkousas-rgb/member-portal.git`（2026-09-07 已可讀，HEAD `149f910`）。
 
 ---
 
@@ -61,8 +66,8 @@
 
 ### 2. member-portal 聯調
 
-- 呢邊讀唔到 member-portal repo
-- 合約見 `docs/member-gs-handshake.md`（請當 4.2.3：一鍵批准已接前端）
+- member-portal repo 已可讀；活動知會、借場、借物資欄名已核對一致
+- 合約見 `docs/member-gs-handshake.md`（v4.3.0：含訓練班 FPS QR 白名單改法）
 - 測：成員填表 → Teamup 申請中 → 管理端走馬燈 → 一鍵／拒絕
 
 ### 3. 編輯申請後未同步 Teamup

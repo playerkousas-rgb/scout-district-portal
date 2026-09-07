@@ -5,6 +5,17 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.3.0 — 意外／應變完成 + 訓練班收費 QR + 主控台完成標示</h3>
+        <ul>
+          <li>🚨「意外／應變」卡片完成：<b>即時應變</b>（情境卡＋電話通報清單＋天氣警告對照表＋熱線，全部依總會通告）、<b>完整指引</b>（總會官方 PDF 全部連結）、<b>意外報告</b>（手機直接填，草稿只存本機，按「確定提交」先入後台 <code>IncidentReports</code>）</li>
+          <li>意外報告列印／PDF 完全依總會行政署「意外報告」(ACC-RPT 2019/07) 兩頁版面，不適用選項自動加刪除線</li>
+          <li>🎓 訓練班管理每班可生成收費 FPS QR（區會戶口＋學費＋課程編號），儲存到 <code>CourseLinks</code>；成員系統 <code>listCourseLinks</code> 會帶 <code>fpsQrPayload</code> 等欄位（member-portal 要改白名單先顯示，見 <code>docs/member-gs-handshake.md</code>）</li>
+          <li>主控台卡片：<b>藍色實線框＝已完成</b>、灰色虛線框＝🚧 加入中，一眼睇到改進方向</li>
+          <li>已核對活動知會雙向打通：成員系統填 → <code>ActivityNotices</code> → 管理系統 /activity-notices 即見</li>
+          <li><code>setupSheets()</code> 會補 <code>IncidentReports</code> 表、CourseLinks 6 個 FPS 欄，並把意外卡片由 todo 改 done（只改仍是舊預設值嘅行）</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.2.4 — FPS QR 即時生成 + 圖片分享</h3>
         <ul>
           <li>主控台「💳 FPS QR Code 製作」：輸入銀碼後即時產生收款 QR，不用再前往外部產生器</li>
@@ -53,7 +64,7 @@ export default function UpdatesPage() {
       </div>
       <div className="info-card">
         <h3>後台程式碼</h3>
-        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.2.3</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
+        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.3.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
       </div>
     </>
   );

@@ -7,7 +7,7 @@ import { DISTRICT_STORAGE_KEY } from './district';
 import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
-  CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice,
+  CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport,
 } from './types';
 
 function getDistrictCode(): string {
@@ -165,4 +165,14 @@ export const api = {
     callPost('submitActivityNotice', data),
   deleteActivityNotice: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteActivityNotice', { token, id }),
+
+  // 意外／應變：意外報告（只喺按「確定提交」時先送後台；草稿留喺本機）
+  submitIncidentReport: (token: string, report: IncidentReport): Promise<ApiResult<{ refCode: string; id: string }>> =>
+    callPost('submitIncidentReport', { token, report }),
+  listIncidentReports: (token: string): Promise<ApiResult<IncidentReport[]>> =>
+    callGet('listIncidentReports', { token }),
+  updateIncidentReport: (token: string, id: string, patch: Partial<IncidentReport>): Promise<ApiResult<{ saved: boolean }>> =>
+    callPost('updateIncidentReport', { token, id, patch }),
+  deleteIncidentReport: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
+    callPost('deleteIncidentReport', { token, id }),
 };

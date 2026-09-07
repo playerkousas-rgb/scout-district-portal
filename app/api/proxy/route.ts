@@ -18,6 +18,12 @@ import { DISTRICTS } from '@/lib/district';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/** 本機開發用：設 PORTAL_DEV_APIBASE 可把所有區指向本機模擬後台（production 一律忽略） */
+function apiBaseFor(district: { apiBase: string }): string {
+  if (process.env.NODE_ENV !== 'production' && process.env.PORTAL_DEV_APIBASE) return process.env.PORTAL_DEV_APIBASE;
+  return district.apiBase;
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const districtCode = searchParams.get('districtCode');
@@ -43,7 +49,7 @@ export async function GET(request: NextRequest) {
       apiKeyPrefix: apiKey ? apiKey.substring(0, 6) + '...' : '(empty)',
       apiKeyLength: apiKey.length,
       allEnvKeys: Object.keys(process.env).filter(k => k.startsWith('PORTAL_')),
-      apiBase: district.apiBase,
+      apiBase: apiBaseFor(district),
     });
   }
 
@@ -55,7 +61,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Build target URL for GET
-  const url = new URL(district.apiBase);
+  const url = new URL(apiBaseFor(district));
   url.searchParams.set('action', action);
   url.searchParams.set('apiKey', apiKey);
   searchParams.forEach((value, key) => {
@@ -103,7 +109,7 @@ export async function POST(request: NextRequest) {
   const postBody = { action, apiKey, ...rest };
 
   try {
-    const res = await fetch(district.apiBase, {
+    const res = await fetch(apiBaseFor(district), {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(postBody),

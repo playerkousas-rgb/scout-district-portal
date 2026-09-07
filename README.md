@@ -51,7 +51,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.2.0"` 即通。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.3.0"` 即通。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -64,7 +64,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.1.0"` 即代表用緊最新後台。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.3.0"` 即代表用緊最新後台。
 
 ---
 
@@ -82,6 +82,23 @@
 - 要令舊後台出現呢張新卡片：貼新 `gs/Code.gs` → 執行 `setupSheets()`（自動補建缺失卡片＋權限，唔會洗資料）。
 
 ---
+
+## 🚨 意外／應變（v4.3.0 完成）
+
+主控台「🚨 意外／應變」卡片三個分頁，全部依香港童軍總會官方通告整理（來源連結喺「完整指引」分頁）：
+
+| 分頁 | 內容 |
+|---|---|
+| 即時應變 | 活動出事時打開即用：受傷送院／嚴重傷亡／惡劣天氣／酷熱寒冷空氣污染／遠足失蹤／海上事故／保護童軍成員／傳媒查詢 8 張情境卡，每張有步驟、致電總監要講齊嘅資料（活動指引通告 02/2021）、限期（嚴重 3 個工作天、報告 7 個工作天）；另有 04/2018 天氣警告對照表、緊急熱線、出發前檢查 |
+| 完整指引 | 總會表格／政策通告／行政通告／活動指引通告全部官方 PDF 連結 |
+| 意外報告 | 手機直接填總會行政署「意外報告」(ACC-RPT 2019/07) 全部欄位；**草稿只存本機，按「確定提交」先入後台 `IncidentReports`**；列印／PDF 完全依官方兩頁版面；DDC+ 可記錄「單位主管已省閱」及刪除 |
+
+後台：`submitIncidentReport`（登入）、`listIncidentReports`（登入）、`updateIncidentReport` / `deleteIncidentReport`（canVenue）。提交會寄 `NOTIFY_STAFF_EMAIL`，嚴重傷亡會加註。
+
+## 🎓 訓練班收費 FPS QR（v4.3.0）
+
+`/training` 每班一個「💳 收費 QR」掣：用區會 FPS 戶口 + 學費 + 課程編號即時生成 → 「儲存 QR 到此班」寫入 `CourseLinks`（`fpsQrPayload` 等 6 欄）→ 成員系統 `listCourseLinks` 就攞到，未交費嘅申請人可以直接掃。
+member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handshake.md`](docs/member-gs-handshake.md)。
 
 ## 📚 文件索引
 

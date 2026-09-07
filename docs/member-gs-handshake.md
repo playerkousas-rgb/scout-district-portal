@@ -1,9 +1,91 @@
-# member-portal ↔ 統一後台（GS）對接合約 v4.2.3
+# member-portal ↔ 統一後台（GS）對接合約 v4.3.0
 
 兩邊共用同一份 `gs/Code.gs`、同一張 Sheet、同一個 `/exec` + API Key。
 
-> `https://github.com/playerkousas-rgb/member-portal.git` 喺呢次環境係 **404 / 讀唔到**。
-> 呢份合約按「那邊表單已對準 SHEET、呢邊負責批核」嚟寫。若 member-portal 有額外欄名，GS 已收一批別名。
+> 2026-09-07 已直接讀過 `https://github.com/playerkousas-rgb/member-portal.git`（HEAD `149f910`，Next 16 / React 19）核對：
+> 借場、借物資、活動知會、訓練班報名嘅欄名同呢邊 GS 一致。member-portal 自己嘅合約文件係 `docs/integration-contract.md`。
+
+## 訓練班收費 FPS QR（v4.3.0 新增）
+
+```
+管理系統 /training（訓練班管理）
+   按該班「💳 收費 QR」→ 用 Config FPS 戶口 + fee + 課程編號即時生成
+   → 「儲存 QR 到此班」= saveCourseLink（帶 fpsQrPayload 等 6 欄）
+        │
+        ▼
+CourseLinks 多咗 6 欄：
+   fpsQrPayload      已計好 CRC 嘅 FPS QR 字串（成員系統只需畫 QR）
+   fpsAmount         固定銀碼（= 學費）
+   fpsReference      參考編號（預設課程編號 courseNo）
+   fpsAccountName    生成當刻嘅戶口名
+   fpsAccountNumber  生成當刻嘅 FPS ID
+   fpsUpdatedAt      ISO 時間
+        │
+        ▼
+member-portal  GET listCourseLinks  → 每個 course 都會多呢 6 個 key（未生成 = 空字串）
+```
+
+**GS 行為：** `saveCourseLink` 只有 body 帶 `fpsQrPayload` 先會掂呢 6 欄（`undefined` = 保留舊值；空字串 = 移除 QR）。
+舊版 member-portal 完全唔受影響（多咗 key 唔會 crash）。
+
+### member-portal 要改嘅位（先可以喺報名頁顯示 QR）
+
+member-portal 個 proxy 有 **公開欄位白名單**，新欄位會被剝走，所以要改 4 個檔：
+
+| 檔案 | 改法 |
+|---|---|
+| `app/api/proxy/route.ts` → `publicCourse()` | 白名單加 `fpsQrPayload, fpsAmount, fpsReference, fpsAccountName, fpsAccountNumber` |
+| `lib/types.ts` → `CourseLink` | 加同名 5 個 optional string |
+| `lib/api.ts` → `mapCourse()` | 一併 map 過去 |
+| `app/training/page.tsx` 付款區 | 有 `fpsQrPayload` 就用 `qrcode.react` 畫 QR（`npm i qrcode.react`），旁邊顯示 `fpsAccountName`、`fpsAccountNumber`、`HK$ fpsAmount`、`fpsReference`；冇就維持現有文字 |
+
+顯示建議：報名成功頁 + 「未交費」提示都放同一個 QR 區塊，等申請人一眼搵到「掃邊個 QR、入邊個戶口、交幾多錢」。
+`fpsQrPayload` 係 HKICL Common QR 標準字串，直接 `<QRCodeCanvas value={fpsQrPayload} />` 就掃得。
+
+**現成 patch：** [`docs/member-portal-fps-qr.patch`](member-portal-fps-qr.patch)（已對 member-portal HEAD `149f910` 做過 `tsc` 通過）。
+喺 member-portal repo 入面：
+
+```bash
+git am path/to/member-portal-fps-qr.patch   # 或 git apply
+npm install                                  # 會裝 qrcode.react
+```
+
+包含：proxy 白名單、`CourseLink` 型別、`mapCourse`、新元件 `components/CourseFpsQr.tsx`（繳費區 + 報名成功頁）、CSS、`docs/integration-contract.md` 一段。
+
+## 活動知會（已核對雙向打通）
+
+```
+member-portal /activity 填表
+   POST action=submitActivityNotice
+   { year, section, nature, troop, activityName, startDateTime, endDateTime, location,
+     membersCount, leadersCount, parentsCount, leaderName, leaderPhone, leaderEmail, note }
+        │
+        ▼
+GS submitActivityNotice_ → ActivityNotices 新增一行（refCode AN-yyyyMMdd-nnnn）
+   + AllRecords 一筆 + NOTIFY_STAFF_EMAIL 電郵
+        │
+        ▼
+管理系統 /activity-notices → listActivityNotices（年份／支部／性質過濾、DDC+ 可刪）
+```
+
+必填：`troop, activityName, leaderName, leaderPhone`。
+⚠️ 如 Config 有填 `ACTIVITY_SCRIPT_URL`，GS 會轉發去外部 Script 而**唔寫本表**，管理系統就會睇唔到；要雙向就留空。
+member-portal 個 proxy 讀 `listActivityNotices` 時會剝走 `leaderName / leaderPhone / leaderEmail / note`（公開端唔顯示個人資料）；管理系統經自己 proxy 讀就係全欄。
+
+## 意外／應變：意外報告（v4.3.0，管理系統專用）
+
+`IncidentReports` 表 = 香港童軍總會行政署「意外報告」(ACC-RPT 2019/07) 兩頁全部欄位（camelCase），
+另加 `id, districtCode, refCode(IR-…), status(submitted/reviewed), submittedAt, submittedBy, serious, createdAt`。
+`details` / `followUps` 係 JSON 字串 `[{when, text}]`。
+
+| action | 權限 | 用途 |
+|---|---|---|
+| `submitIncidentReport` (POST `{token, report}`) | 登入 | 前端按「確定提交」先呼叫；草稿只存本機 localStorage |
+| `listIncidentReports` (GET `token`) | 登入 | 最新在前 |
+| `updateIncidentReport` (POST `{token, id, patch}`) | canVenue | 單位主管省閱、補跟進；`id/refCode/submittedAt` 等鎖欄唔改得 |
+| `deleteIncidentReport` (POST `{token, id}`) | canVenue | |
+
+`IncidentReports` 已加入 `protectSensitiveSheets_`（個人資料）。member-portal **唔應該**接呢組 action。
 
 ## 借物資（而家打通）
 
@@ -98,10 +180,10 @@ member-portal 填表
 健康檢查 `?action=getHealthCheck`（免 Key）會回：
 
 ```json
-{ "version": "4.2.3", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
+{ "version": "4.3.0", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
 ```
 
-`version` 要係 `4.2.3` 先代表呢版 GS 已貼上線。
+`version` 要係 `4.3.0` 先代表呢版 GS 已貼上線。
 
 ## 部署
 

@@ -32,7 +32,13 @@ export default function CardItem({ card, role }: { card: CardDef; role: string }
   }
 
   return (
-    <div className={`card t-${card.type}`} onClick={handleClick} role="button" tabIndex={0}>
+    <div
+      className={`card t-${card.type} ${card.category === 'todo' ? 'todo' : 'done'}`}
+      onClick={handleClick}
+      role="button"
+      tabIndex={0}
+      title={card.category === 'todo' ? '加入中：功能仍在開發' : '已完成：功能已上線'}
+    >
       <span className={`pill ${card.type}`}>{typeLabel[card.type] || card.type}</span>
       {card.category === 'todo' && <span className="plugin-tag">🚧 加入中</span>}
       <div className="ico">{card.icon}</div>

@@ -150,6 +150,8 @@ export default function HomePage() {
             <span><i className="sq" style={{ background: '#16a34a' }} /> 內建</span>
             <span><i className="sq" style={{ background: '#4338ca' }} /> 跳轉</span>
             <span><i className="sq" style={{ background: '#94a3b8' }} /> 資源</span>
+            <span><i className="sq done" /> 藍框＝已完成</span>
+            <span><i className="sq todo" /> 虛線＝🚧 加入中</span>
             <span>✏️ 可管理　👁 可看</span>
           </div>
         </>

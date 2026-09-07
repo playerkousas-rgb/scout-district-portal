@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.2.3
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.3.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -37,6 +37,17 @@
  * 管理系統 setStockRequestStatus：批准先扣庫存；拒絕／取消／歸還回補。
  * 提交欄位兼容 qty/quantity、borrowDate/startDate、items[] 多件。
  *
+ * ── 訓練班收費 FPS QR（v4.3.0）───────────────────────────
+ * 管理系統「訓練班管理」按每班 fee 生成 FPS QR，saveCourseLink 寫入
+ * CourseLinks 嘅 fpsQrPayload / fpsAmount / fpsReference / fpsAccountName /
+ * fpsAccountNumber / fpsUpdatedAt。listCourseLinks（公開）會一併回傳，
+ * 成員系統 member-portal 直接用 fpsQrPayload 畫 QR 俾未交費者。
+ *
+ * ── 意外／應變（v4.3.0）─────────────────────────────────
+ * IncidentReports 表 = 香港童軍總會行政署「意外報告」（ACC-RPT 2019/07）欄位。
+ * submitIncidentReport（需登入）只喺前端按「確定提交」時先寫入；
+ * listIncidentReports（需登入）／updateIncidentReport／deleteIncidentReport（canVenue）。
+ *
  * ── 部署 ──────────────────────────────────────────────────
  * 擴充功能 → Apps Script → 貼上本檔 → 執行 setupSheets()
  * → 部署為網頁應用程式（執行身分：我自己；存取：任何人）
@@ -56,6 +67,7 @@ var SHEET = {
   VENUES: 'Venues', VENUE_REQ: 'VenueBookings',
   ITEMS: 'Items', STOCK_REQ: 'StockRequests',
   ACTIVITY_REQ: 'ActivityNotices',
+  INCIDENT_REQ: 'IncidentReports', // 意外報告（HKSA ACC-RPT 2019/07 欄位）
   COURSE_LINKS: 'CourseLinks',   // 訓練班目錄（單一資料來源）
   COURSES: 'Courses',            // 舊版內建課程（保留相容）
   COURSE_REQ: 'CourseRegs',      // 舊版報名（保留相容）
@@ -142,7 +154,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.2.3',
+      version: '4.3.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -186,6 +198,7 @@ function doGet(e) {
       case 'getPendingInbox':     return json(getPendingInbox_(p.token));
       case 'getActivityNotices':  return json(getActivityNotices_(p.token));
       case 'getAllRecords':       return json(getAllRecords_(p.token));
+      case 'listIncidentReports': return json(listIncidentReports_(p.token));
 
       // ---------- 成員系統 /staff 舊介面 ----------
       case 'staffVerify':         return json(staffVerify_(p.token));
@@ -243,6 +256,11 @@ function doPost(e) {
       case 'saveItem':             return json(saveItem_(b.token, b.item));
       case 'deleteItem':           return json(deleteItem_(b.token, b.itemId));
       case 'deleteActivityNotice': return json(deleteActivityNotice_(b.token, b.id));
+
+      // ---------- 意外／應變：意外報告（管理系統，需登入） ----------
+      case 'submitIncidentReport': return json(submitIncidentReport_(b.token, b.report || b));
+      case 'updateIncidentReport': return json(updateIncidentReport_(b.token, b.id, b.patch || {}));
+      case 'deleteIncidentReport': return json(deleteIncidentReport_(b.token, b.id));
 
       // ---------- 訓練班目錄 ----------
       case 'saveCourseLink':       return json(saveCourseLink_(b.token, b.link));
@@ -1302,6 +1320,138 @@ function deleteActivityNotice_(token, id) {
   return ok({ deleted: true });
 }
 
+// ===================== 意外／應變：意外報告（v4.3.0） =====================
+// 欄位 = 香港童軍總會行政署「意外報告」(ACC-RPT 2019/07) 兩頁內容（camelCase），
+// 另加 id / districtCode / refCode / status / submittedAt / submittedBy / serious / createdAt。
+// details / followUps 以 JSON 字串儲存 [{when, text}, ...]。
+
+var INCIDENT_FIELDS = [
+  'id', 'districtCode', 'refCode', 'status', 'submittedAt', 'submittedBy', 'serious',
+  // 基本資料
+  'accidentDate', 'accidentTime', 'activityName', 'place', 'organiser', 'injuryPart', 'injuryType',
+  // 傷者個人資料
+  'injuredNameZh', 'injuredNameEn', 'scoutId', 'hkid', 'age', 'sex', 'phone', 'email', 'address', 'unit', 'position',
+  // 未滿 18 歲
+  'guardianName', 'guardianRelation', 'guardianPhone', 'guardianEmail',
+  // 救護車
+  'ambulanceCalled', 'ambCallerName', 'ambCallerPhone', 'ambCallerUnit', 'ambCallerPosition', 'ambCallTime', 'ambArriveTime',
+  // 醫院／診所
+  'hospital', 'hospitalStay', 'hospitalDays', 'escortName', 'escortPhone', 'escortUnit', 'escortPosition',
+  // 報案
+  'policeReported', 'policeStation', 'policeCaseNo',
+  // 目擊者（兩位；更多另紙）
+  'hasWitness', 'witnessName', 'witnessPhone', 'witnessSex', 'witnessAddress', 'witnessUnit', 'witnessPosition',
+  'witness2Name', 'witness2Phone', 'witness2Sex', 'witness2Address', 'witness2Unit', 'witness2Position',
+  // 第二頁
+  'details', 'followUps',
+  'reporterName', 'reporterPosition', 'reporterUnit', 'reporterDate', 'reporterPhone', 'reporterEmail',
+  // 童軍單位主管專用
+  'supervisorReceivedDate', 'supervisorUnit', 'supervisorDate', 'supervisorName', 'supervisorRemark',
+  'createdAt',
+];
+var INCIDENT_LOCKED_FIELDS = ['id', 'districtCode', 'refCode', 'submittedAt', 'submittedBy', 'createdAt'];
+
+function incidentJsonList_(v) {
+  if (Array.isArray(v)) return JSON.stringify(v.map(function (r) {
+    return { when: String((r && r.when) || '').trim(), text: String((r && r.text) || '').trim() };
+  }).filter(function (r) { return r.when || r.text; }));
+  var s = String(v || '').trim();
+  if (!s) return '[]';
+  try { var arr = JSON.parse(s); return Array.isArray(arr) ? JSON.stringify(arr) : '[]'; } catch (e) { return '[]'; }
+}
+function incidentClean_(r) {
+  var out = {};
+  INCIDENT_FIELDS.forEach(function (k) {
+    if (k === 'details' || k === 'followUps') { out[k] = incidentJsonList_(r[k]); return; }
+    var v = r[k];
+    out[k] = v === undefined || v === null ? '' : String(v).trim();
+  });
+  return out;
+}
+
+/** 提交意外報告（需登入；前端只喺按「確定提交」時先呼叫） */
+function submitIncidentReport_(token, report) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  var g = guardLocked_(); if (g) return g;
+  report = report || {};
+  if (!String(report.activityName || '').trim()) return err('活動名稱必填');
+  if (!String(report.accidentDate || '').trim()) return err('意外發生日期必填');
+  if (!String(report.injuredNameZh || '').trim() && !String(report.injuredNameEn || '').trim()) return err('傷者姓名必填');
+  if (!String(report.reporterName || '').trim()) return err('活動負責人／導師姓名必填');
+
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.INCIDENT_REQ);
+  if (!sh) return err('尚未執行 setupSheets()（缺 IncidentReports 表）');
+
+  var rid = genId_('ir'), ref = genRef_('IR'), now = new Date().toISOString();
+  var row = incidentClean_(report);
+  row.id = rid; row.districtCode = districtCode_(); row.refCode = ref;
+  row.status = 'submitted'; row.submittedAt = now; row.createdAt = now; row.submittedBy = t.email;
+  row.serious = isTrue_(report.serious) ? 'TRUE' : 'FALSE';
+  appendRowObj_(sh, row);
+
+  var injured = row.injuredNameZh || row.injuredNameEn;
+  appendRecord_('incident', rid, ref, '🚨 意外報告：' + row.activityName, row.reporterName, row.reporterPhone, row.reporterUnit || row.unit,
+    row.serious === 'TRUE' ? 'serious' : 'filed',
+    row.accidentDate + ' ' + row.accidentTime + ' · ' + row.place + ' · 傷者 ' + injured + '（' + row.injuryPart + '／' + row.injuryType + '）');
+  notifyStaff_((row.serious === 'TRUE' ? '🚨【嚴重】' : '🚨 ') + '意外報告 ' + ref + '：' + row.activityName,
+    '活動：' + row.activityName + '\n日期：' + row.accidentDate + ' ' + row.accidentTime + '\n地點：' + row.place
+    + '\n傷者：' + injured + '（' + row.injuryPart + '／' + row.injuryType + '）'
+    + '\n送院：' + (row.hospital || '—') + '\n負責人：' + row.reporterName + ' ' + row.reporterPhone
+    + '\n提交者：' + t.email
+    + (row.serious === 'TRUE' ? '\n\n★ 嚴重傷亡：須於 3 個工作天內通知總會行政署。' : '')
+    + '\n\n請於事發後 7 個工作天內將正本經單位主管轉交總會行政署。');
+  return okSubmit_({ refCode: ref, id: rid });
+}
+
+/** 查閱（需登入；最新在前） */
+function listIncidentReports_(token) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  var list = readSheet_(SHEET.INCIDENT_REQ).map(function (r) {
+    var o = {};
+    Object.keys(r).forEach(function (k) {
+      var v = r[k];
+      // Sheet 會自動把 "2026-09-07" / "14:35" 轉成 Date；讀返出嚟時還原成字串
+      if (v instanceof Date) {
+        v = v.getFullYear() < 1900
+          ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'HH:mm')        // 純時間（1899-12-30 基準）
+          : Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      }
+      o[k] = v === undefined || v === null ? '' : String(v);
+    });
+    o.districtCode = o.districtCode || districtCode_();
+    return o;
+  });
+  list.sort(function (a, b) { return String(b.submittedAt || '').localeCompare(String(a.submittedAt || '')); });
+  return ok(list);
+}
+
+/** 補充／修正（例如單位主管省閱資料、跟進工作）：行政類角色 */
+function updateIncidentReport_(token, id, patch) {
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  id = String(id || '').trim();
+  if (!id) return err('id 必填');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.INCIDENT_REQ);
+  var idx = findRowByFirstCol_(sh, id);
+  if (idx < 0) return err('找不到該意外報告');
+  patch = patch || {};
+  Object.keys(patch).forEach(function (k) {
+    if (INCIDENT_FIELDS.indexOf(k) < 0 || INCIDENT_LOCKED_FIELDS.indexOf(k) >= 0) return;
+    var v = patch[k];
+    if (k === 'details' || k === 'followUps') v = incidentJsonList_(v);
+    else if (k === 'serious') v = isTrue_(v) ? 'TRUE' : 'FALSE';
+    else v = v === undefined || v === null ? '' : String(v).trim();
+    setCellByHeader_(sh, idx, k, v);
+  });
+  if (patch.status) updateRecordStatus_(id, String(patch.status).trim());
+  return ok({ saved: true });
+}
+
+function deleteIncidentReport_(token, id) {
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.INCIDENT_REQ), String(id).trim());
+  return ok({ deleted: true });
+}
+
 // ===================== 訓練班目錄（CourseLinks） =====================
 // 每個訓練班 = 1 張專屬 Sheet + 1 份收表 Script + 1 個 Drive 資料夾。
 // 欄名以管理系統為準：scriptExecUrl / scriptApiKey / driveFolderId
@@ -1321,6 +1471,13 @@ function courseLinkPublic_(r) {
     subsidyNote: r.subsidyNote || '', deadline: r.deadline || '',
     quota: Number(r.quota) || 0, filled: Number(r.filled) || 0,
     venue: r.venue || '', noticeUrl: r.noticeUrl || '', contact: r.contact || '',
+    // 每班收費 FPS QR（v4.3.0）：成員系統直接畫 QR；冇生成過就全部空字串
+    fpsQrPayload: String(r.fpsQrPayload || '').trim(),
+    fpsAmount: r.fpsAmount === undefined || r.fpsAmount === null ? '' : String(r.fpsAmount).trim(),
+    fpsReference: String(r.fpsReference || '').trim(),
+    fpsAccountName: String(r.fpsAccountName || '').trim(),
+    fpsAccountNumber: r.fpsAccountNumber === undefined || r.fpsAccountNumber === null ? '' : String(r.fpsAccountNumber).trim(),
+    fpsUpdatedAt: r.fpsUpdatedAt || '',
   };
 }
 
@@ -1383,6 +1540,18 @@ function saveCourseLink_(token, link) {
     driveFolderId: link.driveFolderId || '',
     active: link.active === undefined || link.active ? 'TRUE' : 'FALSE',
   };
+
+  // 每班收費 FPS QR（v4.3.0）：前端只會喺「儲存 QR」時帶 fpsQrPayload；
+  // 舊前端／未帶欄位時唔掂已儲存嘅 QR（undefined = 保留），帶空字串 = 移除。
+  if (link.fpsQrPayload !== undefined) {
+    var payload = String(link.fpsQrPayload || '').trim();
+    row.fpsQrPayload = payload;
+    row.fpsAmount = payload ? String(link.fpsAmount || '').trim() : '';
+    row.fpsReference = payload ? String(link.fpsReference || '').trim() : '';
+    row.fpsAccountName = payload ? String(link.fpsAccountName || '').trim() : '';
+    row.fpsAccountNumber = payload ? String(link.fpsAccountNumber || '').trim() : '';
+    row.fpsUpdatedAt = payload ? (link.fpsUpdatedAt || new Date().toISOString()) : '';
+  }
 
   if (idx > 0) {
     Object.keys(row).forEach(function (k) { setCellByHeader_(sh, idx, k, row[k]); });
@@ -2408,7 +2577,7 @@ function showNewApiKey() { regenerateApiKeyMenu(); }
 function protectSensitiveSheets_(ss) {
   var me = '';
   try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { me = ''; }
-  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS].forEach(function (name) {
+  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ].forEach(function (name) {
     try {
       var sh = ss.getSheetByName(name);
       if (!sh) return;
@@ -2547,8 +2716,7 @@ function blueprint_() {
       ['ttlockLockId', '', '（舊名）等同 SCIENER_LOCK_ID'],
       ['ttlockApiBase', '', '（舊名）等同 SCIENER_API_BASE'],
       ['ttlockDisabled', '', 'TRUE = 跳過寫鎖，改用模擬密碼'],
-      ['notifyFrom', '', '電郵寄件人名稱（預設用區名）'],
-      ['approverEmail', '', '(選填) 收待審批通知信職員'],
+      ['notifyFrom', '', '寄件人顯示名稱（不是 Gmail 地址；留空用區名）'],
       // 付款 / 規定
       ['FPS_ACCOUNT_NAME', DEFAULT_FPS_ACCOUNT_NAME, '轉數快戶口名'],
       ['FPS_ACCOUNT_NUMBER', DEFAULT_FPS_ACCOUNT_NUMBER, '轉數快號碼'],
@@ -2600,7 +2768,7 @@ function blueprint_() {
       ['venueReg', '場地借用審批', '🏛', 'builtin', '/venue-regs', '借場申請批核 · 場地清單', 9, 'TRUE', 'FALSE', 'core', 'done'],
       ['stockReg', '物資借用審批', '📦', 'builtin', '/stock-regs', '借物資批核 · 庫存管理', 10, 'TRUE', 'FALSE', 'core', 'done'],
       ['activity', '活動知會', '🗓', 'builtin', '/activity-notices', '旅團活動知會記錄', 11, 'TRUE', 'FALSE', 'core', 'done'],
-      ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '通報 · 惡劣天氣', 12, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '即時應變 · 總會指引 · 意外報告', 12, 'TRUE', 'FALSE', 'core', 'done'],
       ['training', '訓練班管理', '🎓', 'builtin', '/training', '開班登記 · 區會目錄', 13, 'TRUE', 'FALSE', 'core', 'done'],
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
@@ -2643,13 +2811,18 @@ function blueprint_() {
         'membersCount', 'leadersCount', 'parentsCount',
         'leaderName', 'leaderPhone', 'leaderEmail', 'note', 'createdAt'],
     ] },
+    // 意外報告：欄位對應香港童軍總會行政署「意外報告」(ACC-RPT 2019/07) 兩頁內容
+    { name: SHEET.INCIDENT_REQ, headerColor: '#fee2e2', rows: [
+      INCIDENT_FIELDS.slice(),
+    ] },
     { name: SHEET.COURSE_LINKS, rows: [
       ['courseId', 'districtCode', 'title', 'badgeName', 'section', 'courseNo', 'sessionsText',
         'eligibility', 'fee', 'originalFee', 'subsidyNote', 'deadline', 'quota', 'filled',
         'venue', 'noticeUrl', 'contact',
         'scriptExecUrl', 'scriptApiKey', 'driveFolderId',
         'apiBase', 'apiKey',
-        'active', 'createdAt'],
+        'active', 'createdAt',
+        'fpsQrPayload', 'fpsAmount', 'fpsReference', 'fpsAccountName', 'fpsAccountNumber', 'fpsUpdatedAt'],
     ] },
     { name: SHEET.COURSES, rows: [
       ['courseId', 'districtCode', 'title', 'section', 'badgeName', 'courseNo', 'sessionsText',
@@ -2711,6 +2884,7 @@ function setupSheets() {
 
   seedCourseParams_(ss);
   ensureCardRows_(ss);
+  patchCardRows_(ss);
   ensurePermsRows_(ss);
   protectSensitiveSheets_(ss);
 
@@ -2749,6 +2923,29 @@ function ensureCardRows_(ss) {
     header.forEach(function (h, j) { obj[h] = r[j] !== undefined ? r[j] : ''; });
     appendRowObj_(sh, obj);
   });
+}
+
+/**
+ * 卡片升級補丁（唔會掂用戶自行改過嘅值）：
+ * v4.3.0 意外／應變卡片已完成 → 只當該行仍然係藍圖舊值（category=todo 且 description=舊字串）先改為 done。
+ */
+function patchCardRows_(ss) {
+  var sh = ss.getSheetByName(SHEET.CARDS);
+  if (!sh) return;
+  var v = sh.getDataRange().getValues();
+  if (v.length < 2) return;
+  var head = v[0].map(function (h) { return String(h).trim(); });
+  var cId = head.indexOf('cardId'), cCat = head.indexOf('category'), cDesc = head.indexOf('description');
+  if (cId < 0 || cCat < 0) return;
+  var patches = { incident: { oldDesc: '通報 · 惡劣天氣', desc: '即時應變 · 總會指引 · 意外報告' } };
+  for (var i = 1; i < v.length; i++) {
+    var id = String(v[i][cId] || '').trim();
+    var p = patches[id];
+    if (!p) continue;
+    if (String(v[i][cCat] || '').trim() !== 'todo') continue;
+    sh.getRange(i + 1, cCat + 1).setValue('done');
+    if (cDesc >= 0 && String(v[i][cDesc] || '').trim() === p.oldDesc) sh.getRange(i + 1, cDesc + 1).setValue(p.desc);
+  }
 }
 
 /** 補建缺失權限行（Perms 表）：新卡片自動按藍圖角色補權限，唔會掂已有行 */
