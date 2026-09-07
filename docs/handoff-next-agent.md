@@ -1,5 +1,7 @@
 # 下一手 Agent 交接備忘（v4.5.0）
 
+> 2026-09-07（第四輪）🎪 繽紛日 2026 專頁：`app/fun-day/page.tsx`（籌備會議＋執行手冊兩分頁，只要求登入、唔經 Cards／Perms，唔使改後台）＋ `lib/funDay.ts`（單一資料來源：第 5 次 9/14(一)1915 百周年大樓1704室已填，1–4 次待補；執行手冊含 FAT/01／ACC-RPT／保險通告連結＋大會文件待上載位）＋ `components/FunDayBanner.tsx`（主控台紫色橫額，自動顯示下一次會議，冇就收埋）＋ CSS `.fund-*`／全站 `.rcode`。更新方法見 `docs/hkir-fun-day-2026.md`。
+
 > 2026-09-07（第三輪）v4.5.0：**外部資料全部由 Vercel `app/api/external/route.ts` 代抓**（sandbox 對外連線被封，只能用 fixture 測；`PORTAL_DEV_EXTERNAL_BASE` 指向 mock `/upstream?u=`）。解析器 `lib/externalParsers.ts`（職員表／總監架構／諮議會／各署／預算 CSV，純函數）、`lib/ics.ts`（ICS + RRULE 展開，香港時間）、`lib/roomsDirectory.ts`（11 間房日曆 ID、打通關係 `combo`）、`lib/orgDirectory.ts`（架構靜態備援）、`lib/externalSources.ts`（來源網址）。頁面：`/budget`（`api.extBudget`，Config `BUDGET_SHEET_URL` 覆蓋 Sheet）、`/rooms`（逐間房逐日／今日總覽／原版 iframe）、`/orgchart`（地域＋總會）、`/contacts` 港島地域只剩 `staff` 組並即時同步，`rc/dc/hq/ahq` 組已刪（搬去 orgchart 備援）。後台 Code.gs 4.5.0：Cards +`rooms`／`orgchart`（ALL_VIEW）、`budget` done、Config `BUDGET_SHEET_URL`、`getConfig` 回 `budgetSheetUrl`；**刪 `annual` 週年會議文件卡**（`removeIds` 內，`app/annual-docs` 已刪；刪 route 後記得 `rm -rf .next/types/app/annual-docs` 先過 tsc）。mock：`/tmp/mockgs/gas-emu.js`（Apps Script 模擬器）+ `server.js`（GS `/exec` + 上游 fixture `/upstream`）+ `test45.js`（33 assertions，包括 v4.4.0→4.5.0 升級路徑）——sandbox 重置會冇咗，要用時照 README 描述重寫。
 > ⚠️ 真實網頁解析未經真機驗證（sandbox 出唔到網）：部署後請開 `/api/external?kind=regionStaff`／`regionOrg`／`hksaCouncil`／`hksaDepts`／`budget`／`rooms` 逐個睇 `ok:true`；scout.org.hk 對非瀏覽器 UA 可能 403（route 已帶 Chrome UA），如仍失敗前端會自動用內建備援並標「⚪ 官方網頁暫時讀唔到」。
 >

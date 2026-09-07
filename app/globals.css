@@ -550,3 +550,27 @@ a{color:inherit;text-decoration:none;}
   .room-embed .embed-frame{min-height:480px;}
   .org-grid{grid-template-columns:1fr;}
 }
+
+/* ── 🎪 繽紛日 2026（/fun-day + 主控台橫額） ── */
+.fund-banner{width:100%;margin-top:14px;display:flex;align-items:center;gap:12px;border-radius:14px;padding:12px 16px;cursor:pointer;text-align:left;font:inherit;background:#faf5ff;border:1.5px solid #c4b5fd;color:#5b21b6;transition:transform .12s,box-shadow .12s;}
+.fund-banner:hover{transform:translateY(-1px);box-shadow:0 8px 18px rgba(91,33,182,.12);}
+.fund-banner .wx-ico{font-size:24px;}
+.fund-banner .wx-text{flex:1;font-size:13.5px;line-height:1.5;}
+.fund-banner .wx-text b{margin-right:8px;}
+.fund-banner .wx-go{font-size:12.5px;font-weight:800;white-space:nowrap;}
+.fund-next{display:flex;align-items:flex-start;gap:12px;background:#faf5ff;border:1.5px solid #c4b5fd;border-radius:14px;padding:12px 16px;margin-bottom:16px;font-size:14px;color:#4c1d95;}
+.fund-next-ico{font-size:22px;}
+.fund-next small{color:#6d28d9;}
+.fund-meet.next{border:2px solid #8b5cf6;box-shadow:0 0 0 3px rgba(139,92,246,.12);}
+.fund-pill{font-size:12px;font-weight:800;color:#fff;background:#7c3aed;border-radius:999px;padding:4px 12px;white-space:nowrap;}
+.fund-dl{margin:0 0 6px;display:flex;flex-direction:column;gap:4px;font-size:13.5px;}
+.fund-dl>div{display:flex;gap:10px;}
+.fund-dl dt{color:var(--muted);min-width:40px;flex:none;}
+.fund-dl dd{margin:0;}
+.fund-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;}
+/* 通用文件編號 pill（之前只喺 role-row 生效，呢度補返全站：意外指引、繽紛日文件共用） */
+.rcode{font-size:11px;color:var(--muted);background:#f1f5f9;border-radius:5px;padding:1px 7px;white-space:nowrap;}
+@media (max-width:640px){
+  .fund-banner{padding:10px 12px;}
+  .fund-banner .wx-go{display:none;}
+}

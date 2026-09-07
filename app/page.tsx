@@ -10,6 +10,7 @@ import { canDelegate, isSuper, levelLabel, levelOf } from '@/lib/levels';
 import CardItem from '@/components/CardItem';
 import PendingTicker from '@/components/PendingTicker';
 import WeatherDecisionBanner from '@/components/WeatherDecisionBanner';
+import FunDayBanner from '@/components/FunDayBanner';
 
 const REMEMBER_KEY = 'portal_remember_login';
 
@@ -318,6 +319,9 @@ export default function HomePage() {
 
       {/* 天氣決策：而家有咩警告 → 活動應唔應該取消（活動指引通告 04/2018） */}
       <WeatherDecisionBanner districtCode={districtCode || ''} onOpen={() => router.push(withDistrict('/incident?tab=weather'))} />
+
+      {/* 🎪 繽紛日 2026：下一次籌備會議 → /fun-day（會議＋執行手冊）；冇即將舉行嘅會議會自動收埋 */}
+      <FunDayBanner onOpen={() => router.push(withDistrict('/fun-day'))} />
 
       {superUser && (
         <div className="super-bar">
