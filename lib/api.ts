@@ -7,8 +7,10 @@ import { DISTRICT_STORAGE_KEY } from './district';
 import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
-  CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice,
+  CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
 } from './types';
+import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers';
+import type { IcsEvent } from './ics';
 
 function getDistrictCode(): string {
   if (typeof window === 'undefined') return '';
@@ -32,6 +34,20 @@ async function callGet<T = any>(action: string, params: Record<string, string> =
   }
 }
 
+/** v4.5.0：外部公開資料（港島地域／總會網頁、預算 Sheet、房間日曆）— 由 /api/external 伺服器端代抓，唔經 Apps Script */
+async function callExternal<T = any>(kind: string, params: Record<string, string> = {}): Promise<ApiResult<T>> {
+  const url = new URL('/api/external', window.location.origin);
+  url.searchParams.set('kind', kind);
+  Object.entries(params).forEach(([k, v]) => { if (v !== '') url.searchParams.set(k, v); });
+  try {
+    const res = await fetch(url.toString(), { cache: 'no-store' });
+    return await res.json();
+  } catch (error) {
+    console.error('External Error:', error);
+    return { ok: false, error: '連線失敗：暫時未能讀取外部資料。' };
+  }
+}
+
 async function callPost<T = any>(action: string, body: Record<string, unknown> = {}): Promise<ApiResult<T>> {
   const districtCode = getDistrictCode();
   const postBody = { districtCode, action, ...body };
@@ -51,10 +67,12 @@ async function callPost<T = any>(action: string, body: Record<string, unknown> =
 }
 
 export const api = {
-  login: (email: string, password: string): Promise<ApiResult<UserSession>> =>
-    callPost('login', { email, password }),
+  login: (email: string, password: string, remember = false): Promise<ApiResult<UserSession>> =>
+    callPost('login', { email, password, remember }),
 
   getConfig: (): Promise<ApiResult<DistrictConfig>> => callGet('getConfig'),
+  /** 公開設定（成員系統同一份）：旅號清單 troopList 等 */
+  getPublicInfo: (): Promise<ApiResult<{ districtName: string; districtCode: string; troopList?: string[]; locked?: boolean }>> => callGet('getPublicInfo'),
 
   getCards: (token: string): Promise<ApiResult<CardDef[]>> =>
     callGet('getCards', { token }),
@@ -74,6 +92,17 @@ export const api = {
   setCardEnabled: (token: string, cardId: string, enabled: boolean):
     Promise<ApiResult<{ saved: boolean; cardId: string; enabled: boolean }>> =>
     callPost('setCardEnabled', { token, cardId, enabled }),
+  // 密碼（v4.4.0）：忘記密碼寄重設連結去帳戶電郵；用重設代碼設定新密碼
+  requestPasswordReset: (email: string, resetUrlBase: string): Promise<ApiResult<{ sent: boolean; message: string }>> =>
+    callPost('requestPasswordReset', { email, resetUrlBase }),
+  resetPassword: (resetToken: string, newPassword: string): Promise<ApiResult<{ reset: boolean; email: string }>> =>
+    callPost('resetPassword', { resetToken, newPassword }),
+  // 授權／收回（v4.4.0）
+  getDelegation: (token: string): Promise<ApiResult<DelegationBundle>> => callGet('getDelegation', { token }),
+  delegatePerms: (token: string, targetRole: string, grants: Record<string, AccessLevel>): Promise<ApiResult<{ applied: number; rejected: string[] }>> =>
+    callPost('delegatePerms', { token, targetRole, grants }),
+  revokePerms: (token: string, targetRole: string): Promise<ApiResult<{ revoked: number; roles: string[] }>> =>
+    callPost('revokePerms', { token, targetRole }),
   changePassword: (token: string, oldPassword: string, newPassword: string):
     Promise<ApiResult<{ changed: boolean }>> =>
     callPost('changePassword', { token, oldPassword, newPassword }),
@@ -92,7 +121,7 @@ export const api = {
   // 前端帳戶管理
   getUsers: (token: string): Promise<ApiResult<PortalUser[]>> => callGet('getUsers', { token }),
   batchCreateUsers: (token: string, users: BatchUserInput[]): Promise<ApiResult<{ created: number; skipped: number; rejected: { row: number; email: string; reason: string }[] }>> => callPost('batchCreateUsers', { token, users }),
-  updateUser: (token: string, email: string, patch: Partial<PortalUser> & { password?: string }): Promise<ApiResult<{ saved: boolean }>> => callPost('updateUser', { token, email, patch }),
+  updateUser: (token: string, email: string, patch: Partial<PortalUser> & { password?: string; resetToDefault?: boolean }): Promise<ApiResult<{ saved: boolean }>> => callPost('updateUser', { token, email, patch }),
   deleteUser: (token: string, email: string): Promise<ApiResult<{ deleted: boolean }>> => callPost('deleteUser', { token, email }),
 
   // 系統鎖定
@@ -165,4 +194,40 @@ export const api = {
     callPost('submitActivityNotice', data),
   deleteActivityNotice: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteActivityNotice', { token, id }),
+
+  // 意外／應變：意外報告（只喺按「確定提交」時先送後台；草稿留喺本機）
+  submitIncidentReport: (token: string, report: IncidentReport): Promise<ApiResult<{ refCode: string; id: string }>> =>
+    callPost('submitIncidentReport', { token, report }),
+  listIncidentReports: (token: string): Promise<ApiResult<IncidentReport[]>> =>
+    callGet('listIncidentReports', { token }),
+  updateIncidentReport: (token: string, id: string, patch: Partial<IncidentReport>): Promise<ApiResult<{ saved: boolean }>> =>
+    callPost('updateIncidentReport', { token, id, patch }),
+  deleteIncidentReport: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
+    callPost('deleteIncidentReport', { token, id }),
+
+  // ── v4.5.0 外部同步（/api/external）──
+  /** 港島地域職員直線電話（hkirscout.org.hk 專業領袖及受薪職員） */
+  extRegionStaff: (): Promise<ApiResult<ExternalMeta & { rows: StaffRow[]; updated: string }>> => callExternal('regionStaff'),
+  /** 港島地域總監架構 */
+  extRegionOrg: (): Promise<ApiResult<ExternalMeta & { groups: OrgGroup[]; updated: string }>> => callExternal('regionOrg'),
+  /** 總會香港總監諮議會 */
+  extHksaCouncil: (): Promise<ApiResult<ExternalMeta & { members: OrgMember[] }>> => callExternal('hksaCouncil'),
+  /** 總會 11 個署聯絡 */
+  extHksaDepts: (): Promise<ApiResult<ExternalMeta & { depts: (DeptContact & { ok: boolean })[] }>> => callExternal('hksaDepts'),
+  /** 區年度預算（Google Sheet gviz CSV） */
+  extBudget: (sheetUrl = ''): Promise<ApiResult<ExternalMeta & { rows: BudgetRow[]; summary: BudgetSummary[]; sheetUrl: string }>> =>
+    callExternal('budget', { sheet: sheetUrl }),
+  /** 地域房間日曆（公開 ICS）；room 留空 = 全部 */
+  extRooms: (room = '', from = '', days = 14): Promise<ApiResult<ExternalMeta & { from: number; to: number; days: number; rooms: RoomEvents[] }>> =>
+    callExternal('rooms', { room, from, days: String(days) }),
 };
+
+/** /api/external 共同欄位 */
+export interface ExternalMeta {
+  fetchedAt: string;     // 伺服器抓取時間（ISO）
+  cached?: boolean;      // 命中伺服器快取
+  stale?: boolean;       // 上游失敗，回傳最後一次成功結果
+  staleReason?: string;
+  source?: string;
+}
+export interface RoomEvents { id: string; ok: boolean; error?: string; events: IcsEvent[] }

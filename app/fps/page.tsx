@@ -7,79 +7,12 @@ import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 
-// ── 轉數快（FPS）QR payload — 香港 Common QR Code 規格 ─────────────
-// FPS ID 放在 tag 26 的子欄 02；港幣是 tag 53 = 344；銀碼是 tag 54。
-// CRC 是 CRC-16/CCITT（poly 0x1021, init 0xFFFF, 無反轉、無 xorout），
-// 計算範圍 = 全部內容 + "6304"（CRC 欄頭）。
-function tlv(id: string, value: string): string {
-  if (value.length > 99) throw new Error(`QR 欄位 ${id} 過長`);
-  return id + String(value.length).padStart(2, '0') + value;
-}
+import {
+  DEFAULT_FPS_ACCOUNT, FPS_ID_PATTERN, buildFpsPayload, checkAmount, checkReference, formatFileName,
+} from '@/lib/fps';
+import BackLink, { BackBar } from '@/components/BackLink';
 
-function crc16(value: string): string {
-  let crc = 0xffff;
-  for (let i = 0; i < value.length; i++) {
-    crc ^= value.charCodeAt(i) << 8;
-    for (let bit = 0; bit < 8; bit++) {
-      crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) : crc << 1;
-      crc &= 0xffff;
-    }
-  }
-  return crc.toString(16).toUpperCase().padStart(4, '0');
-}
-
-function buildFpsPayload(fpsId: string, amount: string, reference: string): string {
-  let payload = '';
-  payload += tlv('00', '01'); // Payload Format Indicator
-  payload += tlv('01', amount ? '12' : '11'); // 12 = 固定銀碼；11 = 付款人輸入銀碼
-  payload += tlv('26', tlv('00', 'hk.com.hkicl') + tlv('02', fpsId));
-  payload += tlv('52', '0000'); // Merchant Category Code（FPS dummy code）
-  payload += tlv('53', '344'); // HKD；無論是否固定銀碼均為必要欄位
-  if (amount) payload += tlv('54', amount);
-  payload += tlv('58', 'HK');
-  payload += tlv('59', 'NA'); // FPS 規格的 merchant name dummy value
-  payload += tlv('60', 'HK');
-  if (reference) payload += tlv('62', tlv('05', reference)); // Reference Label
-  return payload + '6304' + crc16(payload + '6304');
-}
-
-const DEFAULT_FPS_ACCOUNT = {
-  name: 'SCOUT ASSOCIATION OF HONG KONG - SHAU KEI WAN DISTRICT',
-  id: '102866183',
-};
-
-const FPS_ID_PATTERN = /^\d{7,9}$/;
-const SAFE_REFERENCE_PATTERN = /^[A-Za-z0-9 ._:/@+()\-]*$/;
-
-type InputCheck = { value: string; error: string };
 type Feedback = { tone: 'success' | 'error' | 'info'; text: string } | null;
-
-function checkAmount(rawAmount: string): InputCheck {
-  const value = rawAmount.trim();
-  if (!value) return { value: '', error: '' };
-  if (value.length > 13) return { value, error: '銀碼最多可有 13 個字元。' };
-  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)) {
-    return { value, error: '銀碼格式不正確：請輸入正數，最多 2 位小數（例：100 或 100.50）。' };
-  }
-  if (!Number.isFinite(Number(value)) || Number(value) <= 0) {
-    return { value, error: '銀碼必須大於 0。' };
-  }
-  return { value, error: '' };
-}
-
-function checkReference(rawReference: string): InputCheck {
-  const value = rawReference.trim();
-  if (!value) return { value: '', error: '' };
-  if (value.length > 25) return { value, error: '參考編號最多可有 25 個字元。' };
-  if (!SAFE_REFERENCE_PATTERN.test(value)) {
-    return { value, error: '參考編號請只用英文、數字、空格及常用符號。' };
-  }
-  return { value, error: '' };
-}
-
-function formatFileName(amount: string) {
-  return `fps-qr-${amount ? amount.replace('.', '_') : 'static'}.png`;
-}
 
 export default function FpsPage() {
   const router = useRouter();
@@ -258,7 +191,7 @@ export default function FpsPage() {
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">💳 FPS QR Code 製作</h1>
       <p className="page-sub">輸入銀碼後即時生成轉數快收款 QR Code，可複製、分享或下載，不再需要前往外部網站。</p>
 
@@ -366,6 +299,7 @@ export default function FpsPage() {
           </div>
         </section>
       )}
+      <BackBar />
     </>
   );
 }

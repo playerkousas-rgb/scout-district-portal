@@ -56,7 +56,7 @@
 ### 2.1 卡片分類（done 已實作 / todo 加入中）— 最終定案
 - **已實作（done，4 張）**：
   - `venueReg` 借場審批、`stockReg` 借物資審批、`activity` 活動知會、`training` 訓練班管理（區會目錄）。
-- **加入中（todo）**：visit / contacts / awards / annual / budget / meeting / committee / unit / incident。
+- **加入中（todo）**：visit / awards / committee / unit。（v4.4.0：contacts 聯結簿、incident 已完成；meeting 已刪除。v4.5.0：budget 已完成、rooms／orgchart 新增（全員 👁）；annual 已刪除）
 - **已刪除**：`courseRegs` 報名審批（批核由訓練班負責領袖喺各班自己嘅 Sheet 做）、
   `notices` 通告庫（通告由通告圖書館提供，區無需管理）。
 - 成員系統（member app）唔登入，純讀主 Sheet + 提交；所有登入事務（開班登記/批核借場借物資/權限/scope/改密碼/卡開關）都喺呢邊。
@@ -67,10 +67,8 @@
 
 | cardId | 卡片 | 型態 | 資料來源 | DC | SYS | DDC_ADMIN | DDC_TRAIN | ADC | DL | LEADER |
 |---|---|---|---|---|---|---|---|---|---|---|
-| contacts | 旅團聯絡簿 | builtin | 原 Excel／Sheet | ✏️ | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 |
-| annual | 週年會議文件 | builtin | 文件庫 | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 | — |
+| contacts | 聯結簿（旅團／港島地域／總會） | builtin | 內建目錄 + 旅團 Sheet | ✏️ | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 |
 | budget | 區年度預算 | builtin | 原 Excel | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 | — |
-| meeting | 會議行事曆 | jump | TeamUp | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 | — |
 | committee | 委任系統 | jump | 委任表 | ✏️ | ✏️ | ✏️ | 👁 | 👁 | — | — |
 | unit | 旅團管理系統 | jump | 旅名冊 | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | 👁 |
 
@@ -151,7 +149,7 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
   唔再另加卡片寫入權限層。
 - **前端卡片門禁**：`lib/cardAccess.ts` 提供 `useRequireCard(cardId)`，每個功能頁 check 該角色對該卡有冇 access；
   就算直接打 URL，睇唔到張卡都會 redirect 返主控台 → 真正做到「睇唔到 = 做唔到」。
-- 所有計劃中卡片（meeting/committee/unit/incident）已設為 builtin 佔位頁 + 可開關。
+- 所有計劃中卡片（committee/unit 等）已設為 builtin 佔位頁 + 可開關；v4.4.0 起「關」＝隱藏，只有 L0 超管見到。
 
 ## 4. 對接所需要嘅改造（兩邊）
 

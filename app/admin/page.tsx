@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { loadSession } from '@/lib/session';
 import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession, PermsBundle, AccessLevel, RoleDef } from '@/lib/types';
+import BackLink, { BackBar } from '@/components/BackLink';
 
 const NEXT: Record<string, AccessLevel> = { '': 'view', view: 'edit', edit: '' };
 const CELL: Record<string, { txt: string; cls: string }> = {
@@ -129,9 +130,9 @@ export default function AdminPage() {
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">⚙️ 權限 / 角色管理</h1>
-      <p className="page-sub">點格子切換：— 不可見 → 👁 可看 → ✏️ 可管理。受保護角色（標🔒）不可刪改。</p>
+      <p className="page-sub">點格子切換：— 不可見 → 👁 可看 → ✏️ 可管理。受保護角色（標🔒）不可刪改。「開關」關掉＝隱藏卡片：其他人一律睇唔到，只有 L0 超管仍可見及進入。</p>
 
       {/* 系統鎖定 */}
       <div className="lock-panel">
@@ -166,6 +167,7 @@ export default function AdminPage() {
               <div className="role-row" key={r.role}>
                 <span className="rname">{r.label}</span>
                 <span className="rcode">{r.role}</span>
+                {typeof r.level === 'number' && <span className="lvl-chip dark">L{r.level}</span>}
                 {r.protected && <span className="badge-prot">🔒 受保護</span>}
                 <div className="ractions">
                   {!r.protected && (
@@ -221,7 +223,7 @@ export default function AdminPage() {
                         onClick={() => toggleCard(c.cardId, !c.enabled)}
                         title={c.enabled ? '點擊關閉此卡片' : '點擊開啟此卡片'}
                       >
-                        {c.enabled ? '🟢 開' : '⚪ 關'}
+                        {c.enabled ? '🟢 開啟' : '🙈 隱藏'}
                       </button>
                     </td>
                   </tr>
@@ -231,6 +233,7 @@ export default function AdminPage() {
           </div>
         </>
       )}
+      <BackBar />
     </>
   );
 }

@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { ActivityNotice, UserSession } from '@/lib/types';
+import BackLink, { BackBar } from '@/components/BackLink';
 
 const SECTIONS = ['小童軍', '幼童軍', '童軍', '深資童軍', '樂行童軍'];
 const NATURES = ['工作坊', '訓練班', '會議', '聚會', '比賽', '其他'];
@@ -72,7 +73,7 @@ export default function ActivityNoticesPage() {
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">🗓 活動知會</h1>
       <p className="page-sub">旅團活動知會記錄，可按年份／支部／活動性質篩選排序。</p>
       {error && <div className="err">{error}</div>}
@@ -147,6 +148,7 @@ export default function ActivityNoticesPage() {
           ))}
         </section>
       )}
+      <BackBar />
     </>
   );
 }

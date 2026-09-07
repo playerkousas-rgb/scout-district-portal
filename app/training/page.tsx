@@ -1,16 +1,20 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { CourseLink, UserSession } from '@/lib/types';
+import CourseFpsBlock, { type CourseFpsResult } from '@/components/CourseFpsBlock';
+import { DEFAULT_FPS_ACCOUNT, normalizeFpsId } from '@/lib/fps';
+import BackLink, { BackBar } from '@/components/BackLink';
 
 const EMPTY: CourseLink = {
   courseId: '', title: '', badgeName: '', section: '', courseNo: '', sessionsText: '',
   eligibility: '', fee: '', originalFee: '', subsidyNote: '', deadline: '', quota: '',
   filled: '', venue: '', noticeUrl: '', contact: '', scriptExecUrl: '', scriptApiKey: '',
   driveFolderId: '', active: 'TRUE', createdAt: '',
+  fpsQrPayload: '', fpsAmount: '', fpsReference: '', fpsAccountName: '', fpsAccountNumber: '', fpsUpdatedAt: '',
 };
 
 export default function TrainingPage() {
@@ -23,6 +27,9 @@ export default function TrainingPage() {
   const [msg, setMsg] = useState('');
   const [draft, setDraft] = useState<CourseLink>(EMPTY);
   const [editingId, setEditingId] = useState('');
+  const [fpsCourseId, setFpsCourseId] = useState('');   // 正在生成 QR 嘅班
+  const [fpsSaving, setFpsSaving] = useState(false);
+  const [account, setAccount] = useState({ name: DEFAULT_FPS_ACCOUNT.name, id: DEFAULT_FPS_ACCOUNT.id, loaded: false });
 
   async function load(s: UserSession) {
     setLoading(true); setError('');
@@ -32,6 +39,34 @@ export default function TrainingPage() {
     setLoading(false);
   }
   useEffect(() => { if (session) { load(session); } }, [session]);
+
+  // 區會轉數快戶口（Config FPS_ACCOUNT_NAME / FPS_ACCOUNT_NUMBER；未填用內建預設）
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.getConfig();
+        if (cancelled) return;
+        const name = String(r.data?.fpsAccountName ?? '').trim();
+        const id = normalizeFpsId(r.data?.fpsAccountNumber);
+        setAccount({ name: name || DEFAULT_FPS_ACCOUNT.name, id: id || DEFAULT_FPS_ACCOUNT.id, loaded: true });
+      } catch {
+        if (!cancelled) setAccount(a => ({ ...a, loaded: true }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [session]);
+
+  /** 只更新該班 FPS 欄位（其餘欄位原樣送回，避免洗走 Script／Key） */
+  async function saveCourseFps(course: CourseLink, r: CourseFpsResult) {
+    if (!session) return;
+    setFpsSaving(true); setError(''); setMsg('');
+    const res = await api.saveCourseLink(session.token, { ...course, ...r });
+    if (res.ok) { setMsg(r.fpsQrPayload ? `已儲存「${course.title}」收費 QR ✓ 成員系統已可顯示` : `已移除「${course.title}」收費 QR ✓`); await load(session); }
+    else setError(res.error || '儲存 QR 失敗');
+    setFpsSaving(false);
+  }
 
   function startEdit(l: CourseLink) {
     setEditingId(l.courseId);
@@ -62,9 +97,9 @@ export default function TrainingPage() {
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">🎓 訓練班管理</h1>
-      <p className="page-sub">開班登記：每班 1 張專屬 Sheet + 1 份標準收表 Script + 1 個 Drive 資料夾。公開端只做報名寫入。</p>
+      <p className="page-sub">開班登記：每班 1 張專屬 Sheet + 1 份標準收表 Script + 1 個 Drive 資料夾。公開端只做報名寫入；每班可另生成收費 FPS QR，成員系統會顯示俾未交費者。</p>
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}
 
@@ -111,31 +146,49 @@ export default function TrainingPage() {
           <table className="mtx-scroll" style={{ borderCollapse: 'collapse', width: '100%' }}>
             <thead>
               <tr style={{ textAlign: 'left', fontSize: 13 }}>
-                <th>課程</th><th>支部</th><th>費用</th><th>截止</th><th>Script</th><th>Drive</th><th>狀態</th><th>操作</th>
+                <th>課程</th><th>支部</th><th>費用</th><th>收費 QR</th><th>截止</th><th>Script</th><th>Drive</th><th>狀態</th><th>操作</th>
               </tr>
             </thead>
             <tbody>
               {links.map(l => (
-                <tr key={l.courseId} style={{ borderBottom: '1px solid #eee', fontSize: 13 }}>
-                  <td><b>{l.title}</b><br /><small className="rcode">{l.courseId}</small></td>
-                  <td>{l.section || '—'}</td>
-                  <td>{l.fee || '—'}</td>
-                  <td>{l.deadline || '—'}</td>
-                  <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {l.scriptExecUrl ? '✅ 已設定' : '⚠️ 未設定'}
-                  </td>
-                  <td>{l.driveFolderId ? '✅' : '⚠️'}</td>
-                  <td>{String(l.active).toUpperCase() !== 'FALSE' ? <span className="state on">啟用</span> : <span className="state off">停用</span>}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    <button className="mini-btn" onClick={() => startEdit(l)}>編輯</button>{' '}
-                    <button className="mini-btn danger" onClick={() => remove(l)}>刪除</button>
-                  </td>
-                </tr>
+                <Fragment key={l.courseId}>
+                  <tr style={{ borderBottom: fpsCourseId === l.courseId ? 'none' : '1px solid #eee', fontSize: 13 }}>
+                    <td><b>{l.title}</b><br /><small className="rcode">{l.courseId}</small>{l.courseNo && <small className="rcode" style={{ marginLeft: 4 }}>{l.courseNo}</small>}</td>
+                    <td>{l.section || '—'}</td>
+                    <td>{l.fee || '—'}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {l.fpsQrPayload
+                        ? <span className="state on" title={`HK$ ${l.fpsAmount} · ${l.fpsReference || ''}`}>✅ HK$ {l.fpsAmount}</span>
+                        : <span className="state off">未生成</span>}
+                    </td>
+                    <td>{l.deadline || '—'}</td>
+                    <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {l.scriptExecUrl ? '✅ 已設定' : '⚠️ 未設定'}
+                    </td>
+                    <td>{l.driveFolderId ? '✅' : '⚠️'}</td>
+                    <td>{String(l.active).toUpperCase() !== 'FALSE' ? <span className="state on">啟用</span> : <span className="state off">停用</span>}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <button className="mini-btn" onClick={() => setFpsCourseId(fpsCourseId === l.courseId ? '' : l.courseId)}>
+                        {fpsCourseId === l.courseId ? '收起 QR' : '💳 收費 QR'}
+                      </button>{' '}
+                      <button className="mini-btn" onClick={() => startEdit(l)}>編輯</button>{' '}
+                      <button className="mini-btn danger" onClick={() => remove(l)}>刪除</button>
+                    </td>
+                  </tr>
+                  {fpsCourseId === l.courseId && (
+                    <tr style={{ borderBottom: '1px solid #eee' }}>
+                      <td colSpan={9} style={{ padding: '4px 0 14px' }}>
+                        <CourseFpsBlock course={l} account={account} saving={fpsSaving} onSave={r => saveCourseFps(l, r)} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
         )}
       </section>
+      <BackBar />
     </>
   );
 }

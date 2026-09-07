@@ -1,4 +1,14 @@
-# 下一手 Agent 交接備忘（v4.2.3 已入 main）
+# 下一手 Agent 交接備忘（v4.5.0）
+
+> 2026-09-07（第三輪）v4.5.0：**外部資料全部由 Vercel `app/api/external/route.ts` 代抓**（sandbox 對外連線被封，只能用 fixture 測；`PORTAL_DEV_EXTERNAL_BASE` 指向 mock `/upstream?u=`）。解析器 `lib/externalParsers.ts`（職員表／總監架構／諮議會／各署／預算 CSV，純函數）、`lib/ics.ts`（ICS + RRULE 展開，香港時間）、`lib/roomsDirectory.ts`（11 間房日曆 ID、打通關係 `combo`）、`lib/orgDirectory.ts`（架構靜態備援）、`lib/externalSources.ts`（來源網址）。頁面：`/budget`（`api.extBudget`，Config `BUDGET_SHEET_URL` 覆蓋 Sheet）、`/rooms`（逐間房逐日／今日總覽／原版 iframe）、`/orgchart`（地域＋總會）、`/contacts` 港島地域只剩 `staff` 組並即時同步，`rc/dc/hq/ahq` 組已刪（搬去 orgchart 備援）。後台 Code.gs 4.5.0：Cards +`rooms`／`orgchart`（ALL_VIEW）、`budget` done、Config `BUDGET_SHEET_URL`、`getConfig` 回 `budgetSheetUrl`；**刪 `annual` 週年會議文件卡**（`removeIds` 內，`app/annual-docs` 已刪；刪 route 後記得 `rm -rf .next/types/app/annual-docs` 先過 tsc）。mock：`/tmp/mockgs/gas-emu.js`（Apps Script 模擬器）+ `server.js`（GS `/exec` + 上游 fixture `/upstream`）+ `test45.js`（33 assertions，包括 v4.4.0→4.5.0 升級路徑）——sandbox 重置會冇咗，要用時照 README 描述重寫。
+> ⚠️ 真實網頁解析未經真機驗證（sandbox 出唔到網）：部署後請開 `/api/external?kind=regionStaff`／`regionOrg`／`hksaCouncil`／`hksaDepts`／`budget`／`rooms` 逐個睇 `ok:true`；scout.org.hk 對非瀏覽器 UA 可能 403（route 已帶 Chrome UA），如仍失敗前端會自動用內建備援並標「⚪ 官方網頁暫時讀唔到」。
+>
+> 2026-09-07（第二輪）v4.4.0：天氣決策（`lib/weatherDecision.ts` + `components/WeatherDecisionPanel.tsx` + `components/WeatherDecisionBanner.tsx`，天文台 warnsum 由瀏覽器直接拉；sandbox 無法對外連線，只能 mock JSON 測邏輯）、聯結簿三分頁（`lib/contactsDirectory.ts`；旅團資料待用戶提供，格式見 `TroopRow`）、刪除 meeting 卡（`patchCardRows_` 移除舊行）、`components/BackLink.tsx`（每頁頂＋`BackBar` 頁尾）、帳戶層級 `level`（`lib/levels.ts`；後台 `levelOfRole_`/`levelOfUser_`）、`PRESET_USERS` 密碼 1234 + `mustChangePassword`、`requestPasswordReset`/`resetPassword`（token = base64(reset|email|exp|sig)，sig 含舊 passwordHash → 單次有效）、`/delegate` 授權／收回（`getDelegation`/`delegatePerms`/`revokePerms` 寫 Perms 表）、隱藏卡片只有 level 0 見（`getCards_`）。mock 後台 `/tmp/mockgs/server.js` seed 登入改用 `dc@skwscout.org.hk` / `1234`；emulator 測試 `/tmp/gstest/run44.js`（56 assertions）。
+>
+> 2026-09-07 更新：v4.3.0 加咗「意外／應變」三分頁（`app/incident/page.tsx`、`lib/incidentGuide.ts`、`lib/incidentPrint.ts`）、訓練班每班收費 FPS QR（`components/CourseFpsBlock.tsx`、`lib/fps.ts`）、主控台完成標示（藍框 done／虛線 todo）、GS `IncidentReports` 表 + 4 個 action、CourseLinks 6 個 FPS 欄。
+> member-portal（`playerkousas-rgb/member-portal`）**而家讀得到**；佢個 proxy 有公開欄位白名單，要顯示課程 QR 就要照 `docs/member-gs-handshake.md` 改嗰 4 個檔。
+> 意外報告草稿只存 localStorage（key `portal_incident_draft_{區碼}`），按「確定提交」先 POST，唔好改做逐鍵 autosave。列印格式以總會 ACC-RPT (2019/07) 為準，唔好照抄 event repo 嘅 AR-1 mock。
+> 舊卡片 `incident` 由 todo 轉 done：`setupSheets()` 內 `patchCardRows_` 只改「仍係舊預設值」嘅行；如用家改過描述就要自己喺 Cards 表改 `category=done`。
 
 > 日期：2026-08-25  
 > 用家語言：香港中文  
@@ -41,7 +51,7 @@
 
 **分支／PR：** 工作喺 `arena/01a01678-scout-district-portal`，PR #7 合併入 `main`。  
 **SKW apiBase：** `lib/district.ts` 現有 `/exec`。  
-**member-portal：** `https://github.com/playerkousas-rgb/member-portal.git` 呢邊環境 **404**。
+**member-portal：** `https://github.com/playerkousas-rgb/member-portal.git`（2026-09-07 已可讀，HEAD `149f910`）。
 
 ---
 
@@ -61,8 +71,8 @@
 
 ### 2. member-portal 聯調
 
-- 呢邊讀唔到 member-portal repo
-- 合約見 `docs/member-gs-handshake.md`（請當 4.2.3：一鍵批准已接前端）
+- member-portal repo 已可讀；活動知會、借場、借物資欄名已核對一致
+- 合約見 `docs/member-gs-handshake.md`（v4.3.0：含訓練班 FPS QR 白名單改法）
 - 測：成員填表 → Teamup 申請中 → 管理端走馬燈 → 一鍵／拒絕
 
 ### 3. 編輯申請後未同步 Teamup

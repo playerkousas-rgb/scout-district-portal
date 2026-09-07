@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { loadSession } from '@/lib/session';
 import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession } from '@/lib/types';
+import BackLink, { BackBar } from '@/components/BackLink';
 
 export default function PlaceholderPage({
   icon, title, description, features,
@@ -22,7 +23,7 @@ export default function PlaceholderPage({
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">{icon} {title}</h1>
       <p className="page-sub">{description}</p>
       <div className="placeholder-box">
@@ -35,6 +36,7 @@ export default function PlaceholderPage({
           </ul>
         </div>
       </div>
+      <BackBar />
     </>
   );
 }

@@ -15,6 +15,8 @@ import {
   normalizeCreatableRole,
 } from '@/lib/accountRoles';
 import type { BatchUserInput, PortalUser, UserSession } from '@/lib/types';
+import { levelLabel, levelOf } from '@/lib/levels';
+import BackLink, { BackBar } from '@/components/BackLink';
 
 function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = [];
@@ -147,8 +149,20 @@ export default function UsersPage() {
   function canTouch(u: PortalUser) {
     if (!session) return false;
     if (u.email === session.email) return false;
-    if (session.isAdmin || session.isDC) return true;
+    // 層級守則：只可管理層級比自己低嘅帳戶（超管 L0 可管所有）
+    const myLv = levelOf(session), uLv = typeof u.level === 'number' ? u.level : levelOf({ role: u.role });
+    if (myLv !== 0 && uLv <= myLv) return false;
+    if (session.isAdmin || session.isDC || myLv <= 1) return true;
     return isCreatableRole(u.role);
+  }
+
+  async function resetToDefault(u: PortalUser) {
+    if (!session || !confirm(`把「${u.displayName || u.email}」密碼重設為預設 1234？對方下次登入必須即刻改密碼。`)) return;
+    setBusy(true); setError(''); setMessage('');
+    const r = await api.updateUser(session.token, u.email, { resetToDefault: true });
+    setBusy(false);
+    if (r.ok) { setMessage(`${u.displayName || u.email} 密碼已重設為 1234（首次登入必改）。`); load(session); }
+    else setError(r.error || '重設失敗');
   }
 
   async function toggleUser(u: PortalUser) {
@@ -181,11 +195,12 @@ export default function UsersPage() {
 
   return (
     <>
-      <span className="backlink" onClick={() => router.push(withDistrict('/'))}>← 返回主控台</span>
+      <BackLink />
       <h1 className="page-title">👥 帳戶管理及批量開戶</h1>
       <p className="page-sub">
         只有 <b>副區總監或以上</b> 可以開戶；只可以開 <b>區長／區領袖／助理區領袖</b>（可多人）。
-        DC、DDC、ADC、STAFF 係專用預設位，唔經呢度開。密碼只以雜湊寫入該區 Google Sheet。
+        DC、DDC、ADC、STAFF 係預設帳戶（@skwscout.org.hk，預設密碼 <code>1234</code>，首次登入必須改密碼）。
+        只可管理層級比自己低嘅帳戶。密碼只以雜湊寫入該區 Google Sheet。
       </p>
       {error && <div className="err">{error}</div>}
       {message && <div className="success">✓ {message}</div>}
@@ -273,11 +288,14 @@ export default function UsersPage() {
                 <div className="user-identity"><b>{u.displayName || '未命名'}</b><span>{u.email}</span></div>
                 <div>
                   <span className="role-chip">{u.role}</span>
+                  <span className="lvl-chip dark">L{typeof u.level === 'number' ? u.level : levelOf({ role: u.role })} {u.levelLabel || levelLabel(levelOf({ role: u.role }))}</span>
                   <span className={u.active ? 'state on' : 'state off'}>{u.active ? '啟用中' : '已停用'}</span>
-                  {!isCreatableRole(u.role) && <span className="role-chip">專用位</span>}
+                  {u.mustChangePassword && <span className="state warn" title="仍用緊預設密碼，首次登入會被要求改">🔑 未改密碼</span>}
+                  {!isCreatableRole(u.role) && <span className="role-chip">預設位</span>}
                 </div>
                 <div className="user-actions" style={{ flexWrap: 'wrap', gap: 6 }}>
                   <button className="mini-btn" disabled={busy || !canTouch(u)} onClick={() => toggleUser(u)}>{u.active ? '停用' : '啟用'}</button>
+                  <button className="mini-btn" disabled={busy || !canTouch(u)} onClick={() => resetToDefault(u)} title="重設為 1234，對方下次登入必改">🔑 重設 1234</button>
                   <button className="mini-btn" disabled={busy || !canTouch(u)} onClick={() => { setEditingCards(u.email); setCardsDraft(u.cards || ''); }}>🎯 卡片範圍</button>
                   <button className="mini-btn danger" disabled={busy || !canTouch(u)} onClick={() => removeUser(u)}>刪除</button>
                 </div>
@@ -295,6 +313,7 @@ export default function UsersPage() {
           </div>
         )}
       </section>
+      <BackBar />
     </>
   );
 }

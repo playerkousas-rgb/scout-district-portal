@@ -51,7 +51,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.2.0"` 即通。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.5.0"` 即通。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -64,7 +64,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.1.0"` 即代表用緊最新後台。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.5.0"` 即代表用緊最新後台。
 
 ---
 
@@ -82,6 +82,52 @@
 - 要令舊後台出現呢張新卡片：貼新 `gs/Code.gs` → 執行 `setupSheets()`（自動補建缺失卡片＋權限，唔會洗資料）。
 
 ---
+
+## 📑 區年度預算 / 🏢 地域房間 / 📇 聯結簿自動同步 / 🏛 架構（v4.5.0）
+
+外部公開資料一律由 Vercel **`app/api/external/route.ts`** 伺服器端代抓（瀏覽器直接抓會撞 CORS；Apps Script 唔使改），
+解析器係純函數 `lib/externalParsers.ts`（可用 `node` 直接測）；同一 instance 內快取（網頁 6 小時、預算 10 分鐘、日曆 3 分鐘），
+上游失敗回傳最後一次成功結果（`stale=true`），再唔得先由前端用內建備援並標明。
+
+| kind | 來源 | 用喺 |
+|---|---|---|
+| `budget` | 區方 Google Sheet gviz CSV（預設 `1dvrBDIcmk1zXHXb02qPFrDv46UvPDmfd` gid `308655146`；Config `BUDGET_SHEET_URL` 可覆蓋；Sheet 要「知道連結可查看」） | `/budget` 按月／按支部／全部活動 + 合計 |
+| `rooms` | hkir-rooms 11 個公開 Google 日曆 ICS（`lib/roomsDirectory.ts`；`lib/ics.ts` 展開 RRULE） | `/rooms` 逐間房逐日時段、今日總覽、原版日曆 |
+| `regionStaff` | hkirscout.org.hk 專業領袖及受薪職員表 | 聯結簿・港島地域（只放職員直線電話） |
+| `hksaDepts` | scout.org.hk 總部各署頁（11 個 `?id=`） | 聯結簿・總會 |
+| `regionOrg` | hkirscout.org.hk 總監架構 | `/orgchart` 港島地域 |
+| `hksaCouncil` | scout.org.hk 香港總監諮議會 | `/orgchart` 總會（執行委員會主要職位為內建名單） |
+
+- 房間打通關係：1704A／1704B ⊂ 1704 ⊂ 1704+1705；睇任何一間都會自動計入相關日曆（標「經 XXXX 打通預約」）。
+- 開發／測試：`PORTAL_DEV_EXTERNAL_BASE=http://127.0.0.1:8787/upstream` 可把全部上游改經本機 fixture（同 `PORTAL_DEV_APIBASE` 一樣只喺非 production 生效）。
+- 後台 4.5.0：Cards 補 `rooms`／`orgchart`（全員 view）、`budget` todo→done（只改仍係舊預設值嘅行）、Config 補 `BUDGET_SHEET_URL`；刪除 `annual` 週年會議文件卡片（`patchCardRows_` 移除舊行，`app/annual-docs` 已刪）。
+
+## 🌦 天氣決策 / 📇 聯結簿 / 👤 層級授權 / 🙈 隱藏卡片（v4.4.0）
+
+- **天氣決策**（`lib/weatherDecision.ts`、`components/WeatherDecisionPanel.tsx`、主控台 `WeatherDecisionBanner`）：瀏覽器直接拉天文台開放數據 `warnsum`（公開、可跨域），對照活動指引通告 04/2018 表一，戶內／戶外／海上各自一個結論（✅／⚠️／⛔）＋原因；可模擬；AQHI 天文台 API 冇提供，人手揀。
+- **聯結簿**（`app/contacts/page.tsx`、`lib/contactsDirectory.ts`）：旅團（待區方資料）／港島地域／總會三分頁，來源及日期寫喺檔頭。v4.5.0 起港島地域只放職員電話並自動同步，總監架構搬去 `/orgchart`。
+- **帳戶層級**：`level` 0 超管 → 1 DC → 2 DDC → 3 ADC → 4 STAFF → 5 其他。`Users` 表新增 `level` / `mustChangePassword` / `delegatedBy`；`Roles` 表新增 `level`。預設帳戶（`PRESET_USERS`）密碼 `1234`、首次登入必改；`setupSheets()` 只補缺，唔改已有帳戶。
+- **忘記密碼**：`requestPasswordReset`（公開，寄去帳戶電郵，前端帶 `resetUrlBase` 即 `/?d=區碼`，連結 `&reset=TOKEN`）→ `resetPassword`。Token 綁定舊密碼雜湊，24 小時有效、用一次即失效。
+- **授權／收回**（`/delegate`）：`getDelegation` / `delegatePerms` / `revokePerms`，直接寫 `Perms` 表；只可授出自己擁有嘅權限、只可授俾層級較低嘅角色。
+- **隱藏卡片**：`Cards.enabled=FALSE` → `getCards` 只回傳俾 level 0（超管）；主控台超管每張卡有開關。
+- 已刪除「會議行事曆」卡片（`patchCardRows_` 會移除舊行）。
+
+## 🚨 意外／應變（v4.3.0 完成）
+
+主控台「🚨 意外／應變」卡片三個分頁，全部依香港童軍總會官方通告整理（來源連結喺「完整指引」分頁）：
+
+| 分頁 | 內容 |
+|---|---|
+| 即時應變 | 活動出事時打開即用：受傷送院／嚴重傷亡／惡劣天氣／酷熱寒冷空氣污染／遠足失蹤／海上事故／保護童軍成員／傳媒查詢 8 張情境卡，每張有步驟、致電總監要講齊嘅資料（活動指引通告 02/2021）、限期（嚴重 3 個工作天、報告 7 個工作天）；另有 04/2018 天氣警告對照表、緊急熱線、出發前檢查 |
+| 完整指引 | 總會表格／政策通告／行政通告／活動指引通告全部官方 PDF 連結 |
+| 意外報告 | 手機直接填總會行政署「意外報告」(ACC-RPT 2019/07) 全部欄位；**草稿只存本機，按「確定提交」先入後台 `IncidentReports`**；列印／PDF 完全依官方兩頁版面；DDC+ 可記錄「單位主管已省閱」及刪除 |
+
+後台：`submitIncidentReport`（登入）、`listIncidentReports`（登入）、`updateIncidentReport` / `deleteIncidentReport`（canVenue）。提交會寄 `NOTIFY_STAFF_EMAIL`，嚴重傷亡會加註。
+
+## 🎓 訓練班收費 FPS QR（v4.3.0）
+
+`/training` 每班一個「💳 收費 QR」掣：用區會 FPS 戶口 + 學費 + 課程編號即時生成 → 「儲存 QR 到此班」寫入 `CourseLinks`（`fpsQrPayload` 等 6 欄）→ 成員系統 `listCourseLinks` 就攞到，未交費嘅申請人可以直接掃。
+member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handshake.md`](docs/member-gs-handshake.md)。
 
 ## 📚 文件索引
 
