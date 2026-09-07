@@ -90,8 +90,8 @@ export default function HomePage() {
           {locked && <div className="lock-banner">🔒 系統維護中<br /><small>{lockMsg}</small></div>}
           <form onSubmit={handleLogin}>
             {error && <div className="err">{error}</div>}
-            <div className="field"><label>帳號（電郵）</label>
-              <input type="text" placeholder="dc@..." value={email} onChange={e => setEmail(e.target.value)} /></div>
+            <div className="field"><label>帳號</label>
+              <input type="text" placeholder="帳號或電郵" value={email} onChange={e => setEmail(e.target.value)} autoCapitalize="none" autoCorrect="off" /></div>
             <div className="field"><label>密碼</label>
               <input type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} /></div>
             <button className="btn" type="submit" disabled={loggingIn}>{loggingIn ? '登入中…' : '登入'}</button>
