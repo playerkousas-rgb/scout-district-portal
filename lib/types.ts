@@ -64,8 +64,8 @@ export interface DistrictConfig {
   districtName: string;
   theme?: string;
   logoText?: string;
-  fpsAccountName?: string;   // 轉數快戶口名（FPS QR 製作卡片用）
-  fpsAccountNumber?: string; // 轉數快收款識別碼（FPS ID）
+  fpsAccountName?: string;            // 轉數快戶口名（FPS QR 製作卡片用）
+  fpsAccountNumber?: string | number; // Apps Script 會把純數字 Sheet 儲存格回傳為 number
 }
 
 export interface SystemState {
