@@ -313,7 +313,7 @@ export default function FpsPage() {
           </div>
         </div>
         <p id="fps-amount-help" className="fps-help">
-          固定銀碼 QR 會要求付款人支付指定金額；靜態 QR 則由付款人自行輸入金額。參考編號建議使用簡短英文／數字。
+          製作者填入銀碼時，QR 會帶有指定金額；如製作者不設定銀碼，掃碼付款人會在付款 App 自行輸入。參考編號建議使用簡短英文／數字。
         </p>
         {formError && <div className="err fps-form-error" role="alert">{formError}</div>}
       </section>
