@@ -63,7 +63,8 @@
  * 由前端 Vercel `/api/external` 伺服器端代抓，本檔唔使抓網頁。
  * 本檔只負責：Config `BUDGET_SHEET_URL`（區年度預算 Google Sheet 網址，getConfig 回傳 budgetSheetUrl）、
  * 新卡片 rooms（/rooms 地域房間使用情況）／orgchart（/orgchart 地域及總會架構），
- * 以及 budget 卡片由 todo → done（patchCardRows_ 只改仍係舊預設值嘅行）。
+ * budget 卡片由 todo → done（patchCardRows_ 只改仍係舊預設值嘅行），
+ * 以及刪除 annual（週年會議文件）卡片（setupSheets 會同步移除 Cards／Perms 舊行）。
  *
  * ── 部署 ──────────────────────────────────────────────────
  * 擴充功能 → Apps Script → 貼上本檔 → 執行 setupSheets()
@@ -2966,7 +2967,6 @@ function blueprint_() {
     P.push(row('visit', ALL_EDIT));
     P.push(row('contacts', ALL_EDIT));
     P.push(row('awards', adminEdit()));
-    P.push(row('annual', adminEdit()));
     P.push(row('budget', adminEdit()));
     P.push(row('committee', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'edit' }));
     P.push(row('unit', adminEdit()));
@@ -3057,7 +3057,6 @@ function blueprint_() {
       ['visit', '旅團探訪', '🏕', 'builtin', '/visit', '年度旅團探訪', 1, 'TRUE', 'FALSE', 'core', 'todo'],
       ['contacts', '聯結簿', '📇', 'builtin', '/contacts', '旅團 · 港島地域 · 總會 聯絡資料', 2, 'TRUE', 'FALSE', 'core', 'done'],
       ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '讀獲獎名單 · 推下一級', 3, 'TRUE', 'FALSE', 'core', 'todo'],
-      ['annual', '週年會議文件', '📂', 'builtin', '/annual-docs', '議程 · 紀錄', 4, 'TRUE', 'FALSE', 'core', 'todo'],
       ['budget', '區年度預算', '📑', 'builtin', '/budget', '直讀區方預算 Sheet · 按月／支部 · 資助合計', 5, 'TRUE', 'FALSE', 'core', 'done'],
       ['committee', '委任系統', '🗂', 'builtin', '/committee', '委任 · 續任 · R02', 7, 'TRUE', 'FALSE', 'core', 'todo'],
       ['unit', '旅團管理系統', '🧭', 'builtin', '/unit', '旅名冊 · 人數統計', 8, 'TRUE', 'FALSE', 'core', 'todo'],
@@ -3244,7 +3243,7 @@ function patchCardRows_(ss) {
     budget: { oldDesc: '預算編列與追蹤', desc: '直讀區方預算 Sheet · 按月／支部 · 資助合計' },
   };
   var descOnly = { incident: { oldDesc: '即時應變 · 總會指引 · 意外報告', desc: '天氣決策 · 即時應變 · 總會指引 · 意外報告' } };
-  var removeIds = { meeting: true }; // v4.4.0：會議行事曆卡片已刪除
+  var removeIds = { meeting: true, annual: true }; // v4.4.0 刪會議行事曆；v4.5.0 刪週年會議文件
   for (var i = v.length - 1; i >= 1; i--) {
     var id = String(v[i][cId] || '').trim();
     if (removeIds[id]) { sh.deleteRow(i + 1); continue; }

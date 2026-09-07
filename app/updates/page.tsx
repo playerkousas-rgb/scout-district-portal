@@ -11,6 +11,7 @@ export default function UpdatesPage() {
           <li>🏢 新卡片 <b>地域房間使用情況</b>（/rooms）：17／18／19 樓逐間房揀，即見「現在使用中／空置」、未來 7／14／30 日逐日時段（活動、單位、人數、聯絡人由事件標題自動拆出）；打通房（1704A／B／1704／1704+1705）互相計入；另有「今日總覽」一頁睇晒 11 間房及「原版日曆」</li>
           <li>📇 <b>聯結簿・港島地域</b>分頁只剩職員直線電話（搵人解決問題用），並<b>自動由港島地域網頁同步</b>職員姓名／電話；<b>總會</b>各署電話電郵亦自動由總會網頁同步。頁尾顯示網頁更新日期及同步時間，讀唔到時自動用內建備援（會標明）</li>
           <li>🏛 新卡片 <b>地域及總會架構</b>（/orgchart）：港島地域總監架構（地域總監→副／助理地域總監→區總監→地域總部總監→助理地域總部總監）及總會（香港總監諮議會＋執行委員會主要職位），職位換人自動跟官網更新；有搜尋</li>
+          <li>🗑 刪除「週年會議文件」卡片（<code>setupSheets()</code> 會同步移除 Cards／Perms 舊行）</li>
           <li>後台 4.5.0：Cards 補 <code>rooms</code>／<code>orgchart</code>（全員可看）、<code>budget</code> 由 todo 改 done、Config 補 <code>BUDGET_SHEET_URL</code>；外部網頁／Sheet／日曆全部由 Vercel <code>/api/external</code> 代抓，Apps Script 唔使改權限</li>
         </ul>
       </div>

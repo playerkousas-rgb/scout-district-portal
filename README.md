@@ -100,7 +100,7 @@
 
 - 房間打通關係：1704A／1704B ⊂ 1704 ⊂ 1704+1705；睇任何一間都會自動計入相關日曆（標「經 XXXX 打通預約」）。
 - 開發／測試：`PORTAL_DEV_EXTERNAL_BASE=http://127.0.0.1:8787/upstream` 可把全部上游改經本機 fixture（同 `PORTAL_DEV_APIBASE` 一樣只喺非 production 生效）。
-- 後台 4.5.0：Cards 補 `rooms`／`orgchart`（全員 view）、`budget` todo→done（只改仍係舊預設值嘅行）、Config 補 `BUDGET_SHEET_URL`。
+- 後台 4.5.0：Cards 補 `rooms`／`orgchart`（全員 view）、`budget` todo→done（只改仍係舊預設值嘅行）、Config 補 `BUDGET_SHEET_URL`；刪除 `annual` 週年會議文件卡片（`patchCardRows_` 移除舊行，`app/annual-docs` 已刪）。
 
 ## 🌦 天氣決策 / 📇 聯結簿 / 👤 層級授權 / 🙈 隱藏卡片（v4.4.0）
 
