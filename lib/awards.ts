@@ -1,5 +1,5 @@
 /**
- * 🎖 獎勵提名推算（v4.7.1）— 純函數，唔掂網絡，方便測試。
+ * 🎖 獎勵提名推算（v4.7.2）— 純函數，唔掂網絡，方便測試。
  *
  * 規則來源：AwardTypes 表（可喺 /awards「年期設定」改），每個獎項有
  *   prevCode  上一級獎（空 = 入門級）
@@ -186,6 +186,45 @@ export function deadlines(round: AwardRound, targetYear: number): { district: st
 export function daysUntil(dateStr: string, today = new Date()): number {
   const d = new Date(dateStr + 'T23:59:59');
   return Math.ceil((d.getTime() - today.getTime()) / 86400000);
+}
+
+/**
+ * 而家最應該處理緊嘅提名期：
+ * 由今日計，搵返每個提名期「區部死線仲未過」嘅最近一屆頒獎年份。
+ * other（自行申請）冇死線，用今年。
+ */
+export type UpcomingRound = {
+  round: AwardRound;
+  year: number;              // 頒獎年份
+  district: string | null;   // 區部死線
+  hq: string | null;         // 總會死線
+  days: number | null;       // 距區部死線幾多日
+};
+export function upcomingRounds(today = new Date()): UpcomingRound[] {
+  const y = today.getFullYear();
+  const pick = (round: AwardRound): UpcomingRound => {
+    for (let target = y; target <= y + 3; target++) {
+      const dl = deadlines(round, target);
+      if (!dl) break;
+      const days = daysUntil(dl.district, today);
+      if (days >= 0) return { round, year: target, district: dl.district, hq: dl.hq, days };
+    }
+    return { round, year: y + 1, district: null, hq: null, days: null };
+  };
+  return [pick('founder'), pick('rally'), { round: 'other', year: y, district: null, hq: null, days: null }];
+}
+
+/** 逐個人喺 targetYear 夠期可提名嘅獎（畀名冊標亮用）；key = member.id */
+export function readyByMember(
+  members: AwardMember[], types: AwardType[], targetYear: number, opts?: { includeInactive?: boolean },
+): Record<string, Eligibility[]> {
+  const map: Record<string, Eligibility[]> = {};
+  for (const m of members) {
+    if (!opts?.includeInactive && m.status && m.status !== 'active' && m.status !== 'applying') continue;
+    const ready = eligibilityFor(m, types, targetYear).filter(e => e.ready);
+    if (ready.length) map[m.id] = ready;
+  }
+  return map;
 }
 
 // ───────────────────────── 匯入：由 Excel 貼上 ─────────────────────────

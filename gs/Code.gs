@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.7.1
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.7.2
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -93,7 +93,7 @@
  *      （舊資料 warn → warning、urgent → important 自動對應，Sheet 唔使改）。
  * 佢個 proxy 唔會轉發 link / linkLabel / notify / districtCode，呢啲欄位只有管理系統用。
  *
- * ── 獎勵提名 Awards（v4.7.0／年期修訂 v4.7.1）──────────────
+ * ── 獎勵提名 Awards（v4.7.0／年期修訂 v4.7.2）──────────────
  * 管理系統 /awards：區會獎勵名冊（一人一行）＋「今年夠期可提名」自動推算。
  *   Awards 表      一人一行；每個獎項一欄，格入面填獲獎年份（可加「?」表示未確定）
  *                  serviceStart = 服務開始年份（委任年份）；入門級獎項（優良服務獎章 7 年、
@@ -267,7 +267,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.7.1',
+      version: '4.7.2',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -1894,7 +1894,7 @@ function awardTypeSeed_() {
     ['BRL',    '銅獅勳章',                '銅獅',  '獅勳章',   'DSC',   '',   'rally',   'Bronze Lion；冇固定年期規定', 'TRUE'],
     ['SVL',    '銀獅勳章',                '銀獅',  '獅勳章',   'BRL',   '',   'rally',   'Silver Lion；冇固定年期規定', 'TRUE'],
     ['GDL',    '金獅勳章',                '金獅',  '獅勳章',   'SVL',   '',   'rally',   'Gold Lion；制服成年成員最高功績獎勵，冇固定年期規定', 'TRUE'],
-    ['LSM',    '長期服務獎章',            'LSM',   '長期服務', '',      15,   'other',   '服務實職滿 15 年（由服務開始年份起計）；可自行向總會申請', 'TRUE'],
+    ['LSM',    '長期服務獎章',            'LSM',   '長期服務', '',      '',   'other',   '服務實職滿 15 年；第一個由區會自己入紀錄，預設唔自動推算（想自動列出就喺年期設定填 15）', 'TRUE'],
     ['LSM1',   '長期服務一星獎章',        'LSM*',  '長期服務', 'LSM',   10,   'other',   '再服務滿 10 年（共 25 年）', 'TRUE'],
     ['LSM2',   '長期服務二星獎章',        'LSM**', '長期服務', 'LSM1',  10,   'other',   '共 35 年', 'TRUE'],
     ['LSM3',   '長期服務三星獎章',        'LSM***','長期服務', 'LSM2',  10,   'other',   '共 45 年', 'TRUE'],

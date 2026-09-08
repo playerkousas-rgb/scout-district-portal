@@ -1,6 +1,6 @@
 'use client';
 /**
- * 🎖 獎勵提名（v4.7.1）
+ * 🎖 獎勵提名（v4.7.2）
  *
  * 一站式：名冊（Awards 表）＋ 年期規則（AwardTypes 表）＋ 每年「夠期可提名」自動推算。
  * 年期／獎項名稱全部可以喺「年期設定」頁改，唔使改程式、唔使重新部署。
@@ -13,8 +13,9 @@ import type { AwardMember, AwardType, AwardRound, AwardsBoard } from '@/lib/type
 import {
   ROUND_LABEL, ROUND_HINT, STATUS_LABEL, awardYear, isUncertain, hasAward,
   nominationBoard, deadlines, daysUntil, parseAwardPaste, toCsv, shortLabel,
-  missingServiceStart, serviceStartYear,
+  missingServiceStart, serviceStartYear, upcomingRounds, readyByMember,
 } from '@/lib/awards';
+import type { Eligibility } from '@/lib/awards';
 import BackLink, { BackBar } from '@/components/BackLink';
 
 type Tab = 'nominate' | 'roster' | 'rules' | 'import';
@@ -41,6 +42,7 @@ export default function AwardsPage() {
   const [canEdit, setCanEdit] = useState(false);
   const [needUpgrade, setNeedUpgrade] = useState(false);
   const [tab, setTab] = useState<Tab>('nominate');
+  const [year, setYear] = useState(new Date().getFullYear() + 1);
 
   useEffect(() => {
     if (!session) return;
@@ -81,7 +83,7 @@ export default function AwardsPage() {
 
       {needUpgrade && (
         <div className="info-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <h3>⚠️ 後台未升級到 v4.7.1</h3>
+          <h3>⚠️ 後台未升級到 v4.7.2</h3>
           <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.7 }}>
             請去「📢 更新 / 下載」下載最新 <code>Code.gs</code> 貼上 Apps Script →
             執行 <code>setupSheets()</code>（會自動建立 <code>Awards</code> 同 <code>AwardTypes</code> 兩張表，
@@ -98,10 +100,15 @@ export default function AwardsPage() {
 
       {loading ? <div className="center"><div className="spinner" /></div> : board && (
         <>
-          {tab === 'nominate' && <NominateTab board={board} />}
+          <AlertBanner
+            board={board}
+            onGo={(y) => { setYear(y); setTab('nominate'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+            onRoster={(y) => { setYear(y); setTab('roster'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+          />
+          {tab === 'nominate' && <NominateTab board={board} year={year} setYear={setYear} />}
           {tab === 'roster' && (
             <RosterTab
-              board={board} canEdit={canEdit} busy={busy} setBusy={setBusy}
+              board={board} canEdit={canEdit} busy={busy} setBusy={setBusy} year={year} setYear={setYear}
               token={session.token} reload={load} flash={flash} setError={setError}
             />
           )}
@@ -125,11 +132,70 @@ export default function AwardsPage() {
   );
 }
 
+// ─────────────────── 🔔 一入嚟就見到：邊個而家可以提名 ───────────────────
+
+function AlertBanner({ board, onGo, onRoster }: {
+  board: AwardsBoard; onGo: (year: number) => void; onRoster: (year: number) => void;
+}) {
+  const rows = useMemo(() => upcomingRounds().map(u => {
+    const bucket = nominationBoard(board.members, board.types, u.year).find(x => x.round === u.round);
+    const ready = bucket ? bucket.ready : [];
+    const people: AwardMember[] = [];
+    const seen = new Set<string>();
+    ready.forEach(e => { if (!seen.has(e.member.id)) { seen.add(e.member.id); people.push(e.member); } });
+    return { ...u, ready, people };
+  }), [board]);
+
+  const totalPeople = new Set(rows.flatMap(r => r.people.map(m => m.id))).size;
+
+  if (totalPeople === 0) {
+    return (
+      <div className="info-card aw-alert calm">
+        <b>✅ 暫時冇人夠期可以提名</b>
+        <p>年期規則喺「⚙️ 年期設定」，名冊喺「📋 獎勵名冊」。有新人／新獎項入咗，呢度會即刻話你知。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="info-card aw-alert">
+      <div className="aw-alert-head">
+        <b>🔔 而家有 {totalPeople} 位領袖夠期，可以提名</b>
+        <button className="mini-btn" onClick={() => onRoster(rows[0]?.year || new Date().getFullYear() + 1)}>
+          喺名冊標亮佢哋 →
+        </button>
+      </div>
+      {rows.filter(r => r.people.length > 0).map(r => (
+        <div key={r.round} className="aw-alert-row">
+          <div className="aw-alert-title">
+            <span className="aw-hot-badge">{r.people.length} 人</span>
+            <b>{ROUND_LABEL[r.round]}</b>
+            <span className="aw-alert-year">{r.year} 年頒獎</span>
+            {r.district && (
+              <span className={`aw-alert-dl${(r.days ?? 99) < 45 ? ' soon' : ''}`}>
+                區部死線 {r.district}（仲有 {r.days} 日）
+              </span>
+            )}
+            <button className="mini-btn" onClick={() => onGo(r.year)}>睇名單 →</button>
+          </div>
+          <div className="aw-chips">
+            {r.ready.slice(0, 12).map(e => (
+              <span key={e.member.id + e.type.code} className="aw-chip hot" title={`${e.member.name}｜建議提名 ${e.type.label}`}>
+                🔥 {e.member.name} → {shortLabel(e.type)}
+              </span>
+            ))}
+            {r.ready.length > 12 && <span className="aw-none">…另外 {r.ready.length - 12} 項</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ───────────────────────── 🏅 提名建議 ─────────────────────────
 
-function NominateTab({ board }: { board: AwardsBoard }) {
+function NominateTab({ board, year, setYear }: { board: AwardsBoard; year: number; setYear: (y: number) => void }) {
   const thisYear = new Date().getFullYear();
-  const [year, setYear] = useState(thisYear + 1);
   const [includeInactive, setIncludeInactive] = useState(false);
 
   const buckets = useMemo(
@@ -163,7 +229,7 @@ function NominateTab({ board }: { board: AwardsBoard }) {
         <label className="aw-field">
           <span>頒獎年份</span>
           <select value={year} onChange={e => setYear(Number(e.target.value))}>
-            {[thisYear, thisYear + 1, thisYear + 2, thisYear + 3].map(y => (
+            {[thisYear - 1, thisYear, thisYear + 1, thisYear + 2, thisYear + 3].map(y => (
               <option key={y} value={y}>{y} 年</option>
             ))}
           </select>
@@ -181,8 +247,10 @@ function NominateTab({ board }: { board: AwardsBoard }) {
         <div className="info-card aw-warn">
           <b>⚠️ {missing.length} 人未填「服務開始年份」</b>
           <p>
-            {entryLabels || '入門級獎項'} 係由服務開始（委任）年份起計，未填就計唔到。
-            去「📋 獎勵名冊」逐個補返個年份就會自動出現喺上面。
+            {entryLabels || '入門級獎項'} 係由<b>服務開始（首次委任）年份</b>起計。
+            呢個係「由無到有」嗰級，未填年份就計唔到 —— 所以呢一級<b>暫時未通</b>，
+            要慢慢儲返全區領袖嘅委任年份先會準。去「📋 獎勵名冊」逐個補返年份，補到邊就計到邊。<br />
+            （<b>長期服務獎章第一個</b>預設唔自動推算，由你自己入紀錄；<b>一星之後</b>就會自動每 10 年提你。）
           </p>
           <div className="aw-chips">
             {missing.slice(0, 20).map(m => (
@@ -275,8 +343,9 @@ function NominateTab({ board }: { board: AwardsBoard }) {
       <div className="info-card aw-note">
         <b>點計出嚟？</b><br />
         ① 有上一級嘅獎：上一級獲獎年份 ＋ 設定年期 ≤ 頒獎年份（年期留空 = 冇規定，有上一級就列出）。<br />
-        ② 入門級（優良服務獎章、長期服務獎章）：<b>服務開始年份</b> ＋ 設定年期 ≤ 頒獎年份。<br />
-        ③ 感謝狀呢類冇年期規定又冇上一級嘅，唔會自動推算，要自己揀人。<br />
+        ② 入門級（例如優良服務獎章 7 年）：<b>服務開始年份</b> ＋ 設定年期 ≤ 頒獎年份。<br />
+        ③ 冇年期規定又冇上一級嘅（感謝狀、<b>第一個長期服務獎章</b>）：唔自動推算，自己入紀錄；
+        長期服務<b>一星之後</b>就會自動每 10 年提你。<br />
         年期全部喺「⚙️ 年期設定」改，改完即刻重算。
       </div>
     </>
@@ -285,24 +354,38 @@ function NominateTab({ board }: { board: AwardsBoard }) {
 
 // ───────────────────────── 📋 名冊 ─────────────────────────
 
-function RosterTab({ board, canEdit, busy, setBusy, token, reload, flash, setError }: {
+function RosterTab({ board, canEdit, busy, setBusy, year, setYear, token, reload, flash, setError }: {
   board: AwardsBoard; canEdit: boolean; busy: string; setBusy: (v: string) => void;
+  year: number; setYear: (y: number) => void;
   token: string; reload: () => Promise<void>; flash: (s: string) => void; setError: (s: string) => void;
 }) {
+  const thisYear = new Date().getFullYear();
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [awardFilter, setAwardFilter] = useState('');
+  const [onlyReady, setOnlyReady] = useState(false);
   const [editing, setEditing] = useState<Partial<AwardMember> | null>(null);
+
+  // 邊個喺呢一年夠期 → 成行標亮
+  const readyMap = useMemo(
+    () => readyByMember(board.members, board.types, year, { includeInactive: true }),
+    [board, year],
+  );
+  const readyCount = Object.keys(readyMap).length;
 
   const list = useMemo(() => {
     const kw = q.trim().toLowerCase();
     return board.members.filter(m => {
+      if (onlyReady && !readyMap[m.id]) return false;
       if (status && (m.status || 'active') !== status) return false;
       if (awardFilter && !hasAward(m, awardFilter)) return false;
       if (!kw) return true;
       return [m.name, m.nameEn, m.troop, m.position, m.note].some(v => String(v || '').toLowerCase().includes(kw));
-    }).sort((a, b) => (a.troop || '').localeCompare(b.troop || '') || a.name.localeCompare(b.name));
-  }, [board, q, status, awardFilter]);
+    }).sort((a, b) => {
+      const ra = readyMap[a.id] ? 0 : 1, rb = readyMap[b.id] ? 0 : 1;   // 夠期嘅排最前
+      return ra - rb || (a.troop || '').localeCompare(b.troop || '') || a.name.localeCompare(b.name);
+    });
+  }, [board, q, status, awardFilter, onlyReady, readyMap]);
 
   const shownTypes = board.types.filter(t => t.enabled !== false);
 
@@ -315,11 +398,12 @@ function RosterTab({ board, canEdit, busy, setBusy, token, reload, flash, setErr
   }
 
   function exportRoster() {
-    const head = ['姓名', '旅團', '職位', '狀態', '服務開始年份', ...shownTypes.map(t => t.label), '備註'];
+    const head = ['姓名', '旅團', '職位', '狀態', '服務開始年份', `${year} 年可提名`, ...shownTypes.map(t => t.label), '備註'];
     const rows: (string | number)[][] = [head];
     list.forEach(m => rows.push([
       m.name, m.troop || '', m.position || '', STATUS_LABEL[m.status || 'active'],
-      m.serviceStart || '', ...shownTypes.map(t => m.awards?.[t.code] || ''), m.note || '',
+      m.serviceStart || '', (readyMap[m.id] || []).map(e => e.type.label).join('、'),
+      ...shownTypes.map(t => m.awards?.[t.code] || ''), m.note || '',
     ]));
     const blob = new Blob(['\ufeff' + toCsv(rows)], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -350,6 +434,18 @@ function RosterTab({ board, canEdit, busy, setBusy, token, reload, flash, setErr
             {shownTypes.map(t => <option key={t.code} value={t.code}>{t.label}（{board.counts[t.code] || 0}）</option>)}
           </select>
         </label>
+        <label className="aw-field">
+          <span>標亮年份</span>
+          <select value={year} onChange={e => setYear(Number(e.target.value))}>
+            {[thisYear - 1, thisYear, thisYear + 1, thisYear + 2, thisYear + 3].map(y => (
+              <option key={y} value={y}>{y} 年</option>
+            ))}
+          </select>
+        </label>
+        <label className="aw-check hot">
+          <input type="checkbox" checked={onlyReady} onChange={e => setOnlyReady(e.target.checked)} />
+          🔥 只睇夠期可提名（{readyCount}）
+        </label>
         <span className="aw-controls-hint">顯示 {list.length} / {board.total} 人</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="mini-btn" onClick={exportRoster}>⬇ 匯出</button>
@@ -362,14 +458,18 @@ function RosterTab({ board, canEdit, busy, setBusy, token, reload, flash, setErr
           <thead>
             <tr>
               <th className="aw-sticky">姓名</th>
-              <th>旅團</th><th>職位</th><th>服務開始</th><th>獎項</th>{canEdit && <th></th>}
+              <th>旅團</th><th>職位</th><th>服務開始</th>
+              <th>{year} 年可提名</th><th>已有獎項</th>{canEdit && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={6} className="empty">冇資料（可以去「⬆️ 匯入名單」貼上你份 Excel）</td></tr>}
-            {list.map(m => (
-              <tr key={m.id}>
+            {list.length === 0 && <tr><td colSpan={7} className="empty">冇資料（可以去「⬆️ 匯入名單」貼上你份 Excel）</td></tr>}
+            {list.map(m => {
+              const ready = readyMap[m.id];
+              return (
+              <tr key={m.id} className={ready ? 'aw-hot-row' : undefined}>
                 <td className="aw-sticky">
+                  {ready && <span className="aw-hot-badge" title={`${year} 年夠期可提名`}>🔥 可提名</span>}
                   <b>{m.name}</b>
                   {(m.status && m.status !== 'active') && <span className="aw-tag">{STATUS_LABEL[m.status]}</span>}
                   {m.note && <div className="aw-note-sm">{m.note}</div>}
@@ -377,6 +477,17 @@ function RosterTab({ board, canEdit, busy, setBusy, token, reload, flash, setErr
                 <td>{m.troop || '—'}</td>
                 <td>{m.position || '—'}</td>
                 <td>{m.serviceStart ? m.serviceStart : <span className="aw-tag warn">未填</span>}</td>
+                <td>
+                  {ready ? (
+                    <div className="aw-chips">
+                      {ready.map(e => (
+                        <span key={e.type.code} className="aw-chip hot" title={e.fromService ? `服務由 ${e.prevYear} 年起` : `${e.prevType ? shortLabel(e.prevType) : ''} ${e.prevYear ?? ''}`}>
+                          🔥 {e.type.label}
+                        </span>
+                      ))}
+                    </div>
+                  ) : <span className="aw-none">—</span>}
+                </td>
                 <td>
                   <div className="aw-chips">
                     {shownTypes.filter(t => m.awards?.[t.code]).map(t => (
@@ -394,7 +505,8 @@ function RosterTab({ board, canEdit, busy, setBusy, token, reload, flash, setErr
                   </td>
                 )}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -402,6 +514,7 @@ function RosterTab({ board, canEdit, busy, setBusy, token, reload, flash, setErr
       {editing && (
         <MemberModal
           draft={editing} types={board.types} token={token}
+          ready={editing.id ? readyMap[editing.id] : undefined} year={year}
           onClose={() => setEditing(null)}
           onSaved={async (name) => { setEditing(null); flash('已儲存 ' + name); await reload(); }}
           setError={setError}
@@ -411,8 +524,9 @@ function RosterTab({ board, canEdit, busy, setBusy, token, reload, flash, setErr
   );
 }
 
-function MemberModal({ draft, types, token, onClose, onSaved, setError }: {
+function MemberModal({ draft, types, token, ready, year, onClose, onSaved, setError }: {
   draft: Partial<AwardMember>; types: AwardType[]; token: string;
+  ready?: Eligibility[]; year?: number;
   onClose: () => void; onSaved: (name: string) => void; setError: (s: string) => void;
 }) {
   const [d, setD] = useState<Partial<AwardMember>>({ ...draft, awards: { ...(draft.awards || {}) } });
@@ -435,6 +549,13 @@ function MemberModal({ draft, types, token, onClose, onSaved, setError }: {
     <div className="inc-modal" onClick={onClose}>
       <div className="inc-modal-box aw-modal" onClick={e => e.stopPropagation()}>
         <h3 style={{ marginBottom: 12 }}>{d.id ? '編輯成員' : '新增成員'}</h3>
+
+        {ready && ready.length > 0 && (
+          <div className="aw-modal-hot">
+            🔥 <b>{d.name}</b> 喺 {year} 年夠期，可以提名：
+            {ready.map(e => <span key={e.type.code} className="aw-chip hot">{e.type.label}</span>)}
+          </div>
+        )}
 
         <div className="aw-form-grid">
           <label className="aw-field"><span>姓名 *</span>

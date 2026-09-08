@@ -5,7 +5,7 @@
 import assert from 'node:assert';
 import {
   awardYear, isUncertain, eligibilityFor, nominationBoard, deadlines, parseAwardPaste, toCsv,
-  missingServiceStart,
+  missingServiceStart, upcomingRounds, readyByMember,
 } from '../lib/awards.ts';
 import type { AwardMember, AwardType } from '../lib/types.ts';
 
@@ -210,6 +210,31 @@ check('認唔到嘅代號會報返出嚟，唔會靜靜哋吞咗', () => {
 
 check('CSV 匯出會處理逗號同引號', () => {
   assert.strictEqual(toCsv([['a', 'b,c'], ['d"e', 1]]), 'a,"b,c"\n"d""e",1');
+});
+
+
+check('upcomingRounds：跟今日搵返「死線仲未過」嗰屆', () => {
+  // 2026-09-08：創辦人 2027 屆區部死線 2026-10-31 未過；大會操 2026 屆 2026-04-30 已過 → 2027
+  const ups = upcomingRounds(new Date('2026-09-08T12:00:00+08:00'));
+  const founder = ups.find(u => u.round === 'founder')!;
+  const rally = ups.find(u => u.round === 'rally')!;
+  assert.strictEqual(founder.year, 2027);
+  assert.strictEqual(founder.district, '2026-10-31');
+  assert.strictEqual(rally.year, 2027);
+  assert.strictEqual(rally.district, '2027-04-30');
+  // 11 月 15 日：創辦人區部死線已過 → 跳去下一屆
+  const later = upcomingRounds(new Date('2026-11-15T12:00:00+08:00')).find(u => u.round === 'founder')!;
+  assert.strictEqual(later.year, 2028);
+});
+
+check('readyByMember：邊個要標亮（key = member.id，只計夠期嗰啲）', () => {
+  const a = member('甲', { GSA: '2015' });          // 2020 夠期攞 DSA
+  const b = member('乙', {}, { serviceStart: '2019' });  // 2026 先夠期攞 GSA
+  const c = member('丙', {}, { status: 'left' });
+  const map = readyByMember([a, b, c], types, 2021);
+  assert.strictEqual(Object.keys(map).length, 1);
+  assert.strictEqual(map[a.id][0].type.code, 'DSA');
+  assert.strictEqual(map[b.id], undefined);
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

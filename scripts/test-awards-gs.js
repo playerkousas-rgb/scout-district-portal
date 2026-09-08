@@ -118,7 +118,7 @@ check('v4.7.1 預設年期：GSA 7（由服務年資計）、DSM→DSC 5、獅�
   assert.strictEqual(by.BRL.minYears, null);
   assert.strictEqual(by.SVL.minYears, null);
   assert.strictEqual(by.LSM.prevCode, '');
-  assert.strictEqual(by.LSM.minYears, 15);
+  assert.strictEqual(by.LSM.minYears, null);   // 第一個長期服務獎章自己入，唔自動推算
   assert.strictEqual(by.LSM1.minYears, 10);
 });
 
@@ -284,9 +284,9 @@ check('getAwardsBoard 有回內建建議年期（畀「套用建議」用）', (
   assert.strictEqual(d.filter(t => t.code === 'BRL')[0].minYears, null);
 });
 
-check('健康檢查版本 4.7.1', () => {
+check('健康檢查版本 4.7.2', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.7.1');
+  assert.strictEqual(parsed.data.version, '4.7.2');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);
