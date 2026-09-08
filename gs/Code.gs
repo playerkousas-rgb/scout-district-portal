@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.8.1
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.9.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -93,17 +93,33 @@
  *      （舊資料 warn → warning、urgent → important 自動對應，Sheet 唔使改）。
  * 佢個 proxy 唔會轉發 link / linkLabel / notify / districtCode，呢啲欄位只有管理系統用。
  *
- * ── 獎勵提名 Awards（v4.7.0／年期修訂 v4.7.2／登記獲獎 v4.7.3）──────────────
+ * ── 獎勵提名 Awards（v4.7.0／年期修訂 v4.9.0）──────────────
  * 管理系統 /awards：區會獎勵名冊（一人一行）＋「今年夠期可提名」自動推算。
  *   Awards 表      一人一行；每個獎項一欄，格入面填獲獎年份（可加「?」表示未確定）
  *                  serviceStart = 服務開始年份（委任年份）；入門級獎項（優良服務獎章 7 年、
- *                  長期服務獎章 15 年）由呢個年份起計，冇填就計唔到，會喺提名頁提示補資料
+ *                  五年長期服務獎狀 5 年、長期服務獎章 15 年）由呢個年份起計，冇填就計唔到
  *   AwardTypes 表  獎項清單同年期規則（label／上一級 prevCode／最少相隔 minYears／
- *                  提名期 round：founder 創辦人紀念日、rally 大會操（童軍獎勵）、other 自行申請）
+ *                  提名期 round：founder 創辦人紀念日、rally 大會操（童軍獎勵）、
+ *                  hab 民青局局長嘉許提名期、other 自行申請）
  *                  ★ 全部可以喺 /awards「年期設定」頁面改，唔使改程式、唔使重新部署
  * 加新獎項 → 自動喺 Awards 表補一欄（唔會清走舊資料）。
+ * v4.9.0 年期修訂（用戶提供）：
+ *   · LAY／會務委員階梯：五年獎狀(5) → 十年獎狀(+5) → 長期服務獎章(15) → 一二三星(每 10 年)
+ *   · 香港總監嘉許／高級嘉許／民青局局長嘉許／感謝狀 ＝ 自行申請，一律唔自動推算
+ *   · 民青局局長嘉許有提名期：總會每年初發通告收集，2 月初交民青局（死線可喺「年期設定」改）
+ *   · 名冊狀態加「沒有提名資格」（noNomination）— 唔會出現喺提名建議
  * 提名期（總會 ACR 20/2024）：創辦人紀念日 區部 10/31 → 總會 11/30；
  *                              童軍獎勵（大會操）區部 4/30 → 總會 5/31。
+ *
+ * ── 消息發佈 News（v4.9.0 修訂）─────────────────────────
+ * 管理入口搬咗去主控台最頂（ADC 層級 3 或以上直接編輯／刪除，唔使再搵卡片）；
+ * news 卡片已移除（patchCardRows_ 會清走舊行）。
+ * 刪除改為「軟刪除」：deleted=TRUE ＋ deletedAt/deletedBy，Sheet 留底曾經出現過嘅消息；
+ * 公開 listAnnouncements 一律唔回已刪除嘅行（成員端即刻消失）。
+ *
+ * ── 聯絡簿 — 職員姓名區方自訂（v4.9.0）───────────────────
+ * ContactNames 表：地域職員姓名可由區方改（電話唔變但人會轉）。
+ * key = 「職位|電話|出現次序」，存區方自訂姓名；官方網頁同步返嚟之後會蓋上區方姓名。
  *
  * ── 部署 ──────────────────────────────────────────────────
  * 擴充功能 → Apps Script → 貼上本檔 → 執行 setupSheets()
@@ -124,7 +140,8 @@ var SHEET = {
   VENUES: 'Venues', VENUE_REQ: 'VenueBookings',
   ITEMS: 'Items', STOCK_REQ: 'StockRequests',
   ACTIVITY_REQ: 'ActivityNotices',
-  NEWS: 'News',                  // 消息發佈（管理系統發 → 成員系統首頁置頂顯示）
+  NEWS: 'News',                  // 消息發佈（管理系統主控台頂發 → 成員系統首頁置頂顯示）
+  CONTACT_NAMES: 'ContactNames', // 聯絡簿：地域職員姓名區方自訂（電話唔變人會轉）
   AWARDS: 'Awards',              // 獎勵提名名冊（一人一行，每個獎一欄＝獲獎年份）
   UNITS: 'Units',                // 全區旅團名單（旅號、主辦機構、各支部團數）
   VISITS: 'Visits',              // 旅團探訪登記（一次探訪一行）
@@ -269,7 +286,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.8.1',
+      version: '4.9.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -389,6 +406,7 @@ function doPost(e) {
       case 'deleteAwardMember':   return json(deleteAwardMember_(b.token, b.id));
       case 'importAwardMembers':  return json(importAwardMembers_(b.token, b.rows, b.mode));
       case 'saveAwardTypes':      return json(saveAwardTypes_(b.token, b.types));
+      case 'saveAwardDeadlines':  return json(saveAwardDeadlines_(b.token, b.cfg || b.deadlineCfg || b));
 
       // ---------- 旅團探訪（v4.8.1） ----------
       case 'saveVisit':           return json(saveVisit_(b.token, b.visit || b));
@@ -396,8 +414,11 @@ function doPost(e) {
       case 'saveUnits':           return json(saveUnits_(b.token, b.units));
       case 'saveAnnouncement':      return json(saveAnnouncement_(b.token, b.announcement || b.news || b));
       case 'deleteAnnouncement':    return json(deleteAnnouncement_(b.token, b.id));
+      case 'restoreAnnouncement':   return json(restoreAnnouncement_(b.token, b.id));
       case 'setAnnouncementPinned': return json(setAnnouncementPinned_(b.token, b.id, b.pinned));
       case 'setAnnouncementActive': return json(setAnnouncementActive_(b.token, b.id, b.active));
+      case 'getContactNames':       return json(getContactNames_(b.token));
+      case 'saveContactName':       return json(saveContactName_(b.token, b.key, b.name));
 
       // ---------- 意外／應變：意外報告（管理系統，需登入） ----------
       case 'submitIncidentReport': return json(submitIncidentReport_(b.token, b.report || b));
@@ -521,6 +542,10 @@ function colIdxByHeader_(sh, header) {
 function setCellByHeader_(sh, rowIdx, header, value) {
   var ci = colIdxByHeader_(sh, header);
   if (ci > 0) sh.getRange(rowIdx, ci).setValue(value);
+}
+function getCellByHeader_(sh, rowIdx, header) {
+  var ci = colIdxByHeader_(sh, header);
+  return ci > 0 ? sh.getRange(rowIdx, ci).getValue() : '';
 }
 function appendRowObj_(sh, obj) {
   var headers = sheetHeadersBySheet_(sh);
@@ -1735,6 +1760,10 @@ function newsRow_(r) {
     notify: isTrue_(r.notify),
     active: String(r.active).toUpperCase() !== 'FALSE',
     expiresAt: newsDate_(r.expiresAt),
+    // v4.9.0 軟刪除：刪咗都留底（deleted=TRUE；成員端一律見唔到）
+    deleted: isTrue_(r.deleted),
+    deletedAt: String(r.deletedAt || ''),
+    deletedBy: String(r.deletedBy || ''),
     publishedAt: String(r.publishedAt || ''),
     publishedBy: String(r.publishedBy || ''),
     updatedAt: String(r.updatedAt || r.publishedAt || ''),
@@ -1774,6 +1803,7 @@ function listAnnouncements_(p) {
   var list = readSheet_(SHEET.NEWS).map(newsRow_).filter(function (n) {
     if (!n.id || (!n.title && !n.body)) return false;
     if (!n.active) return false;
+    if (n.deleted) return false;                                  // 已刪除留底嘅唔會出返嚟
     if (n.expiresAt && n.expiresAt < today) return false;
     if (n.date && n.date > today) return false;                 // 預設日期喺將來 = 未到發佈日
     if (pinnedOnly && !n.pinned) return false;
@@ -1784,7 +1814,18 @@ function listAnnouncements_(p) {
   return list.slice(0, limit).map(newsPublic_);
 }
 
-/** 管理系統列表（需登入）：連已下架／已過期／未到期都回 */
+/**
+ * 消息管理權限（v4.9.0）：層級 3（ADC）或以上 — 主控台頂部直接編輯／刪除，
+ * 唔使再經 news 卡片（卡片已移除）。層級 0 超管永遠可以。
+ */
+function requireNewsEdit_(token) {
+  var t = checkToken_(token);
+  if (!t.valid) return { error: '登入已過期' };
+  if (levelOfUser_(t.email, t.role) <= LEVEL_ADC) return { ok: true, email: t.email, role: t.role };
+  return { error: '只有 ADC（助理區總監）或以上可以管理消息' };
+}
+
+/** 管理系統列表（需登入）：連已下架／已過期／已刪除留底都回 */
 function getAnnouncements_(token) {
   var t = requireLogin_(token); if (t.error) return err(t.error);
   if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS)) {
@@ -1796,14 +1837,14 @@ function getAnnouncements_(token) {
   return ok(list.map(function (n) {
     n.expired = !!(n.expiresAt && n.expiresAt < today);
     n.scheduled = !!(n.date && n.date > today);
-    n.live = n.active && !n.expired && !n.scheduled;
+    n.live = n.active && !n.deleted && !n.expired && !n.scheduled;
     return n;
   }));
 }
 
-/** 新增／更新消息（news 卡片 edit 權限）；a.id 留空 = 新增 */
+/** 新增／更新消息（ADC 層級 3 或以上）；a.id 留空 = 新增 */
 function saveAnnouncement_(token, a) {
-  var t = requireCardEdit_(token, 'news'); if (t.error) return err(t.error);
+  var t = requireNewsEdit_(token); if (t.error) return err(t.error);
   a = a || {};
   var title = String(a.title || '').trim();
   var body = String((a.body === undefined || a.body === null || a.body === '') ? (a.content || '') : a.body).trim();
@@ -1846,15 +1887,38 @@ function saveAnnouncement_(token, a) {
   return ok({ saved: true, id: id, created: true });
 }
 
-/** 刪除消息（成員系統下次載入即刻唔見） */
+/**
+ * 刪除消息（v4.9.0 軟刪除）：行唔會刪走 — deleted=TRUE ＋ deletedAt/deletedBy 留底，
+ * Sheet 繼續紀錄曾經出現過嘅消息；成員系統下次載入即刻唔見。
+ */
 function deleteAnnouncement_(token, id) {
-  var t = requireCardEdit_(token, 'news'); if (t.error) return err(t.error);
+  var t = requireNewsEdit_(token); if (t.error) return err(t.error);
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS);
   if (!sh) return err('尚未執行 setupSheets()（缺 News 表）');
   var idx = rowIndexByCol_(sh, 'id', String(id).trim());
   if (idx < 0) return err('找不到該消息');
-  sh.deleteRow(idx);
+  var now = new Date().toISOString();
+  setCellByHeader_(sh, idx, 'deleted', 'TRUE');
+  setCellByHeader_(sh, idx, 'deletedAt', now);
+  setCellByHeader_(sh, idx, 'deletedBy', t.email || '');
+  setCellByHeader_(sh, idx, 'active', 'FALSE');
+  setCellByHeader_(sh, idx, 'pinned', 'FALSE');
+  setCellByHeader_(sh, idx, 'updatedAt', now);
   return ok({ deleted: true, id: String(id).trim() });
+}
+
+/** 還原已刪除消息（翻查留底後想收返用；還原後係「已下架」狀態） */
+function restoreAnnouncement_(token, id) {
+  var t = requireNewsEdit_(token); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 News 表）');
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該消息');
+  var now = new Date().toISOString();
+  setCellByHeader_(sh, idx, 'deleted', 'FALSE');
+  setCellByHeader_(sh, idx, 'active', 'FALSE');
+  setCellByHeader_(sh, idx, 'updatedAt', now);
+  return ok({ restored: true, id: String(id).trim() });
 }
 
 /** 置頂／取消置頂 */
@@ -1866,7 +1930,14 @@ function setAnnouncementActive_(token, id, active) {
   return updateAnnouncementFlag_(token, id, 'active', active);
 }
 function updateAnnouncementFlag_(token, id, field, value) {
-  var t = requireCardEdit_(token, 'news'); if (t.error) return err(t.error);
+  var t = requireNewsEdit_(token); if (t.error) return err(t.error);
+  if (field === 'pinned' || field === 'active') {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS);
+    var idx = sh ? rowIndexByCol_(sh, 'id', String(id).trim()) : -1;
+    if (sh && idx > 0 && isTrue_(getCellByHeader_(sh, idx, 'deleted'))) {
+      return err('該消息已刪除（只可以還原）');
+    }
+  }
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS);
   if (!sh) return err('尚未執行 setupSheets()（缺 News 表）');
   var idx = rowIndexByCol_(sh, 'id', String(id).trim());
@@ -1879,6 +1950,49 @@ function updateAnnouncementFlag_(token, id, field, value) {
   return ok(out);
 }
 
+// ===================== 聯絡簿 — 職員姓名區方自訂（v4.9.0） =====================
+// 電話唔變但人會轉：地域職員姓名可以由區方自行改（全區同步，存 ContactNames 表）。
+// key 慣例：「職位|電話|第幾個同 key」（重複職位+電話都用唔同 key）；name 留空 = 還原官方名。
+var CONTACTNAMES_ADMIT_LEVEL = 3; // ADC（助理區總監）或以上
+
+function getContactNames_(token) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.CONTACT_NAMES);
+  if (!sh) return ok({ names: {} });
+  var names = {};
+  readSheet_(SHEET.CONTACT_NAMES).forEach(function (r) {
+    var k = String(r.key || '').trim();
+    var v = String(r.name == null ? '' : r.name).trim();
+    if (k && v) names[k] = v;
+  });
+  return ok({ names: names });
+}
+
+/** 改／還原一個姓名（ADC 或以上）；name 留空 = 刪走自訂（還原用官方同步名） */
+function saveContactName_(token, key, name) {
+  var t = checkToken_(token);
+  if (!t.valid) return err('登入已過期');
+  if (levelOfUser_(t.email, t.role) > CONTACTNAMES_ADMIT_LEVEL) return err('只有 ADC（助理區總監）或以上可以改聯絡簿姓名');
+  key = String(key || '').trim().slice(0, 120);
+  if (!key) return err('key 必填');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.CONTACT_NAMES);
+  if (!sh) { ensureSheet_(ss, SHEET.CONTACT_NAMES, [['key', 'name', 'updatedAt', 'updatedBy']]); sh = ss.getSheetByName(SHEET.CONTACT_NAMES); }
+  var idx = rowIndexByCol_(sh, 'key', key);
+  var v = String(name == null ? '' : name).trim();
+  if (!v) {
+    if (idx > 0) sh.deleteRow(idx);
+    return ok({ saved: true, key: key, name: '' });
+  }
+  var row = { key: key, name: v.slice(0, 60), updatedAt: new Date().toISOString(), updatedBy: t.email || '' };
+  if (idx > 0) {
+    sheetHeadersBySheet_(sh).forEach(function (h, j) { if (row[h] !== undefined) sh.getRange(idx, j + 1).setValue(row[h]); });
+  } else {
+    appendRowObj_(sh, row);
+  }
+  return ok({ saved: true, key: key, name: row.name });
+}
+
 // ===================== 獎勵提名 Awards（v4.7.0） =====================
 // 一站式：名冊（Awards 表，一人一行、每個獎一欄＝獲獎年份）
 //        + 年期規則（AwardTypes 表，可喺管理系統改）
@@ -1887,9 +2001,11 @@ function updateAnnouncementFlag_(token, id, field, value) {
 
 var AWARD_FIXED_COLS = ['id', 'districtCode', 'name', 'nameEn', 'troop', 'position', 'serviceStart', 'status', 'note'];
 var AWARD_TAIL_COLS = ['updatedAt', 'createdAt'];
-var AWARD_ROUNDS = ['founder', 'rally', 'other'];
-// 名冊狀態（同用戶原本 Excel 嘅顏色註腳對應）
-var AWARD_STATUSES = ['active', 'noAppointment', 'notInDistrict', 'applying', 'left'];
+var AWARD_ROUNDS = ['founder', 'rally', 'hab', 'other'];
+// 名冊狀態（同用戶原本 Excel 嘅顏色註腳對應）；noNomination = 沒有提名資格（唔會出現喺提名建議）
+var AWARD_STATUSES = ['active', 'noNomination', 'noAppointment', 'notInDistrict', 'applying', 'left'];
+// 民青局局長嘉許提名期死線（MM-DD；Config 可覆蓋 — 2026 年度：制服團體須於 2/3 前交民青局）
+var AWARD_HAB_DL_DEFAULT = { district: '01-15', hq: '02-03' };
 
 /** 預設獎項及年期（第一次 setupSheets 會種入 AwardTypes 表；之後全部以表為準） */
 function awardTypeSeed_() {
@@ -1902,18 +2018,64 @@ function awardTypeSeed_() {
     ['BRL',    '銅獅勳章',                '銅獅',  '獅勳章',   'DSC',   '',   'rally',   'Bronze Lion；冇固定年期規定', 'TRUE'],
     ['SVL',    '銀獅勳章',                '銀獅',  '獅勳章',   'BRL',   '',   'rally',   'Silver Lion；冇固定年期規定', 'TRUE'],
     ['GDL',    '金獅勳章',                '金獅',  '獅勳章',   'SVL',   '',   'rally',   'Gold Lion；制服成年成員最高功績獎勵，冇固定年期規定', 'TRUE'],
-    ['LSM',    '長期服務獎章',            'LSM',   '長期服務', '',      '',   'other',   '服務實職滿 15 年；第一個由區會自己入紀錄，預設唔自動推算（想自動列出就喺年期設定填 15）', 'TRUE'],
+    ['FIVE',   '五年長期服務獎狀',        '五年',  '長期服務', '',      5,    'other',   '會務委員（LAY）階梯第一級；由服務開始年份起計 5 年', 'TRUE'],
+    ['TEN',    '十年長期服務獎狀',        '十年',  '長期服務', 'FIVE',  5,    'other',   '會務委員（LAY）；五年獎狀後 5 年（共 10 年）', 'TRUE'],
+    ['LSM',    '長期服務獎章',            'LSM',   '長期服務', '',      15,   'other',   '服務滿 15 年（由服務開始年份起計；會務委員 五年→十年→十五年 自動接上）', 'TRUE'],
     ['LSM1',   '長期服務一星獎章',        'LSM*',  '長期服務', 'LSM',   10,   'other',   '再服務滿 10 年（共 25 年）', 'TRUE'],
     ['LSM2',   '長期服務二星獎章',        'LSM**', '長期服務', 'LSM1',  10,   'other',   '共 35 年', 'TRUE'],
     ['LSM3',   '長期服務三星獎章',        'LSM***','長期服務', 'LSM2',  10,   'other',   '共 45 年', 'TRUE'],
     ['LSM4',   '長期服務四星獎章',        'LSM****','長期服務','LSM3',  10,   'other',   '共 55 年', 'TRUE'],
-    ['CCM',    '香港總監嘉許',            '總監嘉許', '嘉許',  '',      '',   'other',   '黃色笛繩（榮譽笛子）；香港總監全權批准', 'TRUE'],
-    ['CCH',    '香港總監高級嘉許',        '高級嘉許', '嘉許',  'CCM',   5,    'other',   '黃紫綠笛繩；獲總監嘉許後有超卓表現', 'TRUE'],
-    ['HAB',    '民政及青年事務局局長嘉許', '民青局',  '外部嘉許', '',    '',   'other',   '前稱民政事務局局長嘉許計劃；義務領袖須服務滿 10 年（限提名名額，預設唔自動推算；想自動列出就喺年期設定填 10）', 'TRUE'],
-    ['FIVE',   '五年長期服務獎狀',        '五年',  '長期服務', '',      '',   'other',   '會務委員專用（預設唔自動推算；想自動列出就喺年期設定填 5）', 'TRUE'],
-    ['TEN',    '十年長期服務獎狀',        '十年',  '長期服務', 'FIVE',  5,    'other',   '會務委員', 'TRUE'],
-    ['THANKS', '感謝狀',                  '感謝狀', '其他',   '',      '',   'founder', '表格 DA2；頒予配偶／家長／支持童軍運動人士', 'TRUE'],
+    ['CCM',    '香港總監嘉許',            '總監嘉許', '嘉許',  '',      '',   'other',   '黃色笛繩（榮譽笛子）；自行申請，香港總監全權批准，唔會自動推算', 'TRUE'],
+    ['CCH',    '香港總監高級嘉許',        '高級嘉許', '嘉許',  '',      '',   'other',   '黃紫綠笛繩；自行申請，唔可以由總監嘉許年份推算', 'TRUE'],
+    ['HAB',    '民政及青年事務局局長嘉許', '民青局',  '外部嘉許', '',    '',   'hab',     '自行申請＋有提名期：總會每年初發通告收集（2026 年度 2/3 前交民青局）；死線可喺年期設定改', 'TRUE'],
+    ['THANKS', '感謝狀',                  '感謝狀', '其他',   '',      '',   'other',   '表格 DA2；自行申請，唔會自動推算', 'TRUE'],
   ];
+}
+
+/**
+ * v4.9.0 年期修訂 — AwardTypes 舊值自動升級（只改仍然同舊預設一樣嘅格，
+ * 用戶自行改過嘅設定絕對唔掂）。同一 philosophy 同 patchCardRows_。
+ */
+function patchAwardTypes_(ss) {
+  var sh = ss.getSheetByName(SHEET.AWARD_TYPES);
+  if (!sh) return;
+  var v = sh.getDataRange().getValues();
+  if (v.length < 2) return;
+  var head = v[0].map(function (h) { return String(h).trim(); });
+  var c = {};
+  ['code', 'prevCode', 'minYears', 'round', 'note'].forEach(function (k) { c[k] = head.indexOf(k); });
+  if (c.code < 0 || c.prevCode < 0 || c.minYears < 0 || c.round < 0) return;
+  // code → [舊 prevCode, 舊 minYears, 新 prevCode, 新 minYears, 舊 round, 新 round, 舊 note, 新 note]
+  var patches = {
+    FIVE:   ['',  '',      '',  '5',  'other', 'other', '會務委員專用（預設唔自動推算；想自動列出就喺年期設定填 5）', '會務委員（LAY）階梯第一級；由服務開始年份起計 5 年'],
+    LSM:    ['',  '',      '',  '15', 'other', 'other', '服務實職滿 15 年；第一個由區會自己入紀錄，預設唔自動推算（想自動列出就喺年期設定填 15）', '服務滿 15 年（由服務開始年份起計；會務委員 五年→十年→十五年 自動接上）'],
+    CCH:    ['CCM', '5',   '',  '',   'other', 'other', '黃紫綠笛繩；獲總監嘉許後有超卓表現', '黃紫綠笛繩；自行申請，唔可以由總監嘉許年份推算'],
+    THANKS: ['',  '',      '',  '',   'founder', 'other', '表格 DA2；頒予配偶／家長／支持童軍運動人士', '表格 DA2；自行申請，唔會自動推算'],
+    HAB:    ['',  '',      '',  '',   'other', 'hab',   '前稱民政事務局局長嘉許計劃；義務領袖須服務滿 10 年（限提名名額，預設唔自動推算；想自動列出就喺年期設定填 10）', '自行申請＋有提名期：總會每年初發通告收集（2026 年度 2/3 前交民青局）；死線可喺年期設定改'],
+  };
+  for (var i = 1; i < v.length; i++) {
+    var code = String(v[i][c.code] || '').trim().toUpperCase();
+    var p = patches[code];
+    if (!p) continue;
+    var curPrev = String(v[i][c.prevCode] || '').trim().toUpperCase();
+    var curMin = String(v[i][c.minYears] == null ? '' : v[i][c.minYears]).trim();
+    var curRound = String(v[i][c.round] || '').trim().toLowerCase();
+    var changed = false;
+    if (curPrev === String(p[0]).toUpperCase() && curMin === p[1] && (curMin !== String(p[3]))) {
+      sh.getRange(i + 1, c.prevCode + 1).setValue(p[2]);
+      sh.getRange(i + 1, c.minYears + 1).setValue(p[3]);
+      changed = true;
+    }
+    if (curRound === p[4] && curRound !== p[5]) {
+      sh.getRange(i + 1, c.round + 1).setValue(p[5]);
+      changed = true;
+    }
+    if (c.note >= 0 && p[6] && String(v[i][c.note] || '').trim() === p[6]) {
+      sh.getRange(i + 1, c.note + 1).setValue(p[7]);
+      changed = true;
+    }
+    if (changed) v[i] = sh.getRange(i + 1, 1, 1, head.length).getValues()[0]; // refresh
+  }
 }
 
 function awardCode_(v) {
@@ -2038,7 +2200,34 @@ function getAwardsBoard_(token) {
       round: awardRound_(r[6]), note: r[7], enabled: true,
     };
   });
-  return ok({ types: types, members: members, counts: counts, total: members.length, defaults: defaults });
+  return ok({
+    types: types, members: members, counts: counts, total: members.length, defaults: defaults,
+    deadlineCfg: {
+      habDistrict: getConfigValue_('AWARD_HAB_DL_DISTRICT') || AWARD_HAB_DL_DEFAULT.district,
+      habHq: getConfigValue_('AWARD_HAB_DL_HQ') || AWARD_HAB_DL_DEFAULT.hq,
+    },
+  });
+}
+/** 民青局局長嘉許提名期死線（MM-DD）— /awards「年期設定」改 */
+function saveAwardDeadlines_(token, cfg) {
+  var t = requireCardEdit_(token, 'awards'); if (t.error) return err(t.error);
+  cfg = cfg || {};
+  var mmdd = function (v, fallback) {
+    var s = String(v == null ? '' : v).trim();
+    var m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/) || s.match(/^(\d{1,2})-(\d{1,2})$/);
+    if (!m) return fallback;
+    var mm = Math.min(12, Math.max(1, Number(m[m.length - 2]))), dd = Math.min(31, Math.max(1, Number(m[m.length - 1])));
+    return ('0' + mm).slice(-2) + '-' + ('0' + dd).slice(-2);
+  };
+  setConfigValue_('AWARD_HAB_DL_DISTRICT', mmdd(cfg.habDistrict, AWARD_HAB_DL_DEFAULT.district));
+  setConfigValue_('AWARD_HAB_DL_HQ', mmdd(cfg.habHq, AWARD_HAB_DL_DEFAULT.hq));
+  return ok({
+    saved: true,
+    deadlineCfg: {
+      habDistrict: getConfigValue_('AWARD_HAB_DL_DISTRICT') || AWARD_HAB_DL_DEFAULT.district,
+      habHq: getConfigValue_('AWARD_HAB_DL_HQ') || AWARD_HAB_DL_DEFAULT.hq,
+    },
+  });
 }
 
 /**
@@ -3951,18 +4140,20 @@ function blueprint_() {
     ROLE_LIST.forEach(function (r) { ALL_VIEW[r] = 'view'; ALL_EDIT[r] = 'edit'; });
     function adminEdit() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; return m; }
     function opsEdit() { var m = adminEdit(); m.DDC_TRAINING = 'edit'; m.STAFF = 'edit'; return m; }
+    // v4.9.0：獎勵提名只限 DDC 或以上（層級 0–2）進入 — ADC／STAFF／區長／領袖一律冇 access
+    function ddcUp() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = ''; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'view'; return m; }
     function trainingEdit() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
     var P = [['cardId'].concat(ROLE_LIST)];
     P.push(row('visit', ALL_EDIT));
     P.push(row('contacts', ALL_EDIT));
-    P.push(row('awards', adminEdit()));
+    P.push(row('awards', ddcUp()));
     P.push(row('budget', adminEdit()));
     P.push(row('committee', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'edit' }));
     P.push(row('unit', adminEdit()));
     P.push(row('venueReg', opsEdit()));
     P.push(row('stockReg', opsEdit()));
     P.push(row('activity', opsEdit()));
-    P.push(row('news', opsEdit()));
+    // v4.9.0：消息發佈搬咗去主控台頂（ADC+ 直接編輯），news 卡片已移除
     P.push(row('incident', ALL_VIEW));
     P.push(row('training', trainingEdit()));
     P.push(row('fps', ALL_EDIT));
@@ -4007,6 +4198,9 @@ function blueprint_() {
       ['FPS_ACCOUNT_NAME', DEFAULT_FPS_ACCOUNT_NAME, '轉數快戶口名'],
       ['FPS_ACCOUNT_NUMBER', DEFAULT_FPS_ACCOUNT_NUMBER, '轉數快號碼'],
       ['BUDGET_SHEET_URL', '', '區年度預算 Google Sheet 網址（連 gid=分頁；Sheet 要設「知道連結可查看」；留空用前端內建）'],
+      // 獎勵提名：民青局局長嘉許提名期死線（MM-DD；留空用內建 01-15 / 02-03）
+      ['AWARD_HAB_DL_DISTRICT', '', '民青局嘉許 區→總會死線（MM-DD，例 01-15；留空用內建）'],
+      ['AWARD_HAB_DL_HQ', '', '民青局嘉許 總會→民青局死線（MM-DD，例 02-03；留空用內建）'],
       ['VENUE_RULES', '', '借場規定（留空用內建）'],
       ['CCTV_URL', '', '閉路電視指引 PDF'],
       ['STOCK_RULES', '', '借物資規定（留空用內建）'],
@@ -4045,7 +4239,7 @@ function blueprint_() {
     { name: SHEET.CARDS, rows: [
       ['cardId', 'title', 'icon', 'type', 'url', 'description', 'order', 'enabled', 'embed', 'source', 'category'],
       ['visit', '旅團探訪', '🏕', 'builtin', '/visit', '一撳登記探訪 · 未探旅團紅燈 · 季度報告', 1, 'TRUE', 'FALSE', 'core', 'done'],
-      ['contacts', '聯結簿', '📇', 'builtin', '/contacts', '旅團 · 港島地域 · 總會 聯絡資料', 2, 'TRUE', 'FALSE', 'core', 'done'],
+      ['contacts', '聯絡簿', '📇', 'builtin', '/contacts', '聯絡電話：旅團 · 港島地域 · 總會（職員姓名區方可改）', 2, 'TRUE', 'FALSE', 'core', 'done'],
       ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '獎勵名冊 · 自動計夠期可提名 · 年期自訂', 3, 'TRUE', 'FALSE', 'core', 'done'],
       ['budget', '區年度預算', '📑', 'builtin', '/budget', '直讀區方預算 Sheet · 按月／支部 · 資助合計', 5, 'TRUE', 'FALSE', 'core', 'done'],
       ['committee', '委任系統', '🗂', 'builtin', '/committee', '委任 · 續任 · R02', 7, 'TRUE', 'FALSE', 'core', 'todo'],
@@ -4053,7 +4247,6 @@ function blueprint_() {
       ['venueReg', '場地借用審批', '🏛', 'builtin', '/venue-regs', '借場申請批核 · 場地清單', 9, 'TRUE', 'FALSE', 'core', 'done'],
       ['stockReg', '物資借用審批', '📦', 'builtin', '/stock-regs', '借物資批核 · 庫存管理', 10, 'TRUE', 'FALSE', 'core', 'done'],
       ['activity', '活動知會', '🗓', 'builtin', '/activity-notices', '旅團活動知會記錄', 11, 'TRUE', 'FALSE', 'core', 'done'],
-      ['news', '消息發佈', '📢', 'builtin', '/news', '發佈消息到成員系統首頁置頂 · 一刪即消失', 4, 'TRUE', 'FALSE', 'core', 'done'],
       ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '天氣決策 · 即時應變 · 總會指引 · 意外報告', 12, 'TRUE', 'FALSE', 'core', 'done'],
       ['training', '訓練班管理', '🎓', 'builtin', '/training', '開班登記 · 區會目錄', 13, 'TRUE', 'FALSE', 'core', 'done'],
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
@@ -4108,7 +4301,12 @@ function blueprint_() {
     // 消息發佈（v4.6.0）：管理系統發 → 成員系統 member-portal 首頁頂部置頂顯示
     { name: SHEET.NEWS, headerColor: '#fef3c7', rows: [
       ['id', 'districtCode', 'title', 'body', 'date', 'pinned', 'level', 'link', 'linkLabel',
-        'notify', 'active', 'expiresAt', 'publishedAt', 'publishedBy', 'updatedAt', 'createdAt'],
+        'notify', 'active', 'expiresAt', 'publishedAt', 'publishedBy', 'updatedAt', 'createdAt',
+        // v4.9.0 軟刪除留底：刪咗都喺 Sheet 紀錄曾經出現過嘅消息
+        'deleted', 'deletedAt', 'deletedBy'],
+    ] },
+    { name: SHEET.CONTACT_NAMES, rows: [
+      ['key', 'name', 'updatedAt', 'updatedBy'],
     ] },
     { name: SHEET.AWARDS, headerColor: '#fde68a', frozenCols: 1, rows: [
       AWARD_FIXED_COLS.concat(awardTypeSeed_().map(function (r) { return r[0]; })).concat(AWARD_TAIL_COLS),
@@ -4189,9 +4387,11 @@ function setupSheets() {
 
   seedCourseParams_(ss);
   ensureAwardColumns_(ss);
+  patchAwardTypes_(ss);
   ensureCardRows_(ss);
   patchCardRows_(ss);
   ensurePermsRows_(ss);
+  patchPermsRows_(ss);
   ensureRoleLevels_(ss);
   ensurePresetUsers_(ss);
   protectSensitiveSheets_(ss);
@@ -4249,14 +4449,16 @@ function patchCardRows_(ss) {
   // 只當該行仍然係藍圖舊值先改（用戶自行改過就唔掂）
   var patches = {
     incident: { oldDesc: '通報 · 惡劣天氣', desc: '即時應變 · 總會指引 · 意外報告' },
-    contacts: { oldTitle: '旅團聯絡簿', title: '聯結簿', oldDesc: '聯絡資料 · 分組 · 群發', desc: '旅團 · 港島地域 · 總會 聯絡資料' },
+    // v4.9.0：聯結簿 → 聯絡簿（強調聯絡電話用途；逐個舊名都試）
+    contacts: { oldTitles: ['旅團聯絡簿', '聯結簿'], title: '聯絡簿', oldDesc: '聯絡資料 · 分組 · 群發', desc: '旅團 · 港島地域 · 總會 聯絡資料', oldDescs: ['旅團 · 港島地域 · 總會 聯絡資料'], desc2: '聯絡電話：旅團 · 港島地域 · 總會（職員姓名區方可改）' },
     // v4.5.0 區年度預算已完成（直讀區方 Google Sheet）
     budget: { oldDesc: '預算編列與追蹤', desc: '直讀區方預算 Sheet · 按月／支部 · 資助合計' },
-    // v4.7.0 獎勵提名已完成（名冊 + 夠期提名推算 + 年期可自訂）
-    awards: { oldDesc: '讀獲獎名單 · 推下一級', desc: '獎勵名冊 · 自動計夠期可提名 · 年期自訂' },
+    // v4.7.0 獎勵提名已完成（名冊 + 夠期提名推算 + 年期可自訂）；v4.9.0 限 DDC 或以上
+    awards: { oldDesc: '讀獲獎名單 · 推下一級', desc: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', oldDescs: ['獎勵名冊 · 自動計夠期可提名 · 年期自訂'], desc2: '獎勵名冊 · 夠期自動推算 · 只限 DDC 或以上' },
   };
   var descOnly = { incident: { oldDesc: '即時應變 · 總會指引 · 意外報告', desc: '天氣決策 · 即時應變 · 總會指引 · 意外報告' } };
-  var removeIds = { meeting: true, annual: true }; // v4.4.0 刪會議行事曆；v4.5.0 刪週年會議文件
+  // v4.4.0 刪會議行事曆；v4.5.0 刪週年會議文件；v4.9.0 刪消息發佈卡片（搬咗去主控台頂）
+  var removeIds = { meeting: true, annual: true, news: true };
   for (var i = v.length - 1; i >= 1; i--) {
     var id = String(v[i][cId] || '').trim();
     if (removeIds[id]) { sh.deleteRow(i + 1); continue; }
@@ -4264,8 +4466,15 @@ function patchCardRows_(ss) {
     var d = descOnly[id];
     if (d && cDesc >= 0 && String(v[i][cDesc] || '').trim() === d.oldDesc) sh.getRange(i + 1, cDesc + 1).setValue(d.desc);
     if (!p) continue;
-    if (p.oldTitle && cTitle >= 0 && String(v[i][cTitle] || '').trim() === p.oldTitle) sh.getRange(i + 1, cTitle + 1).setValue(p.title);
-    if (cDesc >= 0 && String(v[i][cDesc] || '').trim() === p.oldDesc) sh.getRange(i + 1, cDesc + 1).setValue(p.desc);
+    if (p.title && cTitle >= 0) {
+      var olds = p.oldTitles || (p.oldTitle ? [p.oldTitle] : []);
+      if (olds.indexOf(String(v[i][cTitle] || '').trim()) >= 0) sh.getRange(i + 1, cTitle + 1).setValue(p.title);
+    }
+    if (cDesc >= 0) {
+      var curDesc = String(v[i][cDesc] || '').trim();
+      if (curDesc === p.oldDesc) sh.getRange(i + 1, cDesc + 1).setValue(p.desc);
+      else if (p.oldDescs && p.oldDescs.indexOf(curDesc) >= 0 && p.desc2) sh.getRange(i + 1, cDesc + 1).setValue(p.desc2);
+    }
     if (String(v[i][cCat] || '').trim() === 'todo') sh.getRange(i + 1, cCat + 1).setValue('done');
   }
   // Perms 表同步移除已刪卡片
@@ -4347,6 +4556,50 @@ function ensurePermsRows_(ss) {
     }
     sh.appendRow(newRow);
   });
+}
+
+/**
+ * v4.9.0 權限修訂：獎勵提名只限 DDC 或以上。
+ * 只改「仍然同舊預設（全角色 view + DC/SYSADMIN/DDC_ADMIN edit）一樣」嘅行；
+ * 用戶已自行自訂嘅矩陣絕對唔掂。
+ */
+function patchPermsRows_(ss) {
+  var sh = ss.getSheetByName(SHEET.PERMS);
+  if (!sh) return;
+  var v = sh.getDataRange().getValues();
+  if (v.length < 2) return;
+  var header = v[0].map(function (h) { return String(h).trim(); });
+  var bp = blueprint_().filter(function (b) { return b.name === SHEET.PERMS; })[0];
+  if (!bp || bp.rows.length < 2) return;
+  var bpHeader = bp.rows[0].map(function (h) { return String(h).trim(); });
+  function blueprintRow(cid) {
+    for (var r = 1; r < bp.rows.length; r++) if (String(bp.rows[r][0]).trim() === cid) return bp.rows[r];
+    return null;
+  }
+  // 舊 awards 預設：全部角色 'view'，除咗 DC/SYSADMIN/DDC_ADMIN = 'edit'
+  // （空白格都當 legacy：setupSheets 補新角色欄時係留空嘅）
+  function isLegacyAwardsRow(row) {
+    for (var c = 1; c < header.length; c++) {
+      var role = header[c], bi = bpHeader.indexOf(role);
+      if (bi < 1) continue;
+      var cur = String(row[c] || '').trim().toLowerCase();
+      var want = (role === 'DC' || role === 'SYSADMIN' || role === 'DDC_ADMIN') ? 'edit' : 'view';
+      if (cur !== want && cur !== '') return false;
+    }
+    return true;
+  }
+  for (var i = 1; i < v.length; i++) {
+    var cid = String(v[i][0] || '').trim();
+    if (cid !== 'awards') continue;
+    if (!isLegacyAwardsRow(v[i])) break;
+    var br = blueprintRow('awards');
+    if (!br) break;
+    for (var c2 = 1; c2 < header.length; c2++) {
+      var role2 = header[c2], bi2 = bpHeader.indexOf(role2);
+      sh.getRange(i + 1, c2 + 1).setValue(bi2 > 0 && bi2 < br.length ? br[bi2] : '');
+    }
+    break;
+  }
 }
 
 /** 建立新表（每行長度可以唔同，自動補空白） */

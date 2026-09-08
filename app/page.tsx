@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { loadSession, saveSession, clearSession } from '@/lib/session';
@@ -7,10 +7,11 @@ import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession, CardDef } from '@/lib/types';
 import { canManageAccounts } from '@/lib/accountRoles';
 import { canDelegate, isSuper, levelLabel, levelOf } from '@/lib/levels';
+import { applyCardOrder, clearCardOrder, loadCardOrder, moveInList, saveCardOrder, type CardOrderMap } from '@/lib/cardOrder';
 import CardItem from '@/components/CardItem';
 import PendingTicker from '@/components/PendingTicker';
 import WeatherDecisionBanner from '@/components/WeatherDecisionBanner';
-import NewsBanner from '@/components/NewsBanner';
+import NewsTopPanel from '@/components/NewsTopPanel';
 
 const REMEMBER_KEY = 'portal_remember_login';
 
@@ -24,6 +25,9 @@ export default function HomePage() {
   const [cards, setCards] = useState<CardDef[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // v4.9.0：自行排列卡片次序（瀏覽器 localStorage，各用戶各自記住）
+  const [cardOrder, setCardOrder] = useState<CardOrderMap>({});
+  const dragFrom = useRef<number | null>(null);
 
   // 登入表單
   const [email, setEmail] = useState('');
@@ -86,12 +90,56 @@ export default function HomePage() {
     try {
       const r = await api.getCards(s.token);
       // 後台已過濾：隱藏卡片只會回傳俾超管（enabled=false 用作標示）
-      if (r.ok && r.data) setCards(r.data.sort((a, b) => a.order - b.order));
+      if (r.ok && r.data) {
+        const defaults = r.data.slice().sort((a, b) => a.order - b.order);
+        const saved = loadCardOrder(districtCode || '', s.email || '');
+        setCardOrder(saved);
+        setCards(applyCardOrder(defaults, saved));
+      }
       else setError(r.error || '無法載入卡片');
     } catch {
       setError('連線失敗：請確認該區後台網址已設定且已部署。');
     } finally { setLoading(false); }
   }
+
+  // ── v4.9.0 卡片次序：移動一格 → 存返 localStorage ──
+  const persistOrder = useCallback((list: CardDef[], email: string) => {
+    const full: CardOrderMap = {};
+    list.forEach((c, i) => { full[c.cardId] = i; });
+    saveCardOrder(districtCode || '', email || '', full);
+    return full;
+  }, [districtCode]);
+
+  function moveCard(from: number, to: number) {
+    setCards(prev => {
+      const next = moveInList(prev, from, to);
+      if (next === prev) return prev;
+      if (session) setCardOrder(persistOrder(next, session.email || ''));
+      return next;
+    });
+  }
+
+  function resetCardOrder() {
+    if (!session) return;
+    clearCardOrder(districtCode || '', session.email || '');
+    const defaults = cards.slice().sort((a, b) => a.order - b.order);
+    setCardOrder({});
+    setCards(defaults);
+  }
+
+  // 桌面拖拽（手機用 ▲▼ 掣）
+  const dragProps = (i: number) => ({
+    draggable: true,
+    onDragStart: () => { dragFrom.current = i; },
+    onDragOver: (e: React.DragEvent) => { if (dragFrom.current !== null) e.preventDefault(); },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      const from = dragFrom.current;
+      dragFrom.current = null;
+      if (from !== null && from !== i) moveCard(from, i);
+    },
+    onDragEnd: () => { dragFrom.current = null; },
+  });
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault(); setError(''); setInfo('');
@@ -317,11 +365,8 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* 置頂消息：同成員系統首頁同一份資料（listAnnouncements）；喺 /news 一刪就即刻消失 */}
-      <NewsBanner
-        canManage={cards.some(c => c.cardId === 'news')}
-        onManage={() => router.push(withDistrict('/news'))}
-      />
+      {/* 📢 消息（v4.9.0）：一入主控台就喺最頂，ADC+ 可以直接編輯／刪除，唔使再搵卡片 */}
+      <NewsTopPanel session={session} />
 
       {/* 天氣決策：而家有咩警告 → 活動應唔應該取消（活動指引通告 04/2018） */}
       <WeatherDecisionBanner districtCode={districtCode || ''} onOpen={() => router.push(withDistrict('/incident?tab=weather'))} />
@@ -339,13 +384,27 @@ export default function HomePage() {
       {error && <div className="err" style={{ maxWidth: 560 }}>{error}</div>}
       {!loading && !error && (
         <>
+          <div className="card-order-bar">
+            <span className="muted" style={{ fontSize: 12 }}>
+              ✋ 拖拽或者用 ▲▼ 排自己鍾意嘅次序（只影響呢部機／呢個帳號）
+            </span>
+            {Object.keys(cardOrder).length > 0 && (
+              <button className="linkish" onClick={resetCardOrder}>↺ 還原預設次序</button>
+            )}
+          </div>
           <div className="grid">
-            {cards.map(c => (
+            {cards.map((c, i) => (
               <CardItem
                 key={c.cardId} card={c} role={session.role}
                 canToggle={superUser}
                 toggling={cardBusy === c.cardId}
                 onToggle={() => toggleCardEnabled(c)}
+                canReorder
+                first={i === 0}
+                last={i === cards.length - 1}
+                onMoveUp={() => moveCard(i, i - 1)}
+                onMoveDown={() => moveCard(i, i + 1)}
+                dragProps={dragProps(i)}
               />
             ))}
           </div>

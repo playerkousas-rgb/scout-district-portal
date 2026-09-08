@@ -213,18 +213,32 @@ check('CSV 匯出會處理逗號同引號', () => {
 });
 
 
-check('upcomingRounds：跟今日搵返「死線仲未過」嗰屆', () => {
+check('upcomingRounds：跟今日搵返「死線仲未過」嗰屆（連 hab 民青局）', () => {
   // 2026-09-08：創辦人 2027 屆區部死線 2026-10-31 未過；大會操 2026 屆 2026-04-30 已過 → 2027
-  const ups = upcomingRounds(new Date('2026-09-08T12:00:00+08:00'));
+  const ups = upcomingRounds(undefined, new Date('2026-09-08T12:00:00+08:00'));
   const founder = ups.find(u => u.round === 'founder')!;
   const rally = ups.find(u => u.round === 'rally')!;
   assert.strictEqual(founder.year, 2027);
   assert.strictEqual(founder.district, '2026-10-31');
   assert.strictEqual(rally.year, 2027);
   assert.strictEqual(rally.district, '2027-04-30');
+  // hab（民青局嘉許）：死線喺同一年（2027-01-15）→ 2026-09-08 未過 = 2027 年度
+  const hab = ups.find(u => u.round === 'hab')!;
+  assert.strictEqual(hab.year, 2027);
+  assert.strictEqual(hab.district, '2027-01-15');
+  assert.strictEqual(hab.hq, '2027-02-03');
   // 11 月 15 日：創辦人區部死線已過 → 跳去下一屆
-  const later = upcomingRounds(new Date('2026-11-15T12:00:00+08:00')).find(u => u.round === 'founder')!;
+  const later = upcomingRounds(undefined, new Date('2026-11-15T12:00:00+08:00')).find(u => u.round === 'founder')!;
   assert.strictEqual(later.year, 2028);
+});
+
+check('v4.9.0 hab 死線可以用 deadlineCfg 覆蓋（MM-DD）', () => {
+  const dl = deadlines('hab', 2026, { habDistrict: '01-31', habHq: '02-28' });
+  assert.strictEqual(dl!.district, '2026-01-31');
+  assert.strictEqual(dl!.hq, '2026-02-28');
+  const fallback = deadlines('hab', 2026, {});
+  assert.strictEqual(fallback!.district, '2026-01-15');
+  assert.strictEqual(fallback!.hq, '2026-02-03');
 });
 
 check('readyByMember：邊個要標亮（key = member.id，只計夠期嗰啲）', () => {
@@ -234,6 +248,43 @@ check('readyByMember：邊個要標亮（key = member.id，只計夠期嗰啲）
   const map = readyByMember([a, b, c], types, 2021);
   assert.strictEqual(Object.keys(map).length, 1);
   assert.strictEqual(map[a.id][0].type.code, 'DSA');
+  assert.strictEqual(map[b.id], undefined);
+});
+
+check('v4.9.0 LAY 階梯：五年(5)→十年(+5)→LSM(15)→一星(+10)，由服務開始年份自動計', () => {
+  const lay: AwardType[] = [
+    { code: 'FIVE', label: '五年長期服務獎狀', prevCode: '', minYears: 5, round: 'other' },
+    { code: 'TEN', label: '十年長期服務獎狀', prevCode: 'FIVE', minYears: 5, round: 'other' },
+    { code: 'LSM', label: '長期服務獎章', prevCode: '', minYears: 15, round: 'other' },
+    { code: 'LSM1', label: '長期服務一星獎章', prevCode: 'LSM', minYears: 10, round: 'other' },
+  ];
+  const layman = member('會務', {}, { position: 'LAY', serviceStart: '2010' });
+  const e2025 = eligibilityFor(layman, lay, 2025);
+  // 2010+5=2015 五年夠期；+15=2025 長期服務獎章都夠（兩級獨立由服務年份計）
+  assert.ok(e2025.find(x => x.type.code === 'FIVE')!.ready);
+  assert.ok(e2025.find(x => x.type.code === 'LSM')!.ready);
+  // 十年獎狀要登記咗五年獎狀先會接住計（有上一級先列出）
+  assert.strictEqual(e2025.find(x => x.type.code === 'TEN'), undefined);
+  const gotFive = member('會務', { FIVE: '2015' }, { position: 'LAY', serviceStart: '2010' });
+  const e2022 = eligibilityFor(gotFive, lay, 2022);
+  assert.ok(e2022.find(x => x.type.code === 'TEN')!.ready);   // 2015+5=2020
+  // 一星要 LSM 攞咗先會計：呢度未攞 → 唔出現
+  assert.strictEqual(e2022.find(x => x.type.code === 'LSM1'), undefined);
+  const got = member('會務2', { FIVE: '2015', TEN: '2020', LSM: '2025' }, { position: 'LAY' });
+  const e2035 = eligibilityFor(got, lay, 2035);
+  assert.ok(e2035.find(x => x.type.code === 'LSM1')!.ready);   // 2025+10=2035
+});
+
+check('v4.9.0 沒有提名資格（noNomination）：連「連沒有委任都計埋」都唔會出現', () => {
+  const a = member('甲', { GSA: '2015' });
+  const b = member('乙', { GSA: '2015' }, { status: 'noNomination' });
+  const c = member('丙', { GSA: '2015' }, { status: 'left' });
+  const board = nominationBoard([a, b, c], types, 2021, { includeInactive: true });
+  const founder = board.find(x => x.round === 'founder')!;
+  assert.ok(founder.ready.some(e => e.member.id === a.id));
+  assert.strictEqual(founder.ready.some(e => e.member.id === b.id), false);
+  assert.ok(founder.ready.some(e => e.member.id === c.id));   // left + includeInactive = 照計
+  const map = readyByMember([a, b, c], types, 2021, { includeInactive: true });
   assert.strictEqual(map[b.id], undefined);
 });
 

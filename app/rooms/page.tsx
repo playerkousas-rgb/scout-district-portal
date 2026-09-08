@@ -1,11 +1,11 @@
 'use client';
 /**
- * 🏢 地域房間使用情況（v4.5.0）
+ * 🏢 地域房間使用情況（v4.5.0；v4.9.0 加返「月曆模式」做預設）
  * ─────────────────────────────────────────────────────────────────────
  * 來源：https://sites.google.com/hkirscout.org.hk/hkir-rooms（每間房一個公開 Google 日曆）。
- * 原網站要逐個日曆捲動先睇到；呢度改成「揀樓層 → 揀房 → 逐日列出」，
- * 打通房（1704A／1704B／1704／1704+1705）會自動把相關日曆一齊計入，一眼睇到嗰間房實際有冇人用。
- * 資料由 /api/external?kind=rooms 伺服器端拉公開 ICS（3 分鐘快取）。
+ * v4.9.0：預設改成「月曆模式」— 成個月一目了然，逐日格仔列出邊個房邊段時間有人用；
+ * 另外保留 逐間房／今日總覽／原版日曆。打通房（1704A／1704B／1704／1704+1705）
+ * 會自動把相關日曆一齊計入。資料由 /api/external?kind=rooms 伺服器端拉公開 ICS（3 分鐘快取）。
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -14,17 +14,19 @@ import { useRequireCard } from '@/lib/cardAccess';
 import BackLink, { BackBar } from '@/components/BackLink';
 import { FLOORS, ROOMS, ROOM_NOTES } from '@/lib/roomsDirectory';
 import { SOURCES } from '@/lib/externalSources';
-import { hkDow, hkHm, hkStartOfDay, hkYmd, type IcsEvent } from '@/lib/ics';
+import { HK_OFFSET_MS, hkDayStart, hkDow, hkHm, hkStartOfDay, hkYmd, type IcsEvent } from '@/lib/ics';
 
-type Mode = 'room' | 'today' | 'embed';
+type Mode = 'calendar' | 'room' | 'today' | 'embed';
 const MODES: { id: Mode; label: string }[] = [
+  { id: 'calendar', label: '📅 月曆' },
   { id: 'room', label: '🚪 逐間房' },
   { id: 'today', label: '📆 今日總覽' },
   { id: 'embed', label: '🗓 原版日曆' },
 ];
 const RANGES = [7, 14, 30];
+const DOW = ['日', '一', '二', '三', '四', '五', '六'];
 
-interface Booking extends IcsEvent { via: string }   // via = 來自邊個日曆（自己或打通房）
+interface Booking extends IcsEvent { via: string; roomId: string }   // via = 來自邊個日曆（自己或打通房）
 
 /** 事件標題慣例：<參考編號>_<活動>_<單位>_<人數>（<聯絡人 電話>）；冇參考編號／人數都照拆 */
 function parseTitle(s: string): { ref?: string; activity: string; unit?: string; pax?: string; contact?: string } {
@@ -45,16 +47,30 @@ function parseTitle(s: string): { ref?: string; activity: string; unit?: string;
 
 function ymdInput(t: number): string { return hkYmd(t); }
 
+/** 用香港年月 → 該月 1 號 00:00 epoch ms */
+function hkMonthStart(y: number, m0: number): number {
+  return Date.UTC(y, m0, 1) - HK_OFFSET_MS;
+}
+function daysInMonth(y: number, m0: number): number {
+  return new Date(Date.UTC(y, m0 + 1, 0)).getUTCDate();
+}
+
 export default function RoomsPage() {
   const session = useRequireCard('rooms');
   const searchParams = useSearchParams();
   const initialRoom = searchParams.get('room');
   const initialMode = searchParams.get('mode') as Mode | null;
-  const [mode, setMode] = useState<Mode>(initialMode && MODES.some(m => m.id === initialMode) ? initialMode : 'room');
+  const [mode, setMode] = useState<Mode>(initialMode && MODES.some(m => m.id === initialMode) ? initialMode : 'calendar');
   const [floor, setFloor] = useState<string>(() => ROOMS.find(r => r.id === initialRoom)?.floor || '17');
   const [roomId, setRoomId] = useState<string>(() => (ROOMS.some(r => r.id === initialRoom) ? initialRoom! : '1702'));
   const [days, setDays] = useState(14);
   const [from, setFrom] = useState(() => ymdInput(hkStartOfDay(Date.now())));
+  // 月曆模式狀態：香港年月 + 樓層篩選 + 點選嘅日子
+  const nowParts = new Date(Date.now() + HK_OFFSET_MS);
+  const [calY, setCalY] = useState(() => nowParts.getUTCFullYear());
+  const [calM, setCalM] = useState(() => nowParts.getUTCMonth());
+  const [calFloor, setCalFloor] = useState<'all' | '17' | '18' | '19'>('all');
+  const [selDay, setSelDay] = useState<string>('');   // YYYY-MM-DD
   const [data, setData] = useState<RoomEvents[]>([]);
   const [fetchedAt, setFetchedAt] = useState('');
   const [stale, setStale] = useState('');
@@ -63,6 +79,9 @@ export default function RoomsPage() {
   const [tick, setTick] = useState(0);
   const [now, setNow] = useState(() => Date.now());
 
+  const calFrom = useMemo(() => hkYmd(hkMonthStart(calY, calM)), [calY, calM]);
+  const calDays = useMemo(() => daysInMonth(calY, calM), [calY, calM]);
+
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(id); }, []);
 
   useEffect(() => {
@@ -70,7 +89,8 @@ export default function RoomsPage() {
     let cancelled = false;
     (async () => {
       setLoading(true); setError('');
-      const r = await api.extRooms('', from, days);
+      const useCal = mode === 'calendar';
+      const r = await api.extRooms('', useCal ? calFrom : from, useCal ? calDays : days);
       if (cancelled) return;
       if (r.ok && r.data) {
         setData(r.data.rooms); setFetchedAt(r.data.fetchedAt);
@@ -81,7 +101,7 @@ export default function RoomsPage() {
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [session, from, days, tick]);
+  }, [session, from, days, tick, mode, calFrom, calDays]);
 
   const room = ROOMS.find(r => r.id === roomId) || ROOMS[0];
   const byId = useMemo(() => { const m: Record<string, RoomEvents> = {}; data.forEach(d => { m[d.id] = d; }); return m; }, [data]);
@@ -92,7 +112,7 @@ export default function RoomsPage() {
     if (!r) return [];
     const ids = [id, ...(r.combo || [])];
     const out: Booking[] = [];
-    ids.forEach((cid) => { (byId[cid]?.events || []).forEach(e => out.push({ ...e, via: cid })); });
+    ids.forEach((cid) => { (byId[cid]?.events || []).forEach(e => out.push({ ...e, via: cid, roomId: id })); });
     out.sort((a, b) => a.start - b.start || a.end - b.end);
     return out;
   }
@@ -107,6 +127,37 @@ export default function RoomsPage() {
   const next = bookings.find(b => b.start > now);
   const ownFailed = byId[room.id] && !byId[room.id].ok;
 
+  // ── 月曆模式（v4.9.0）：成個月每日格仔，跨全部（或所選樓層）房間 ──
+  const calRooms = useMemo(() => ROOMS.filter(r => calFloor === 'all' || r.floor === calFloor), [calFloor]);
+  const calByDay = useMemo(() => {
+    const map: Record<string, { start: number; end: number; dayStart: number; dayEnd: number; roomId: string; roomName: string; floor: string; via: string; summary: string; allDay: boolean }[]> = {};
+    calRooms.forEach((r) => {
+      const ids = [r.id, ...(r.combo || [])];
+      const out: Booking[] = [];
+      ids.forEach((cid) => { (byId[cid]?.events || []).forEach(e => out.push({ ...e, via: cid, roomId: r.id })); });
+      out.sort((a, b) => a.start - b.start || a.end - b.end);
+      // 去重：同一預約經幾個打通日曆都會出現，按 uid+start 只計一次
+      const seen = new Set<string>();
+      out.forEach((b) => {
+        const key = `${b.uid}-${b.start}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        for (let d = hkStartOfDay(Math.max(b.start, hkMonthStart(calY, calM))); d < Math.min(b.end, hkMonthStart(calY, calM) + calDays * 86_400_000); d += 86_400_000) {
+          const ymd = hkYmd(d);
+          (map[ymd] = map[ymd] || []).push({
+            start: b.start, end: b.end, dayStart: d, dayEnd: d + 86_400_000,
+            roomId: r.id, roomName: r.name, floor: r.floor, via: b.via, summary: b.summary, allDay: b.allDay,
+          });
+        }
+      });
+    });
+    Object.values(map).forEach(list => list.sort((a, b) => a.start - b.start || a.roomId.localeCompare(b.roomId)));
+    return map;
+  }, [byId, calRooms, calY, calM, calDays]);
+  const calLead = DOW.indexOf(hkDow(hkMonthStart(calY, calM)));
+  const calTodayYmd = hkYmd(now);
+  const selList = selDay ? (calByDay[selDay] || []) : [];
+
   if (!session) return <div className="center"><div className="spinner" /></div>;
 
   const todayStart = hkStartOfDay(now), todayEnd = todayStart + 86_400_000;
@@ -115,7 +166,7 @@ export default function RoomsPage() {
     <>
       <BackLink />
       <h1 className="page-title">🏢 地域房間使用情況</h1>
-      <p className="page-sub">灣仔 香港童軍百周年紀念大樓 17／18／19 樓房間；揀一間房即刻見到未來幾日邊個時段有人用。</p>
+      <p className="page-sub">灣仔 香港童軍百周年紀念大樓 17／18／19 樓房間 — 月曆一目了然；亦可以逐間房睇時段。</p>
 
       <div className="inc-tabs" role="tablist">
         {MODES.map(m => (
@@ -129,6 +180,100 @@ export default function RoomsPage() {
       </div>
 
       {error && <div className="err">❌ {error}<div style={{ fontSize: 12, marginTop: 4 }}>可先到原網站查看：<a href={SOURCES.roomsSite} target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>hkir-rooms ↗</a></div></div>}
+
+      {/* ── 📅 月曆模式（v4.9.0 預設）：成個月格仔，逐日列出邊個房有人用 ── */}
+      {mode === 'calendar' && (
+        <>
+          <div className="bud-toolbar">
+            <button className="mini-btn ghost" onClick={() => { const m = calM === 0 ? 11 : calM - 1; setCalM(m); if (calM === 0) setCalY(y => y - 1); }}>◀ 上月</button>
+            <button className="mini-btn ghost" onClick={() => { const p = new Date(Date.now() + HK_OFFSET_MS); setCalY(p.getUTCFullYear()); setCalM(p.getUTCMonth()); }}>本月</button>
+            <button className="mini-btn ghost" onClick={() => { const m = calM === 11 ? 0 : calM + 1; setCalM(m); if (calM === 11) setCalY(y => y + 1); }}>下月 ▶</button>
+            <b className="cal-title">{calY} 年 {calM + 1} 月</b>
+            <span className="wx-sim" style={{ marginLeft: 'auto' }}>
+              <button className={`wx-chip ${calFloor === 'all' ? 'on' : ''}`} onClick={() => setCalFloor('all')}>全部樓層</button>
+              {FLOORS.map(f => <button key={f.id} className={`wx-chip ${calFloor === f.id ? 'on' : ''}`} onClick={() => setCalFloor(f.id as '17' | '18' | '19')}>{f.label}</button>)}
+            </span>
+          </div>
+
+          {loading ? <div className="center"><div className="spinner" /></div> : (
+            <>
+              <div className="cal-grid">
+                {DOW.map(d => <div key={d} className="cal-dow">{d}</div>)}
+                {Array.from({ length: calLead }, (_, i) => <div key={`lead-${i}`} className="cal-cell empty" />)}
+                {Array.from({ length: calDays }, (_, i) => {
+                  const d = hkMonthStart(calY, calM) + i * 86_400_000;
+                  const ymd = hkYmd(d);
+                  const list = calByDay[ymd] || [];
+                  const isToday = ymd === calTodayYmd;
+                  const isSel = ymd === selDay;
+                  const dow = hkDow(d);
+                  return (
+                    <button
+                      key={ymd} className={`cal-cell ${list.length ? 'has' : 'free'} ${isToday ? 'today' : ''} ${isSel ? 'sel' : ''} ${dow === '日' || dow === '六' ? 'wknd' : ''}`}
+                      onClick={() => setSelDay(isSel ? '' : ymd)}
+                    >
+                      <span className="cal-d">{i + 1}</span>
+                      {list.length === 0 ? (
+                        <span className="cal-free">—</span>
+                      ) : (
+                        <span className="cal-events">
+                          {list.slice(0, 3).map((b, j) => (
+                            <span key={j} className={`cal-ev f-${b.floor}`}>
+                              <i>{b.allDay ? '全日' : `${hkHm(b.start)}–${hkHm(b.end)}`}</i> {b.roomId} {parseTitle(b.summary).activity}
+                            </span>
+                          ))}
+                          {list.length > 3 && <span className="cal-more">+{list.length - 3}</span>}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {selDay && (
+                <section className="info-card" style={{ marginTop: 12 }}>
+                  <div className="section-head">
+                    <div>
+                      <h3>{selDay}（{hkDow(hkDayStart(selDay))}）<small>· {selList.length} 節</small></h3>
+                      <p>點格仔揀日子；再點一次收起。包括打通房預約（標明「經 XXXX」）。</p>
+                    </div>
+                    <button className="mini-btn ghost" onClick={() => setSelDay('')}>收起</button>
+                  </div>
+                  {selList.length === 0 ? (
+                    <p className="empty">全日冇預約。</p>
+                  ) : (
+                    <div className="cal-day-list">
+                      {selList.map((b, i) => {
+                        const t = parseTitle(b.summary);
+                        return (
+                          <div key={i} className="room-ev">
+                            <div className="room-ev-time">{b.allDay ? '全日' : `${b.start < hkDayStart(selDay) ? '00:00' : hkHm(b.start)}–${b.end > hkDayStart(selDay) + 86_400_000 ? '24:00' : hkHm(b.end)}`}</div>
+                            <div className="room-ev-body">
+                              <b>{b.roomId} · {t.activity}</b>
+                              <small>
+                                {[t.unit, t.pax ? `${t.pax} 人` : '', t.ref ? `#${t.ref}` : ''].filter(Boolean).join(' · ')}
+                                {t.contact && <> · 📞 {t.contact}</>}
+                              </small>
+                              {b.via !== b.roomId && <small className="room-via">經 {b.via} 打通預約</small>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              <div className="legend" style={{ marginTop: 10 }}>
+                <span><i className="sq" style={{ background: '#dbeafe' }} /> 17 樓</span>
+                <span><i className="sq" style={{ background: '#dcfce7' }} /> 18 樓</span>
+                <span><i className="sq" style={{ background: '#fef9c3' }} /> 19 樓</span>
+                <span>點日子睇詳情 · 撳「🚪 逐間房」睇單一房間</span>
+              </div>
+            </>
+          )}
+        </>
+      )}
 
       {(mode === 'room' || mode === 'embed') && (
         <>

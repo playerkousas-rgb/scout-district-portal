@@ -83,6 +83,21 @@
 
 ---
 
+## 🎖 獎勵規則修訂 + 📢 消息搬主控台頂（v4.9.0）
+
+七大改動（詳細見 app/updates 頁）：
+
+1. **獎勵規則（用戶提供）**：長期服務線改為 LAY 階梯 — `FIVE` 五年獎狀（服務 5 年）→ `TEN` 十年獎狀（＋5）→ `LSM` 長期服務獎章（共 15 年，**由服務開始計，唔再由上一級推**）→ `LSM1/2/3` 一／二／三星（每 10 年），全部自動推算。`CCM` 香港總監嘉許／`CCH` 高級嘉許／`HAB` 民青局局長嘉許／`THANKS` 感謝狀 = **自行申請，唔會自動推算**（CCH 唔再由 CCM 年份計、舊 HAB 歸入 hab 提名期）。名冊狀態新增 **「沒有提名資格」**（`noNomination`）— 揀咗嘅人永不會出現喺提名建議。
+2. **HAB 提名期**：新提名期 `hab` — 區→總會 `01-15`、總會→民青局 `02-03`（2026 年度：2026-02-03 前交表，附件 II 加蓋印簽署）— 喺「⚙️ 年期設定」可改（`getAwardsBoard.deadlineCfg`／`saveAwardDeadlines`，收 `MM-DD` 或 `YYYY-MM-DD`）。
+3. **獎勵提名只限 DDC 或以上**：`Perms.awards = ddcUp`，ADC／區職員／區長領袖睇唔到張卡，直接打 URL 都會擋（`levelOf() <= 2`）。
+4. **消息發佈搬去主控台最頂**（`NewsTopPanel`）：一入管理系統就新增／編輯／刪除／置頂／下架，**ADC（level 3）或以上**（`requireNewsEdit_`）— news 卡片同佢嘅 Perms 行已移除。刪除改為**軟刪除**（`deleted/deletedAt/deletedBy`），Sheet 永遠留底，`/news` =「完整紀錄」可以還原；成員系統公開 API 永遠唔會出現已刪消息。
+5. **聯結簿 → 聯絡簿**：地域職員**姓名**可以由 ADC+ 直接改（電話固定由官網同步，「電話不變但人會轉」）— 存後台 `ContactNames` 表，全區同步；留空即還原同步名（`getContactNames`／`saveContactName`）。
+6. **地域架構**：7 區區總監合併做一個大格（`xx區` ＋ 姓名並排）。
+7. **主控台卡片自排**：拖拽或 ▲▼，次序存瀏覽器 localStorage（每位用戶各自記住）；房間頁預設改為「📅 月曆」逐日總覽模式。
+
+- **舊部署升級**：貼新 `Code.gs` → 跑一次 `setupSheets()` → 重新部署。setupSheets 會自動：升級 AwardTypes 舊預設（你自己改過嘅數值唔會被掂）、Perms `awards` → `ddcUp`、移除 news 卡＋Perms 行、News 表補 `deleted/deletedAt/deletedBy`、新建 `ContactNames` 表、contacts 卡改名「聯絡簿」— **已有資料全部保留**。
+- 測試：`node scripts/test-upgrade-gs.js`（7 項 4.8.1→4.9.0 升級模擬）、`node scripts/test-awards-gs.js`（21 項）、`node --experimental-strip-types scripts/test-awards-logic.ts`（27 項）、`node scripts/test-news-gs.js`（38 項）、`node scripts/check-member-alignment.js`（成員 API 對齊）。
+
 ## 🏕 旅團探訪（v4.8.1）
 
 `/visit` — 幹部撳一下旅團格仔就登記探訪；DC 揀日期範圍即出報告。

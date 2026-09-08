@@ -51,10 +51,12 @@ member-portal 一張表揀 3 款
 - `StockRequests` 新增 `batchRef` 欄（`setupSheets()` 會自動補，唔清空）；舊資料留空 = 單件申請，行為完全不變。
 - 單件 `submitStockRequest` 一切照舊；佢亦接受 `batchRef` 透傳。
 
-## 📢 消息發佈（v4.6.0 新增）— 管理系統發，成員系統首頁置頂顯示
+## 📢 消息發佈（v4.6.0 新增；v4.9.0 改軟刪除＋搬主控台頂）— 管理系統發，成員系統首頁置頂顯示
 
 做法＝**方案 2「一直置頂」（pull on open + pinned display）**：冇推送、冇 Service Worker、冇 badge。
 member-portal 每次載入首頁 fetch 一次公開 action，有置頂消息就顯示，冇就隱藏。
+
+> **v4.9.0 變化**：管理端 news 卡片已移除，發佈／編輯／刪除搬咗去主控台最頂（`NewsTopPanel`，ADC 層級 3 或以上，`requireNewsEdit_`）。**刪除改為軟刪除**：News 表補 `deleted/deletedAt/deletedBy` 三欄，刪除只是 `deleted=TRUE` 留底（可喺 /news 完整紀錄還原）。`listAnnouncements`／`newsPublic_` **照舊**：已刪行同「已下架」一樣永遠唔會出現喺公開回應，成員端 API 形狀唔變，member-portal 唔使改。
 
 ```
 管理系統 /news「＋ 發佈消息」→ saveAnnouncement（需 Perms 矩陣 news = edit）

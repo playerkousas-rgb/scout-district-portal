@@ -1,16 +1,18 @@
 'use client';
 /**
- * 📢 消息發佈（v4.6.0）
+ * 📢 消息發佈 — 完整紀錄（v4.9.0）
  *
- * 呢度發佈嘅消息 → 成員系統 member-portal 首頁頂部「置頂消息」區域直接顯示。
- * 純粹「讀同顯示」：成員端每次載入 fetch 一次公開 action `listAnnouncements`，
- * 冇推送、冇 cache；喺呢度刪咗、下架、或過咗自動落架日，成員端下次載入即刻消失。
+ * v4.9.0 起主要管理入口搬咗去主控台最頂（ADC 層級 3 或以上）；呢一頁保留做
+ * 「完整紀錄」：全部消息＋已刪除留底（軟刪除 — Sheet 繼續紀錄曾經出現過嘅消息）。
+ * 成員系統 member-portal 首頁頂部「置頂消息」同樣讀呢一份資料。
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { useRequireCard } from '@/lib/cardAccess';
-import { isSuper } from '@/lib/levels';
-import type { Announcement, NewsLevel } from '@/lib/types';
+import { loadSession } from '@/lib/session';
+import { levelOf, LEVEL_ADC } from '@/lib/levels';
+import { useDistrict } from '@/lib/useDistrict';
+import type { Announcement, NewsLevel, UserSession } from '@/lib/types';
 import BackLink, { BackBar } from '@/components/BackLink';
 
 const LEVELS: { value: NewsLevel; label: string; hint: string }[] = [
@@ -33,29 +35,31 @@ function emptyDraft(): Draft {
 }
 
 export default function NewsPage() {
-  const session = useRequireCard('news');
+  // v4.9.0：改用層級門檻（ADC 或以上），唔再靠 news 卡片（卡片已移除）
+  const router = useRouter();
+  const { withDistrict } = useDistrict();
+  const [session, setSession] = useState<UserSession | null | 'denied'>(null);
   const [list, setList] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState('');
-  const [canEdit, setCanEdit] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [showForm, setShowForm] = useState(false);
   const [needUpgrade, setNeedUpgrade] = useState(false);
+  const canEdit = session !== 'denied' && !!session && levelOf(session) <= LEVEL_ADC;
 
-  // 卡片權限：news = edit 先可以發佈／刪除（超管永遠可）
   useEffect(() => {
-    if (!session) return;
-    if (isSuper(session)) { setCanEdit(true); return; }
-    (async () => {
-      const r = await api.getCards(session.token);
-      if (r.ok && r.data) setCanEdit(r.data.some(c => c.cardId === 'news' && c.access === 'edit'));
-    })().catch(() => { /* ignore */ });
-  }, [session]);
+    const s = loadSession();
+    if (!s) { router.replace(withDistrict('/')); return; }
+    if (levelOf(s) > LEVEL_ADC) { setSession('denied'); return; }
+    setSession(s);
+  }, [router, withDistrict]);
+
+  const denied = session === 'denied';
 
   async function load() {
-    if (!session) return;
+    if (!session || session === 'denied') return;
     setLoading(true); setError('');
     const r = await api.getAnnouncements(session.token);
     if (r.ok && r.data) { setList(r.data); setNeedUpgrade(false); }
@@ -66,9 +70,11 @@ export default function NewsPage() {
     }
     setLoading(false);
   }
-  useEffect(() => { if (session) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [session]);
+  useEffect(() => { if (session && session !== 'denied') load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [session]);
 
   const pinnedCount = useMemo(() => list.filter(n => n.pinned && n.live).length, [list]);
+  const deletedList = useMemo(() => list.filter(n => n.deleted), [list]);
+  const activeList = useMemo(() => list.filter(n => !n.deleted), [list]);
 
   function startNew() { setDraft(emptyDraft()); setShowForm(true); setMsg(''); setError(''); }
   function startEdit(n: Announcement) {
@@ -83,7 +89,7 @@ export default function NewsPage() {
   }
 
   async function save() {
-    if (!session) return;
+    if (!session || session === 'denied') return;
     setError(''); setMsg('');
     if (!draft.title.trim()) { setError('標題必填'); return; }
     if (!draft.body.trim()) { setError('內容必填'); return; }
@@ -97,7 +103,7 @@ export default function NewsPage() {
   }
 
   async function togglePinned(n: Announcement) {
-    if (!session) return;
+    if (!session || session === 'denied') return;
     setBusy(n.id); setError(''); setMsg('');
     const r = await api.setAnnouncementPinned(session.token, n.id, !n.pinned);
     setBusy('');
@@ -105,7 +111,7 @@ export default function NewsPage() {
     else setError(r.error || '操作失敗');
   }
   async function toggleActive(n: Announcement) {
-    if (!session) return;
+    if (!session || session === 'denied') return;
     setBusy(n.id); setError(''); setMsg('');
     const r = await api.setAnnouncementActive(session.token, n.id, n.active === false);
     setBusy('');
@@ -113,12 +119,34 @@ export default function NewsPage() {
     else setError(r.error || '操作失敗');
   }
   async function remove(n: Announcement) {
-    if (!session || !confirm(`確定刪除消息「${n.title}」？成員系統下次載入即刻消失。`)) return;
+    if (!session || session === 'denied' || !confirm(`確定刪除消息「${n.title}」？\n成員系統下次載入即刻消失；Sheet 會留底曾經出現過。`)) return;
     setBusy(n.id); setError(''); setMsg('');
     const r = await api.deleteAnnouncement(session.token, n.id);
     setBusy('');
-    if (r.ok) { setMsg('已刪除 ✓'); await load(); }
+    if (r.ok) { setMsg('已刪除 ✓（Sheet 留底，下面「已刪除留底」可以還原）'); await load(); }
     else setError(r.error || '刪除失敗');
+  }
+
+  async function restore(n: Announcement) {
+    if (!session || session === 'denied') return;
+    setBusy(n.id); setError(''); setMsg('');
+    const r = await api.restoreAnnouncement(session.token, n.id);
+    setBusy('');
+    if (r.ok) { setMsg('已還原（現為「已下架」，上架後成員就見到）'); await load(); }
+    else setError(r.error || '還原失敗');
+  }
+
+  if (denied) {
+    return (
+      <>
+        <BackLink />
+        <h1 className="page-title">📢 消息發佈</h1>
+        <div className="info-card">
+          <p className="empty">🔒 只有 ADC（助理區總監）或以上可以管理消息。請返主控台用頂部「📢 消息」區。</p>
+        </div>
+        <BackBar />
+      </>
+    );
   }
 
   if (!session) return <div className="center"><div className="spinner" /></div>;
@@ -126,10 +154,11 @@ export default function NewsPage() {
   return (
     <>
       <BackLink />
-      <h1 className="page-title">📢 消息發佈</h1>
+      <h1 className="page-title">📢 消息發佈 — 完整紀錄</h1>
       <p className="page-sub">
-        呢度發佈嘅消息會喺成員系統（member-portal）首頁頂部一直置頂顯示。純粹「讀同顯示」：
-        成員每次打開頁面就拉一次最新消息 —— 呢邊一刪／一下架，嗰邊下次載入即刻消失。
+        日常發佈／編輯／刪除已經搬咗去<b>主控台最頂</b>（一入去就改到，仲快）。
+        呢頁保留睇晒全部消息同已刪除留底。消息會喺成員系統（member-portal）首頁頂部置頂顯示 ——
+        呢邊一刪／一下架，嗰邊下次載入即刻消失。
       </p>
 
       {error && <div className="err">{error}</div>}
@@ -139,9 +168,9 @@ export default function NewsPage() {
         <div className="info-card" style={{ borderColor: '#fbbf24', background: '#fffbeb' }}>
           <h3>⚠️ 後台未更新</h3>
           <p style={{ fontSize: 13, lineHeight: 1.8 }}>
-            區 Google Sheet 嘅 Apps Script 仲係舊版。請將本 repo <code>gs/Code.gs</code>（v4.6.0）全部覆蓋貼上 →
-            執行 <code>setupSheets()</code>（補建唔清空，會自動加一個 <b>News</b> 工作表）→ 重新部署 Web App。
-            驗證：<code>?action=getHealthCheck</code> 見到 <code>version: &quot;4.6.0&quot;</code>。
+            區 Google Sheet 嘅 Apps Script 仲係舊版。請將本 repo <code>gs/Code.gs</code>（v4.9.0）全部覆蓋貼上 →
+            執行 <code>setupSheets()</code>（補建唔清空）→ 重新部署 Web App。
+            驗證：<code>?action=getHealthCheck</code> 見到 <code>version: &quot;4.9.0&quot;</code>。
           </p>
         </div>
       )}
@@ -230,12 +259,12 @@ export default function NewsPage() {
 
       {loading ? (
         <div className="center"><div className="spinner" /></div>
-      ) : list.length === 0 ? (
-        <div className="info-card"><p className="empty">仲未有消息。{canEdit ? '按「＋ 發佈消息」開始。' : ''}</p></div>
+      ) : activeList.length === 0 ? (
+        <div className="info-card"><p className="empty">仲未有消息。{canEdit ? '按「＋ 發佈消息」開始，或者去主控台頂直接發。' : ''}</p></div>
       ) : (
         <section className="info-card">
-          <div className="section-head"><div><h3>全部消息（{list.length}）</h3><p>置頂喺最前；已下架／已過期／未到日期嘅只會喺呢邊見到。</p></div></div>
-          {list.map(n => (
+          <div className="section-head"><div><h3>全部消息（{activeList.length}）</h3><p>置頂喺最前；已下架／已過期／未到日期嘅只會喺呢邊見到。</p></div></div>
+          {activeList.map(n => (
             <article key={n.id} className="user-row" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
               <div className="user-identity" style={{ flex: 1, minWidth: 240 }}>
                 <b>{n.pinned ? '📌 ' : ''}{n.title}</b>
@@ -263,6 +292,27 @@ export default function NewsPage() {
                   <button className="mini-btn danger" disabled={busy === n.id} onClick={() => remove(n)}>刪除</button>
                 </div>
               )}
+            </article>
+          ))}
+        </section>
+      )}
+
+      {canEdit && deletedList.length > 0 && (
+        <section className="info-card">
+          <div className="section-head"><div><h3>🗄 已刪除留底（{deletedList.length}）</h3><p>刪除唔會整走資料 — Sheet 繼續紀錄曾經出現過嘅消息；還原後係「已下架」狀態。</p></div></div>
+          {deletedList.map(n => (
+            <article key={n.id} className="user-row" style={{ opacity: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div className="user-identity" style={{ flex: 1, minWidth: 240 }}>
+                <b>{n.title}</b>
+                <span>
+                  {n.date || '—'}
+                  {n.deletedAt ? ` · 刪於 ${n.deletedAt.slice(0, 10)}` : ''}
+                  {n.deletedBy ? ` · ${n.deletedBy}` : ''}
+                </span>
+              </div>
+              <div className="user-actions">
+                <button className="mini-btn" disabled={busy === n.id} onClick={() => restore(n)}>還原</button>
+              </div>
             </article>
           ))}
         </section>

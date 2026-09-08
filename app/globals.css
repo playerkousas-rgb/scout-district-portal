@@ -731,3 +731,85 @@ a{color:inherit;text-decoration:none;}
 .vs-range-bar{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;}
 .vs-presets{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto;}
 .vs-units input{border:1px solid #e2e8f0;border-radius:6px;padding:3px 6px;font-size:12.5px;}
+
+/* ===================== v4.9.0：消息主控台頂部 / 卡片次序 / 月曆 / 大格區總監 / 姓名編輯 ===================== */
+
+/* 📢 消息 — 主控台最頂 */
+.news-top{background:var(--card,#fff);border:1px solid var(--line,#e2e8f0);border-radius:16px;
+  padding:14px 16px;margin-top:14px;}
+.news-top .news-banner-head{margin-bottom:6px;}
+.news-top .news-banner-head .mini-btn{margin-left:8px;}
+.news-top .linkish{margin-left:8px;font-size:12.5px;}
+.news-none{margin:4px 0;font-size:13px;}
+.news-top-editor{border:1px solid #fbbf24;background:#fffbeb;border-radius:12px;padding:12px 14px;margin:8px 0;}
+.news-top-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.news-deleted{margin-top:10px;border-top:1px dashed #e2e8f0;padding-top:8px;}
+.news-deleted summary{cursor:pointer;font-size:12.5px;color:#64748b;}
+.news-deleted-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:6px 0;border-bottom:1px dashed #f1f5f9;font-size:13px;}
+.news-deleted-row small{color:#94a3b8;margin-left:6px;}
+
+/* 卡片次序 */
+.card-order-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 10px;}
+.card .card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;}
+.card-move{display:inline-flex;gap:4px;}
+.card .move-btn{border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;font-size:11px;
+  width:26px;height:26px;line-height:1;cursor:pointer;color:#475569;}
+.card .move-btn:hover:not(:disabled){background:#e0f2fe;border-color:#7dd3fc;color:#0369a1;}
+.card .move-btn:disabled{opacity:.35;cursor:default;}
+.grid .card{transition:box-shadow .12s ease;}
+.grid .card:active{box-shadow:0 0 0 2px #93c5fd;}
+
+/* 🏛 7 區區總監 — 一個大格 */
+.org-dc-cell{border:2px solid #93c5fd;background:#eff6ff;border-radius:14px;padding:14px 16px;}
+.org-dc-cell-head{display:flex;align-items:center;gap:10px;color:#1e3a8a;font-size:15px;margin-bottom:10px;}
+.org-dc-cell-head .org-avatar.big{width:38px;height:38px;font-size:20px;background:#dbeafe;}
+.org-dc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;}
+.org-dc-item{background:#fff;border:1px solid #bfdbfe;border-radius:10px;padding:8px 10px;text-align:center;}
+.org-dc-item small{display:block;font-size:11px;color:#1d4ed8;font-weight:700;margin-bottom:2px;}
+.org-dc-item b{font-size:14.5px;color:#0f172a;}
+
+/* 🏢 房間 — 月曆模式 */
+.bud-toolbar .cal-title{font-size:16px;color:#0f172a;margin:0 4px;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
+.cal-dow{text-align:center;font-size:12px;font-weight:800;color:#64748b;padding:4px 0;}
+.cal-cell{border:1px solid #e2e8f0;border-radius:10px;background:#fff;min-height:74px;padding:5px 6px;
+  text-align:left;cursor:pointer;display:flex;flex-direction:column;gap:3px;overflow:hidden;font:inherit;}
+.cal-cell:hover{border-color:#60a5fa;}
+.cal-cell.empty{border-style:dashed;background:transparent;cursor:default;}
+.cal-cell.today{border-color:#2563eb;box-shadow:0 0 0 1px #2563eb inset;}
+.cal-cell.sel{background:#eff6ff;border-color:#2563eb;}
+.cal-cell.wknd .cal-d{color:#dc2626;}
+.cal-cell .cal-d{font-size:12.5px;font-weight:800;color:#0f172a;}
+.cal-cell.free .cal-free{color:#cbd5e1;font-size:12px;margin:auto;}
+.cal-events{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.cal-ev{font-size:10px;line-height:1.35;border-radius:5px;padding:1.5px 4px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;display:block;}
+.cal-ev i{font-style:normal;font-weight:700;margin-right:2px;}
+.cal-ev.f-17{background:#dbeafe;color:#1e40af;}
+.cal-ev.f-18{background:#dcfce7;color:#166534;}
+.cal-ev.f-19{background:#fef9c3;color:#854d0e;}
+.cal-more{font-size:10px;color:#64748b;}
+.cal-day-list{display:flex;flex-direction:column;gap:8px;}
+@media(max-width:640px){
+  .cal-cell{min-height:56px;padding:3px 4px;}
+  .cal-ev{font-size:9px;}
+  .cal-dow{font-size:11px;}
+  .bud-toolbar .cal-title{font-size:14.5px;}
+}
+
+/* 📇 聯絡簿 — 姓名編輯 */
+.dir-name-tag{display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;
+  font-size:10px;font-weight:700;border-radius:999px;padding:0 6px;margin-left:6px;vertical-align:1px;}
+.dir-name-edit{border:1px solid #e2e8f0;background:#f8fafc;border-radius:999px;font-size:11px;
+  padding:1px 7px;margin-left:6px;cursor:pointer;color:#475569;}
+.dir-name-edit:hover{background:#e0f2fe;border-color:#7dd3fc;color:#0369a1;}
+
+/* 手機：卡片更易入 */
+@media(max-width:640px){
+  .card{padding:15px 14px;}
+  .card h3{font-size:17px;}
+  .card .desc{font-size:12px;min-height:0;}
+  .card .move-btn{width:32px;height:32px;font-size:12px;}
+  .news-top{padding:12px;}
+}
