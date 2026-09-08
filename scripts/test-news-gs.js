@@ -145,7 +145,36 @@ check('公開 listAnnouncements 兩則都見到，置頂排前', () => {
   assert.strictEqual(list.length, 2);
   assert.strictEqual(list[0].id, pinnedId);
   assert.strictEqual(list[0].pinned, true);
-  assert.strictEqual(list[0].level, 'warn');
+  assert.strictEqual(list[0].level, 'warning');   // 舊詞彙 warn 自動對應成 warning
+});
+
+check('對齊成員系統：公開輸出有 content（＝body）', () => {
+  const list = ctx.listAnnouncements_({});
+  list.forEach((n) => {
+    assert.strictEqual(typeof n.content, 'string');
+    assert.strictEqual(n.content, n.body);
+  });
+  assert.ok(list[0].content.length > 0);
+});
+
+check('對齊成員系統：level 只會係 info / warning / important', () => {
+  const ok = ['info', 'warning', 'important'];
+  ctx.listAnnouncements_({}).forEach((n) => assert.ok(ok.indexOf(n.level) >= 0, '意外 level：' + n.level));
+  assert.strictEqual(ctx.newsLevel_('warn'), 'warning');
+  assert.strictEqual(ctx.newsLevel_('urgent'), 'important');
+  assert.strictEqual(ctx.newsLevel_('WARNING'), 'warning');
+  assert.strictEqual(ctx.newsLevel_('乜嘢都唔係'), 'info');
+  assert.strictEqual(ctx.newsLevel_(''), 'info');
+});
+
+check('對齊成員系統：saveAnnouncement 接受 content 當內容', () => {
+  const r = ctx.saveAnnouncement_(dcToken, { title: '用 content 交', content: '成員端字眼', level: 'urgent' });
+  assert.strictEqual(r.ok, true);
+  const row = ctx.listAnnouncements_({}).filter((n) => n.id === r.data.id)[0];
+  assert.strictEqual(row.body, '成員端字眼');
+  assert.strictEqual(row.content, '成員端字眼');
+  assert.strictEqual(row.level, 'important');
+  ctx.deleteAnnouncement_(dcToken, r.data.id);
 });
 
 check('pinnedOnly 只回置頂', () => {
@@ -233,9 +262,9 @@ check('doGet 公開路由 listAnnouncements 通', () => {
   assert.ok(parsed.data.length >= 0);
 });
 
-check('健康檢查版本 4.6.1', () => {
+check('健康檢查版本 4.6.2', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.6.1');
+  assert.strictEqual(parsed.data.version, '4.6.2');
 });
 
 // ───────────────────────────────────────────────────────────

@@ -15,8 +15,8 @@ import BackLink, { BackBar } from '@/components/BackLink';
 
 const LEVELS: { value: NewsLevel; label: string; hint: string }[] = [
   { value: 'info', label: '🔵 一般消息', hint: '藍色' },
-  { value: 'warn', label: '🟡 請留意', hint: '黃色' },
-  { value: 'urgent', label: '🔴 緊急', hint: '紅色' },
+  { value: 'warning', label: '🟡 請留意', hint: '黃色' },
+  { value: 'important', label: '🔴 緊急', hint: '紅色' },
 ];
 
 type Draft = {

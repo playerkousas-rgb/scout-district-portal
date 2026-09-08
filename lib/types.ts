@@ -309,16 +309,18 @@ export interface IncidentReport {
  * 管理系統 /news 發佈 → 成員系統 member-portal 首頁頂部置頂顯示（純拉取，冇推送）。
  * 呢邊刪咗／下架（active=false）／過咗 expiresAt → 成員系統下次載入即刻消失。
  */
-export type NewsLevel = 'info' | 'warn' | 'urgent';
+/** 同成員系統 AnnouncementBanner 一致嘅詞彙（後台 v4.6.2 起；舊 warn/urgent 會自動對應）。 */
+export type NewsLevel = 'info' | 'warning' | 'important';
 
 export interface Announcement {
   id: string;
   districtCode?: string;
   title: string;
   body: string;
+  content?: string;       // = body，後台額外回一份畀成員系統讀（欄位名對齊）
   date?: string;          // yyyy-MM-dd：顯示日期；日期喺將來 = 未到發佈日，成員端未見到
   pinned?: boolean;       // 置頂：成員系統首頁頂部一直顯示
-  level?: NewsLevel;      // info 一般 / warn 提提你 / urgent 緊急
+  level?: NewsLevel;      // info 一般 / warning 請留意 / important 緊急
   link?: string;          // 選填「查看詳情」連結
   linkLabel?: string;
   notify?: boolean;       // 允許成員端彈系統通知（Notification API；純顯示可忽略）

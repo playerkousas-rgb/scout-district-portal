@@ -84,6 +84,66 @@ function memberInfo(dir) {
   return { called, getAllow, postAllow };
 }
 
+// ── [4] 欄位名對齊：佢個 sanitizer 讀 row.X，後台有冇回 X？ ────
+// 成員 proxy 嘅 public* 函數 = 欄位白名單，唔喺入面嘅 key 會被剝走；
+// 反過來佢讀嘅 key 後台唔回，前端就會靜靜哋變空白（好難 debug，所以要自動查）。
+const FIELD_MAP = [
+  ['publicAnnouncement', 'newsPublic_', 'listAnnouncements'],
+  ['publicItem', 'listItems_', 'listItems'],
+  ['publicVenue', 'listVenues_', 'listVenues'],
+  ['publicCourse', 'courseLinkPublic_', 'listCourseLinks'],
+];
+
+function fnSource(src, name) {
+  const i = src.indexOf('function ' + name + '(');
+  if (i < 0) return '';
+  const j = src.indexOf('\nfunction ', i + 1);
+  return src.slice(i, j > 0 ? j : undefined);
+}
+
+function fieldCheck(dir) {
+  const proxyPath = path.join(dir, 'app', 'api', 'proxy', 'route.ts');
+  if (!fs.existsSync(proxyPath)) { console.log('  （搵唔到 proxy route.ts）'); return 0; }
+  const proxy = fs.readFileSync(proxyPath, 'utf8');
+  const gs = fs.readFileSync(CODE_GS, 'utf8');
+  let bad = 0;
+  for (const [theirFn, ourFn, action] of FIELD_MAP) {
+    const theirSrc = fnSource(proxy.replace(/\nfunction /g, '\nfunction '), theirFn);
+    const ourSrc = fnSource(gs, ourFn);
+    if (!theirSrc || !ourSrc) continue;
+    const reads = [...new Set([...theirSrc.matchAll(/\brow\.([A-Za-z0-9_]+)/g)].map(m => m[1]))];
+    const emits = new Set([...ourSrc.matchAll(/([A-Za-z0-9_]+)\s*:/g)].map(m => m[1]));
+    const missing = reads.filter(k => !emits.has(k));
+    if (missing.length) {
+      bad += missing.length;
+      console.log(`  ❌ ${action}：成員端讀 ${missing.map(k => '`' + k + '`').join('、')}，但 ${ourFn} 冇回 → 前端會空白`);
+    } else {
+      console.log(`  ✅ ${action}（${reads.length} 個欄位）`);
+    }
+  }
+  return bad;
+}
+
+// ── [5] level 值域：字串值對唔上就淨係「顏色錯」，唔會報錯，最陰險 ──
+function levelCheck(dir) {
+  const proxyPath = path.join(dir, 'app', 'api', 'proxy', 'route.ts');
+  if (!fs.existsSync(proxyPath)) return 0;
+  const theirSrc = fnSource(fs.readFileSync(proxyPath, 'utf8'), 'publicAnnouncement');
+  if (!/level/.test(theirSrc)) return 0;
+  const theirs = new Set([...theirSrc.matchAll(/rawLevel === '([a-z]+)'/g)].map(m => m[1]).concat('info'));
+  const gs = fs.readFileSync(CODE_GS, 'utf8');
+  const ours = new Set(((gs.match(/var NEWS_LEVELS = \[([^\]]*)\]/) || [])[1] || '')
+    .split(',').map(s => s.trim().replace(/'/g, '')).filter(Boolean));
+  const orphan = [...ours].filter(v => !theirs.has(v));
+  console.log('  後台：' + [...ours].join(' / ') + '   成員端接受：' + [...theirs].join(' / '));
+  if (orphan.length) {
+    console.log('  ❌ ' + orphan.join('、') + ' 成員端唔認得 → 會被降級做 info（顯示藍色）');
+    return orphan.length;
+  }
+  console.log('  ✅ 一致');
+  return 0;
+}
+
 function main() {
   let dir = process.argv[2];
   if (!dir) {
@@ -131,6 +191,12 @@ function main() {
   const risky = [...me.getAllow, ...me.postAllow].filter(a => be.all.has(a) && !be.publicish.has(a));
   if (risky.length) { problems += risky.length; risky.forEach(a => console.log('  ⛔ ' + a + '（後台要 token）')); }
   else console.log('  ✅ 冇');
+
+  console.log('\n[4] 欄位名對齊（成員 proxy 白名單讀 row.X ↔ 後台回傳嘅 key）');
+  problems += fieldCheck(dir);
+
+  console.log('\n[5] level 詞彙');
+  problems += levelCheck(dir);
 
   console.log('\n' + (problems ? `⚠️ 有 ${problems} 項要處理` : '🎉 完全對齊'));
   process.exit(problems ? 1 : 0);

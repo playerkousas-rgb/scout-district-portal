@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.6.1
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.6.2
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -84,6 +84,14 @@
  * 只寄一封通知。區職員喺 /stock-regs 見到「一張申請 N 款」，可 setStockBatchStatus
  * 一次過批准／拒絕／歸還（庫存逐行加減，只寄一封俾申請人）。
  * ⚠️ 呢個 action 舊版冇，成員系統以前要 fallback 逐件 POST；而家統一由本檔處理。
+ *
+ * ── 消息欄位對齊成員系統（v4.6.2）──────────────────────────
+ * 成員系統 AnnouncementBanner 讀 { id, title, content, date, pinned, level }，
+ * 佢個 proxy 會做欄位白名單，唔喺清單嘅 key 會被剝走。所以本檔 listAnnouncements：
+ *   ① 除咗原有 body，額外回一份 content（同內容，畀成員端讀）；
+ *   ② level 統一用成員端詞彙 info / warning / important
+ *      （舊資料 warn → warning、urgent → important 自動對應，Sheet 唔使改）。
+ * 佢個 proxy 唔會轉發 link / linkLabel / notify / districtCode，呢啲欄位只有管理系統用。
  *
  * ── 部署 ──────────────────────────────────────────────────
  * 擴充功能 → Apps Script → 貼上本檔 → 執行 setupSheets()
@@ -245,7 +253,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.6.1',
+      version: '4.6.2',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -1664,11 +1672,16 @@ function deleteActivityNotice_(token, id) {
 // 純拉取：member-portal 每次載入 fetch 一次 listAnnouncements，冇推送、冇 cache。
 // 呢邊刪咗 / 下架（active=FALSE）／過咗 expiresAt → 成員系統下次載入即刻消失。
 
-var NEWS_LEVELS = ['info', 'warn', 'urgent'];
+// 統一詞彙（同成員系統 AnnouncementBanner 一致）：info 一般 / warning 請留意 / important 緊急。
+// 舊 Sheet 用過 warn / urgent，讀寫時自動對應，唔使人手改資料。
+var NEWS_LEVELS = ['info', 'warning', 'important'];
+var NEWS_LEVEL_ALIAS = { warn: 'warning', warning: 'warning', urgent: 'important', important: 'important', info: 'info', normal: 'info', '': 'info' };
 var NEWS_LOCKED_FIELDS = ['id', 'districtCode', 'publishedAt', 'publishedBy', 'createdAt'];
 
 function newsLevel_(v) {
   var s = String(v || '').trim().toLowerCase();
+  var mapped = NEWS_LEVEL_ALIAS[s];
+  if (mapped) return mapped;
   return NEWS_LEVELS.indexOf(s) >= 0 ? s : 'info';
 }
 /** Sheet 嘅日期格可能係 Date 物件，一律轉 yyyy-MM-dd 字串 */
@@ -1704,7 +1717,8 @@ function newsRow_(r) {
 function newsPublic_(n) {
   return {
     id: n.id, districtCode: n.districtCode,
-    title: n.title, body: n.body, date: n.date,
+    // body = 管理系統用；content = 成員系統 AnnouncementBanner 讀嘅欄位名（同一份內容）
+    title: n.title, body: n.body, content: n.body, date: n.date,
     pinned: n.pinned, level: n.level,
     link: n.link, linkLabel: n.linkLabel, notify: n.notify,
     publishedAt: n.publishedAt, updatedAt: n.updatedAt,
@@ -1765,7 +1779,7 @@ function saveAnnouncement_(token, a) {
   var t = requireCardEdit_(token, 'news'); if (t.error) return err(t.error);
   a = a || {};
   var title = String(a.title || '').trim();
-  var body = String(a.body || '').trim();
+  var body = String((a.body === undefined || a.body === null || a.body === '') ? (a.content || '') : a.body).trim();
   if (!title) return err('標題必填');
   if (!body) return err('內容必填');
 
@@ -1989,6 +2003,8 @@ function courseLinkPublic_(r) {
     subsidyNote: r.subsidyNote || '', deadline: r.deadline || '',
     quota: Number(r.quota) || 0, filled: Number(r.filled) || 0,
     venue: r.venue || '', noticeUrl: r.noticeUrl || '', contact: r.contact || '',
+    // 成員系統 proxy 嘅 publicCourse 會讀 active 再過濾，所以公開版都要回（listCourseLinks_ 本身已隔走 FALSE）
+    active: String(r.active).toUpperCase() !== 'FALSE',
     // 每班收費 FPS QR（v4.3.0）：成員系統直接畫 QR；冇生成過就全部空字串
     fpsQrPayload: String(r.fpsQrPayload || '').trim(),
     fpsAmount: r.fpsAmount === undefined || r.fpsAmount === null ? '' : String(r.fpsAmount).trim(),

@@ -5,6 +5,16 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.6.2 — 消息欄位對齊成員系統（要換新 Code.gs）</h3>
+        <ul>
+          <li>📢 成員系統首頁「最新消息」而家<b>睇到內容同顏色</b>：佢嗰邊讀 <code>content</code> 同 <code>level = info / warning / important</code>，舊後台回嘅係 <code>body</code> 同 <code>warn / urgent</code> ——兩邊都唔會報錯，但成員只會見到<b>空白內容、全部藍色</b>。後台 4.6.2 已對齊</li>
+          <li>🎨 <code>/news</code> 類別維持三揀一（🔵 一般／🟡 請留意／🔴 緊急），Sheet 舊資料唔使改，讀寫時自動對應</li>
+          <li>🔔 成員系統新加嘅「通告圖書館推送」行 Supabase + Web Push，<b>唔經本後台</b>，區職員唔使做嘢</li>
+          <li>🧪 新增 <code>node scripts/check-member-alignment.js</code>：成員系統每次更新後一跑，就知有冇 action 缺漏、欄位名對唔上、或者 proxy 放行咗唔應該公開嘅 action</li>
+          <li>⚠️ 請下載新 <code>Code.gs</code> 貼上去 → 執行 <code>setupSheets()</code> → 重新部署，健康檢查應顯示 <code>version 4.6.2</code></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.6.1 — 一次過借多款物資（一張申請一次批）</h3>
         <ul>
           <li>📦 成員系統一張表揀幾款物資，而家後台原生收（<code>submitStockBatchRequest</code>）：<b>全部夠貨先寫入</b>，任何一款唔夠貨就成批唔寫，唔會出現「寫咗一半」；同一款揀兩次自動合併數量</li>

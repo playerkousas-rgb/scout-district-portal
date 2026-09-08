@@ -1,4 +1,4 @@
-# member-portal ↔ 統一後台（GS）對接合約 v4.6.1
+# member-portal ↔ 統一後台（GS）對接合約 v4.6.2
 
 兩邊共用同一份 `gs/Code.gs`、同一張 Sheet、同一個 `/exec` + API Key。
 
@@ -63,10 +63,10 @@ member-portal 每次載入首頁 fetch 一次公開 action，有置頂消息就�
 主 Sheet 新工作表 News（setupSheets() 自動補建，唔清空）
         │
         ▼
-GET listAnnouncements?pinnedOnly=1&limit=10   ← 公開、免登入、no-store
+GET listAnnouncements（成員端唔帶參數，全部拎，佢自己 filter pinned）← 公開、免登入、no-store
         │
         ▼
-member-portal 首頁 <NewsBanner /> 頂部置頂顯示
+member-portal 首頁 <AnnouncementBanner /> 頂部置頂顯示
         │
 管理系統刪除／下架／過咗自動落架日 → 呢邊下次載入即刻消失
 ```
@@ -77,10 +77,10 @@ member-portal 首頁 <NewsBanner /> 頂部置頂顯示
 |---|---|
 | `id` | `nw_xxx`，後台自動生成 |
 | `districtCode` | 自動填 |
-| `title` / `body` | 標題／內容（必填） |
+| `title` / `body` | 標題／內容（必填）。公開回應會**同時**回一份 `content`（＝`body`），因為成員端讀 `content` |
 | `date` | `yyyy-MM-dd` 顯示日期；**填將來日期＝到嗰日先出現（排期）** |
 | `pinned` | `TRUE` = 成員系統首頁頂部一直顯示 |
-| `level` | `info`（藍）／`warn`（黃）／`urgent`（紅） |
+| `level` | `info`（藍）／`warning`（黃）／`important`（紅）※ 舊資料 `warn`／`urgent` 讀寫時自動對應 |
 | `link` / `linkLabel` | 選填「查看詳情」連結（member proxy 只放行 http(s)） |
 | `notify` | 允許成員端彈系統通知（純顯示版可以唔理；升級做方案 1 先用） |
 | `active` | `FALSE` = 下架（記錄仍在，成員端即刻唔見） |
@@ -101,23 +101,39 @@ member-portal 首頁 <NewsBanner /> 頂部置頂顯示
 `listAnnouncements` 公開回應**唔會**有 `active` / `publishedBy`；已下架、已過期、未到日期嘅一律唔會出現。
 未建 News 表（舊後台）→ 回空陣列，member-portal 唔會爆。
 
-### member-portal 要改嘅 6 個位
+#### ⚠️ 欄位名／值域必須對齊（v4.6.2 修正）
 
-| 檔案 | 改法 |
+成員端 `AnnouncementBanner` 只讀 **`{ id, title, content, date, pinned, level }`**，
+而佢個 proxy `publicAnnouncement()` 係欄位白名單 —— 唔喺名單嘅 key（`link`／`linkLabel`／`notify`／`districtCode`／`body`）
+會**靜靜哋被剝走**，唔會報錯。所以後台：
+
+| 佢讀 | 後台回 | 備註 |
+|---|---|---|
+| `content` | `content`（v4.6.2 新增，＝`body`） | 以前只回 `body` → 成員端內容一片空白 |
+| `level` | `info` / `warning` / `important` | 以前回 `warn` / `urgent` → 成員端唔認得，一律降級做藍色 `info` |
+| `pinned` | boolean | 佢接受 `true` 或字串 `"TRUE"` |
+| `date` | `yyyy-MM-dd` | 佢個 proxy 會再按 `date` 由新到舊排 |
+
+`saveAnnouncement` 亦接受 `content` 當內容（`body` 優先），方便兩邊共用同一份 payload。
+
+> **對齊檢查（每次成員系統更新後跑）**：`node scripts/check-member-alignment.js`
+> —— 第 [4]／[5] 項就係專門查呢兩類「唔會報錯但顯示錯」嘅問題。
+
+### member-portal 現況（已上線，commit `bb44fe6`）
+
+| 檔案 | 內容 |
 |---|---|
-| `app/api/proxy/route.ts` | `GET_ACTIONS` 加 `listAnnouncements`；加 `GET_PARAMS`（只放行 `pinnedOnly` / `limit`）；加 `publicAnnouncement()` 欄位白名單；`sanitizeGet` 加分支 |
-| `lib/types.ts` | 加 `Announcement` |
-| `lib/api.ts` | 加 `mapAnnouncement` + `api.listAnnouncements(pinnedOnly)` |
-| `components/NewsBanner.tsx` | 新元件：載入時拉一次；冇消息／後台未升級就 `return null` |
-| `app/page.tsx` | hero 下面加 `<NewsBanner />` |
-| `app/globals.css` | `.news-pins` / `.news-pin`（info 藍 / warn 黃 / urgent 紅） |
+| `app/api/proxy/route.ts` | `GET_ACTIONS` 加 `listAnnouncements` + `publicAnnouncement()` 欄位白名單 + 按 `date` 排序 |
+| `lib/types.ts` / `lib/api.ts` | `Announcement`（`id/title/content/date/pinned/level`）＋ `api.listAnnouncements()`（唔帶參數） |
+| `components/AnnouncementBanner.tsx` | 首頁最頂：pinned 全部展示、可展開內容；另用 `localStorage` 記低上次見過嘅最新 id，有新消息就彈一次 Notification |
+| `app/page.tsx` | hero 上面 `<AnnouncementBanner />` |
 
-**現成 patch：** [`docs/member-portal-news-banner.patch`](member-portal-news-banner.patch)
-（已對 member-portal HEAD `149f910` 做過 `git am` + `tsc` + `next build` 驗證）：
+管理端呢邊照舊：`/news` 發佈／置頂／下架／刪除 → 成員端下次載入即刻同步。
 
-```bash
-git am path/to/member-portal-news-banner.patch   # 或 git apply
-```
+> 🔔 **通告圖書館 Web Push（member-portal `762e35a`）同本後台無關**：
+> 佢用 Supabase（`SUPABASE_URL`／`SUPABASE_SERVICE_KEY`）+ VAPID key 直接同 scout-circulars 對接，
+> 冇經 Apps Script、冇寫 Sheet。GS 呢邊**唔使加任何嘢**，只需要 `listAnnouncements`（已有）。
+
 
 想升級做**方案 1（開 app 彈系統通知）**：唔使再改後台，`NewsBanner.tsx` 檔頭註釋已寫好嗰十行——
 比較 `items[0].updatedAt` 同 `localStorage.news_seen`，新過就 `Notification.requestPermission()`。
@@ -297,10 +313,10 @@ member-portal 填表
 健康檢查 `?action=getHealthCheck`（免 Key）會回：
 
 ```json
-{ "version": "4.6.1", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
+{ "version": "4.6.2", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
 ```
 
-`version` 要係 `4.6.1` 先代表呢版 GS 已貼上線。
+`version` 要係 `4.6.2` 先代表呢版 GS 已貼上線。
 
 ## 部署
 
