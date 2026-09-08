@@ -1,4 +1,4 @@
-# 下一手 Agent 交接備忘（v4.7.3）
+# 下一手 Agent 交接備忘（v4.8.0）
 
 > 2026-09-08（第七輪）v4.7.0：**🎖 獎勵提名**（用戶指定「一站式，全部喺 app 入面睇同改」）。
 > 後台加 `Awards`（一人一行，每個獎一欄＝獲獎年份，值可以係 `2015` / `2015?` / `無`）同 `AwardTypes`（年期規則）兩張表，
@@ -17,6 +17,14 @@
 > **v4.7.3**：提名建議每行加剔格 →「✅ 登記 N 項獲獎」→ 按人合併 `saveAwardMember({id,name,awards:{CODE:year}})`。
 > 配合改咗 `awardWriteFields_(sh,row,a,types,isNew)`：**只寫 payload 有嘅欄**（isNew 例外，寫齊做預設），
 > 所以局部更新唔會清走 troop／position／serviceStart／note。`importAwardMembers_` 兩個 call site 已跟住傳 isNew。
+> **v4.8.0 🏕 旅團探訪**（用戶自己諗掂點做）：幹部撳一下旅團格仔就登記，DC 揀日期範圍出報告。
+> 後台加 `Units`（旅團名單，seed = 港島地域官網筲箕灣區 28 旅，連五個支部團數）同 `Visits`（一次探訪一行，有 `section` 欄）；
+> action `getVisitBoard(token, from, to)`／`saveVisit`／`deleteVisit`／`saveUnits`（會同步 `Config TROOP_LIST`）；卡片 `visit` = edit。
+> 角色 → 預設支部：`VISIT_ROLE_SECTION`（ADC_GH/ADC_CUBS/ADC_SCOUT），前端仲會用 localStorage `skw.visit.section` 記住揀擇。
+> 純邏輯喺 `lib/visits.ts`（`troopStats`／`coverage`／`visitorStats`／`rangePresets`／`parseUnitPaste`）。
+> ⚠️ vm 測試提醒：`v instanceof Date` 跨 realm 會 false，所以 `visitDate_` 改用 `Object.prototype.toString.call(v)`。
+> 🧪 本機預覽用 `node scripts/mock-gs-server.js`（in-repo，sandbox 重置都唔會冇；apiKey 固定 `dev`，登入 sheep/0728）。
+> 🛑 **委任系統／旅團管理系統暫時 hold**：用戶話委任資料難搞；旅團管理佢自己另有一套系統，日後先接，仲要處理私隱。
 > ⏭ **用戶未來想要**：全區領袖「委任年期 list」——有新委任就登記入去，令「無 → GSA（服務滿 7 年）」呢級真正計得準。
 > 而家係靠 `Awards.serviceStart` 逐個人填；下一步可以考慮同 Staff／成員系統委任資料對接，或者做一張 `Appointments` 表。
 > 用戶自己喺「年期設定」改得，所以千祈唔好 hardcode 返落程式。

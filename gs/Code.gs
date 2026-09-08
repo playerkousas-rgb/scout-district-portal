@@ -2220,7 +2220,9 @@ function visitKind_(v) {
 }
 /** Sheet 日期格可能係 Date → 一律 yyyy-MM-dd */
 function visitDate_(v) {
-  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
   var s = String(v == null ? '' : v).trim();
   var m = s.match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
   if (!m) return '';
