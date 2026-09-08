@@ -51,7 +51,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.6.0"` 即通。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.6.1"` 即通。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -64,7 +64,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.6.0"` 即代表用緊最新後台。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.6.1"` 即代表用緊最新後台。
 
 ---
 
@@ -82,6 +82,18 @@
 - 要令舊後台出現呢張新卡片：貼新 `gs/Code.gs` → 執行 `setupSheets()`（自動補建缺失卡片＋權限，唔會洗資料）。
 
 ---
+
+## 📦 一次過借多款物資（v4.6.1）
+
+`gs/Code.gs` 補上 **`submitStockBatchRequest`**（成員系統一張表揀幾款物資時會叫，舊版冇 → 佢要逐件 POST）：
+
+- **全部夠貨先寫**：任何一款唔夠／唔存在 → 成批唔寫，唔會出現「寫咗一半」
+- 同一款揀兩次自動合併數量；只寄一封通知俾區職員
+- 每款仍然係 `StockRequests` 一行（批核／庫存邏輯完全唔變），但共用 **`batchRef`**
+- `/stock-regs` 會合成「🧾 一張申請 · N 款物資」，可 **一次過批准／拒絕／歸還**（`setStockBatchStatus`）：庫存逐款加減、重複批唔會重複扣、申請人只收一封信
+- `StockRequests` 加 `batchRef` 欄，`setupSheets()` 自動補；舊資料留空 = 單件，行為不變
+
+> 🧭 **唯一後台**：`gs/Code.gs` 係兩邊唯一後台來源，成員系統唔會自己養一份。詳見 [`docs/member-gs-handshake.md`](docs/member-gs-handshake.md) 開頭「唯一後台原則」。
 
 ## 📢 消息發佈 → 成員系統首頁置頂（v4.6.0）
 

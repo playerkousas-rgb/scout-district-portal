@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.6.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.6.1
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -77,6 +77,13 @@
  * News 表欄位：title 標題、body 內容、date 日期、pinned 置頂、level 類別、
  *   link/linkLabel 詳情連結、notify 是否廣播（member-portal 可選擇彈 Notification）、
  *   active 發佈中、expiresAt 自動落架日、publishedAt/publishedBy/updatedAt。
+ *
+ * ── 一次過借多款物資 submitStockBatchRequest（v4.6.1）──────────
+ * 成員系統一張表揀多款物資 → 一個 action 搞掂：全部夠貨先寫（唔會寫一半），
+ * 每款仍然係 StockRequests 一行（批核／庫存邏輯完全唔變）但共用 batchRef，
+ * 只寄一封通知。區職員喺 /stock-regs 見到「一張申請 N 款」，可 setStockBatchStatus
+ * 一次過批准／拒絕／歸還（庫存逐行加減，只寄一封俾申請人）。
+ * ⚠️ 呢個 action 舊版冇，成員系統以前要 fallback 逐件 POST；而家統一由本檔處理。
  *
  * ── 部署 ──────────────────────────────────────────────────
  * 擴充功能 → Apps Script → 貼上本檔 → 執行 setupSheets()
@@ -238,7 +245,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.6.0',
+      version: '4.6.1',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -318,6 +325,8 @@ function doPost(e) {
       case 'addVenueRequest':      return json(submitVenueRequest_(b));
       case 'submitStockRequest':
       case 'addStockRequest':      return json(submitStockRequest_(b));
+      case 'submitStockBatchRequest':
+      case 'addStockBatchRequest': return json(submitStockBatchRequest_(b));
       case 'submitActivityNotice': return json(submitActivityNotice_(b));
       case 'submitCourseReg':      return json(submitCourseReg_(b));
 
@@ -334,6 +343,7 @@ function doPost(e) {
       // ---------- 批核（管理系統） ----------
       case 'setVenueBookingStatus': return json(setVenueBookingStatus_(b.token, b.id, b.status));
       case 'setStockRequestStatus': return json(setStockRequestStatus_(b.token, b.id, b.status));
+      case 'setStockBatchStatus':   return json(setStockBatchStatus_(b.token, b.batchRef, b.status));
       case 'confirmVenueBooking':   return json(confirmVenueBooking_(b.token, b.id));
       case 'approveVenueBooking':   return json(approveVenueBooking_(b.token, b.id));
       case 'rejectVenueBooking':    return json(rejectVenueBooking_(b.token, b.id));
@@ -1304,24 +1314,49 @@ function stockLineItems_(b) {
   return [];
 }
 
-function submitOneStockLine_(ss, applicant, line) {
-  var item = readSheet_(SHEET.ITEMS).filter(function (v) {
-    return String(v.itemId).trim() === String(line.itemId).trim()
-      || String(v.name || '').trim() === String(line.itemId).trim();
-  })[0];
-  if (!item) return { ok: false, error: '物資不存在：' + line.itemId };
+/** 合併同一件物資嘅數量（成員系統一次揀多款時可能重複） */
+function stockMergeLines_(lines) {
+  var out = [], index = {};
+  (lines || []).forEach(function (l) {
+    var key = String(l.itemId || '').trim();
+    if (!key) return;
+    if (index[key] === undefined) { index[key] = out.length; out.push({ itemId: key, qty: Number(l.qty) || 0 }); }
+    else out[index[key]].qty += Number(l.qty) || 0;
+  });
+  return out;
+}
 
-  var qty = Number(line.qty) || 0;
-  if (qty <= 0) return { ok: false, error: '數量不正確（' + (item.name || line.itemId) + '）' };
-  var avail = Number(item.availableQty) || 0;
-  if (qty > avail) return { ok: false, error: '「' + item.name + '」數量超出可借數量（可借 ' + avail + '）' };
+/**
+ * 逐行核對物資（存在／數量正確／夠貨），**唔會寫入**。
+ * items 只讀一次；整批任何一行唔合格就成批唔寫（避免寫一半）。
+ */
+function resolveStockLines_(lines) {
+  var items = readSheet_(SHEET.ITEMS);
+  var rows = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var item = items.filter(function (v) {
+      return String(v.itemId).trim() === String(line.itemId).trim()
+        || String(v.name || '').trim() === String(line.itemId).trim();
+    })[0];
+    if (!item) return { ok: false, error: '物資不存在：' + line.itemId };
+    var qty = Number(line.qty) || 0;
+    if (qty <= 0) return { ok: false, error: '數量不正確（' + (item.name || line.itemId) + '）' };
+    var avail = Number(item.availableQty) || 0;
+    if (qty > avail) return { ok: false, error: '「' + item.name + '」數量超出可借數量（可借 ' + avail + '）' };
+    rows.push({ item: item, qty: qty, avail: avail });
+  }
+  return { ok: true, rows: rows };
+}
 
+/** 寫一行 StockRequests（已核對過）；batchRef 有值＝同一張申請嘅其中一款物資 */
+function writeStockRow_(ss, applicant, item, qty, avail, batchRef) {
   var sh = ss.getSheetByName(SHEET.STOCK_REQ);
   if (!sh) return { ok: false, error: '尚未執行 setupSheets()' };
 
   var rid = genId_('sr'), ref = genRef_('SR'), now = new Date().toISOString();
   appendRowObj_(sh, {
-    id: rid, districtCode: districtCode_(), refCode: ref,
+    id: rid, districtCode: districtCode_(), refCode: ref, batchRef: batchRef || '',
     submittedAt: now, createdAt: now,
     itemId: String(item.itemId).trim(), itemName: item.name || '', category: item.category || '', qty: qty,
     purpose: applicant.purpose || '', borrowDate: applicant.borrowDate || '', returnDate: applicant.returnDate || '',
@@ -1332,13 +1367,22 @@ function submitOneStockLine_(ss, applicant, line) {
   });
 
   if (STOCK_DEDUCT_ON === 'submit') {
-    var iIdx = rowIndexByCol_(ss.getSheetByName(SHEET.ITEMS), 'itemId', String(item.itemId).trim());
-    if (iIdx > 0) setCellByHeader_(ss.getSheetByName(SHEET.ITEMS), iIdx, 'availableQty', avail - qty);
+    var ish = ss.getSheetByName(SHEET.ITEMS);
+    var iIdx = rowIndexByCol_(ish, 'itemId', String(item.itemId).trim());
+    if (iIdx > 0) setCellByHeader_(ish, iIdx, 'availableQty', Math.max(0, avail - qty));
   }
 
   appendRecord_('stock', rid, ref, '📦 借物資：' + item.name, applicant.name, applicant.phone, applicant.troop || '', 'pending',
-    item.name + ' x' + qty + ' · ' + (applicant.borrowDate || '') + ' → ' + (applicant.returnDate || ''));
+    item.name + ' x' + qty + ' · ' + (applicant.borrowDate || '') + ' → ' + (applicant.returnDate || '')
+    + (batchRef ? ' · 批次 ' + batchRef : ''));
   return { ok: true, refCode: ref, id: rid, itemName: item.name, qty: qty };
+}
+
+function submitOneStockLine_(ss, applicant, line, batchRef) {
+  var res = resolveStockLines_([line]);
+  if (!res.ok) return { ok: false, error: res.error };
+  var r = res.rows[0];
+  return writeStockRow_(ss, applicant, r.item, r.qty, r.avail, batchRef);
 }
 
 function submitStockRequest_(b) {
@@ -1360,7 +1404,7 @@ function submitStockRequest_(b) {
 
   var refs = [], names = [];
   for (var i = 0; i < lines.length; i++) {
-    var one = submitOneStockLine_(ss, applicant, lines[i]);
+    var one = submitOneStockLine_(ss, applicant, lines[i], stockBatchRefOf_(b));
     if (!one.ok) return err(one.error);
     refs.push(one.refCode);
     names.push((one.itemName || lines[i].itemId) + ' x' + one.qty);
@@ -1376,6 +1420,63 @@ function submitStockRequest_(b) {
   });
 }
 
+/** 只收安全字元嘅批次編號（成員系統會自己生成 SB-yyyymmdd-XXXXXX） */
+function stockBatchRefOf_(b) {
+  var raw = String((b && (b.batchRef || b.batch_ref || b.batchId)) || '').trim();
+  return /^[A-Za-z0-9_-]{1,40}$/.test(raw) ? raw : '';
+}
+
+/**
+ * 一次過借多款物資（成員系統 member-portal 一張表揀多件時用）。
+ * 同 submitStockRequest 分別：
+ *   1. **全部合格先寫**（任何一款唔夠貨即成批唔寫，唔會出現寫咗一半）；
+ *   2. 每款物資仍然係 StockRequests 一行（批核邏輯、庫存扣減完全唔變），
+ *      但共用同一個 batchRef，區職員可以喺 /stock-regs 一次過批成批；
+ *   3. 只寄一封通知（列晒全部物資），唔會逐件洗版。
+ * 回應包含 refCode（= batchRef）／refCodes／submittedCount，member-portal proxy 直接讀得到。
+ */
+function submitStockBatchRequest_(b) {
+  if (!isFeature_('stock')) return err('服務暫未開放');
+  var g = guardLocked_(); if (g) return g;
+  var applicant = normalizeStockApplicant_(b);
+  var lines = stockMergeLines_(stockLineItems_(b));
+  if (!applicant.name || !applicant.phone) return err('資料不完整（需要姓名、電話）');
+  if (!lines.length) return err('資料不完整（需要物資及數量）');
+
+  // Config 有填外部收表 Script 就照舊轉發（同單件一致）
+  var fwd = callService_('STOCK', 'addRequest', b);
+  if (fwd) {
+    if (fwd.ok) return okSubmit_({ refCode: (fwd.data && fwd.data.refCode) || fwd.refCode || '' });
+    return err(fwd.error || '借物資轉發失敗');
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss.getSheetByName(SHEET.STOCK_REQ)) return err('尚未執行 setupSheets()');
+
+  var checked = resolveStockLines_(lines);
+  if (!checked.ok) return err(checked.error);
+
+  var batchRef = stockBatchRefOf_(b) || genRef_('SB');
+  var refs = [], names = [];
+  for (var i = 0; i < checked.rows.length; i++) {
+    var r = checked.rows[i];
+    var one = writeStockRow_(ss, applicant, r.item, r.qty, r.avail, batchRef);
+    if (!one.ok) return err(one.error);
+    refs.push(one.refCode);
+    names.push((one.itemName || r.item.itemId) + ' x' + one.qty);
+  }
+
+  notifyStaff_('📦 新借物資申請（' + refs.length + ' 款）',
+    '批次：' + batchRef + '\n物資：' + names.join('、') + '\n'
+    + '申請人：' + applicant.name + '（' + applicant.phone + '）\n'
+    + (applicant.borrowDate || '') + ' → ' + (applicant.returnDate || ''));
+
+  return okSubmit_({
+    refCode: batchRef, batchRef: batchRef, refCodes: refs,
+    submittedCount: refs.length, requestedCount: lines.length, count: refs.length,
+  });
+}
+
 // ===================== 借物資：查閱／批核（庫存只扣一次） =====================
 
 function getStockRequests_(token) {
@@ -1387,18 +1488,14 @@ var STOCK_STATUS = ['pending', 'approved', 'rejected', 'returned', 'cancelled'];
 /** 呢啲狀態代表「物資喺申請人手上」，需要佔用庫存 */
 function stockHolds_(status) { return String(status).toLowerCase() === 'approved'; }
 
-function setStockRequestStatus_(token, id, status) {
-  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
-  status = String(status).toLowerCase();
-  if (STOCK_STATUS.indexOf(status) < 0) return err('狀態不正確');
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+/**
+ * 改一行申請嘅狀態 + 調整庫存（**唔寄電郵**，由呼叫者決定寄一封定係唔寄）。
+ * 單件同批次批核共用同一段邏輯，庫存永遠只加減一次。
+ */
+function applyStockStatusRow_(ss, req, status, reviewer) {
   var sh = ss.getSheetByName(SHEET.STOCK_REQ);
-  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
-  if (idx < 0) return err('找不到該申請');
-
-  var req = readSheet_(SHEET.STOCK_REQ).filter(function (r) { return String(r.id).trim() === String(id).trim(); })[0];
-  if (!req) return err('找不到該申請');
+  var idx = rowIndexByCol_(sh, 'id', String(req.id).trim());
+  if (idx < 0) return { ok: false, error: '找不到該申請' };
   var prev = String(req.status || '').toLowerCase();
 
   // ★ 只喺「佔用狀態」轉變時調整庫存，避免重複加減
@@ -1416,9 +1513,62 @@ function setStockRequestStatus_(token, id, status) {
   }
 
   setCellByHeader_(sh, idx, 'status', status);
-  setCellByHeader_(sh, idx, 'reviewer', t.email);
+  setCellByHeader_(sh, idx, 'reviewer', reviewer);
   setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
-  updateRecordStatus_(id, status);
+  updateRecordStatus_(req.id, status);
+  return { ok: true };
+}
+
+/**
+ * 一次過批核／拒絕整張多款物資申請（同一個 batchRef）。
+ * 逐行行返單件嗰套庫存邏輯，但**只寄一封**列晒全部物資嘅通知。
+ */
+function setStockBatchStatus_(token, batchRef, status) {
+  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
+  status = String(status).toLowerCase();
+  if (STOCK_STATUS.indexOf(status) < 0) return err('狀態不正確');
+  batchRef = String(batchRef || '').trim();
+  if (!batchRef) return err('缺少批次編號');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var rows = readSheet_(SHEET.STOCK_REQ).filter(function (r) { return String(r.batchRef || '').trim() === batchRef; });
+  if (!rows.length) return err('找不到該批次');
+
+  var done = 0, failed = [], names = [], email = '', who = '';
+  rows.forEach(function (req) {
+    var res = applyStockStatusRow_(ss, req, status, t.email);
+    if (res.ok) {
+      done++;
+      names.push((req.itemName || req.itemId) + ' x' + (req.qty || 0));
+      email = email || String(req.email || '');
+      who = who || String(req.name || '');
+    } else failed.push(req.refCode || req.id);
+  });
+
+  if (email && done) {
+    try {
+      var label = { approved: '✅ 借物資申請已批核', rejected: '❌ 借物資申請未獲批准', returned: '📥 借物資已登記歸還' }[status] || '';
+      if (label) {
+        MailApp.sendEmail(email, label + '（批次 ' + batchRef + '）',
+          (who ? who + '，你' : '你') + '嘅借物資申請（批次 ' + batchRef + '）共 ' + done + ' 款物資：\n'
+          + names.join('\n') + '\n\n狀態：' + label);
+      }
+    } catch (e) {}
+  }
+  return ok({ saved: true, batchRef: batchRef, count: done, failed: failed });
+}
+
+function setStockRequestStatus_(token, id, status) {
+  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
+  status = String(status).toLowerCase();
+  if (STOCK_STATUS.indexOf(status) < 0) return err('狀態不正確');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var req = readSheet_(SHEET.STOCK_REQ).filter(function (r) { return String(r.id).trim() === String(id).trim(); })[0];
+  if (!req) return err('找不到該申請');
+
+  var applied = applyStockStatusRow_(ss, req, status, t.email);
+  if (!applied.ok) return err(applied.error);
 
   if (req.email) {
     try {
@@ -3310,7 +3460,7 @@ function blueprint_() {
       ['itemId', 'districtCode', 'category', 'name', 'totalQty', 'availableQty', 'unit', 'note', 'location', 'active'],
     ] },
     { name: SHEET.STOCK_REQ, rows: [
-      ['id', 'districtCode', 'refCode', 'submittedAt', 'itemId', 'itemName', 'category', 'qty',
+      ['id', 'districtCode', 'refCode', 'batchRef', 'submittedAt', 'itemId', 'itemName', 'category', 'qty',
         'purpose', 'borrowDate', 'returnDate', 'name', 'phone', 'email', 'troop', 'position',
         'agreeRules', 'status', 'reviewer', 'reviewedAt', 'createdAt'],
     ] },

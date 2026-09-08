@@ -1,5 +1,11 @@
-# 下一手 Agent 交接備忘（v4.6.0）
+# 下一手 Agent 交接備忘（v4.6.1）
 
+> 2026-09-08（第五輪）v4.6.1：用戶定案 **`gs/Code.gs` 係兩邊唯一後台**（member-portal 由另一個 agent 負責，只讀＋提交，唔會養第二份 GS；首頁通告圖書館係外接系統，同 Sheet／GS 無關）。
+> 對數發現唯一缺口 `submitStockBatchRequest`（member-portal proxy 一直有叫，之前 fallback 逐件 POST）→ 已補：全部夠貨先寫、同款合併數量、共用 `batchRef`、只寄一封通知；
+> `StockRequests` 加 `batchRef` 欄；新 `setStockBatchStatus`（batch 批核，庫存逐行加減、只寄一封）；重構出 `resolveStockLines_` / `writeStockRow_` / `applyStockStatusRow_`（單件同批次共用，庫存永遠只加減一次）。
+> `/stock-regs` 前端按 `batchRef` 分組顯示「🧾 一張申請 · N 款」＋整批掣。測試 `node scripts/test-news-gs.js` 由 19 → **32 項**。
+> ⚠️ 加新 action 之後記得同步：`docs/member-gs-handshake.md`（合約）＋ health check `version`（而家 4.6.1）＋ README／updates 頁。
+>
 > 2026-09-08（第四輪）v4.6.0：**消息發佈 News**——管理系統 `/news` 發 → 成員系統 member-portal 首頁置頂顯示（方案 2「一直置頂」，pull on open，冇推送）。
 > 後台 `gs/Code.gs` 4.6.0：新 `News` 表（`title/body/date/pinned/level/link/linkLabel/notify/active/expiresAt/publishedAt/publishedBy/updatedAt`）、
 > 公開 `listAnnouncements`（參數 `pinnedOnly`／`limit`≤50／`since`；已下架、`expiresAt` 過期、`date` 喺將來嘅一律唔回；公開版剝走 `active`／`publishedBy`）、

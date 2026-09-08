@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
@@ -8,6 +8,21 @@ import type { UserSession, StockItem, StockRequest } from '@/lib/types';
 import BackLink, { BackBar } from '@/components/BackLink';
 
 const STATUS: Record<string, string> = { pending: '待批', approved: '已批', rejected: '已拒絕', returned: '已歸還', cancelled: '已取消' };
+
+/** 一次過借多款物資：後台用同一個 batchRef 寫多行，呢度合返一組顯示，可一次過批 */
+type Group = { key: string; batchRef: string; rows: StockRequest[] };
+function groupByBatch(reqs: StockRequest[]): Group[] {
+  const out: Group[] = [];
+  const index = new Map<string, number>();
+  reqs.forEach(r => {
+    const batchRef = String(r.batchRef || '').trim();
+    if (!batchRef) { out.push({ key: r.id, batchRef: '', rows: [r] }); return; }
+    const at = index.get(batchRef);
+    if (at === undefined) { index.set(batchRef, out.length); out.push({ key: batchRef, batchRef, rows: [r] }); }
+    else out[at].rows.push(r);
+  });
+  return out;
+}
 
 export default function StockRegsPage() {
   const router = useRouter();
@@ -38,6 +53,15 @@ export default function StockRegsPage() {
     if (res.ok) { setMsg(`已標為「${STATUS[status]}」✓`); await load(session); }
     else setError(res.error || '更新失敗');
   }
+  /** 整張申請（多款物資）一次過批：庫存逐款加減，申請人只收一封通知 */
+  async function setBatchStatus(g: Group, status: string) {
+    if (!session) return;
+    setBusy(true); setError(''); setMsg('');
+    const res = await api.setStockBatchStatus(session.token, g.batchRef, status);
+    setBusy(false);
+    if (res.ok) { setMsg(`整批 ${g.rows.length} 款已標為「${STATUS[status]}」✓`); await load(session); }
+    else setError(res.error || '更新失敗');
+  }
   async function saveItem() {
     if (!session) return;
     setError(''); setMsg('');
@@ -52,13 +76,18 @@ export default function StockRegsPage() {
     if (r.ok) { setMsg('物資已刪除 ✓'); await load(session); } else setError(r.error || '刪除失敗');
   }
 
+  const groups = useMemo(() => groupByBatch(reqs), [reqs]);
+
   if (!session) return <div className="center"><div className="spinner" /></div>;
 
   return (
     <>
       <BackLink />
       <h1 className="page-title">📦 物資借用審批</h1>
-      <p className="page-sub">member-portal 填表寫入 StockRequests；呢邊批核。批准先扣庫存，拒絕／取消／歸還自動回補。</p>
+      <p className="page-sub">
+        member-portal 填表寫入 StockRequests；呢邊批核。批准先扣庫存，拒絕／取消／歸還自動回補。
+        成員一次過揀幾款物資會合成「一張申請」，可以一次過批（申請人只收一封通知）。
+      </p>
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}
 
@@ -66,7 +95,25 @@ export default function StockRegsPage() {
         <div className="section-head"><div><h3>申請審批 <small>({reqs.length})</small></h3></div></div>
         {loading ? <div className="small-loading">載入中…</div> : reqs.length === 0 ? (
           <p className="empty">暫無申請。</p>
-        ) : reqs.map(r => (
+        ) : groups.map(g => (
+          <div key={g.key} className={g.batchRef ? 'stock-batch' : undefined}>
+            {g.batchRef && (
+              <div className="stock-batch-head">
+                <div>
+                  <b>🧾 一張申請 · {g.rows.length} 款物資</b>
+                  <span className="rcode">批次 {g.batchRef}</span>
+                  <span>{g.rows[0].name}{g.rows[0].phone ? ` · ${g.rows[0].phone}` : ''}{g.rows[0].troop ? ` · ${g.rows[0].troop}` : ''}</span>
+                </div>
+                <div className="user-actions">
+                  <button className="mini-btn" disabled={busy} onClick={() => setBatchStatus(g, 'approved')}>✅ 一次過批准</button>
+                  {g.rows.some(r => r.status === 'approved') && (
+                    <button className="mini-btn" disabled={busy} onClick={() => setBatchStatus(g, 'returned')}>📥 整批歸還</button>
+                  )}
+                  <button className="mini-btn danger" disabled={busy} onClick={() => setBatchStatus(g, 'rejected')}>✕ 整批拒絕</button>
+                </div>
+              </div>
+            )}
+            {g.rows.map(r => (
           <article key={r.id} className="user-row" style={{ flexWrap: 'wrap' }}>
             <div className="user-identity">
               <b>{r.itemName || r.itemId} × {r.qty}</b>
@@ -87,6 +134,8 @@ export default function StockRegsPage() {
             </div>
             {r.reviewedAt && <span style={{ fontSize: 11, color: '#888' }}>審批：{r.reviewer} @ {r.reviewedAt}</span>}
           </article>
+            ))}
+          </div>
         ))}
       </section>
 

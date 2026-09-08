@@ -5,6 +5,15 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.6.1 — 一次過借多款物資（一張申請一次批）</h3>
+        <ul>
+          <li>📦 成員系統一張表揀幾款物資，而家後台原生收（<code>submitStockBatchRequest</code>）：<b>全部夠貨先寫入</b>，任何一款唔夠貨就成批唔寫，唔會出現「寫咗一半」；同一款揀兩次自動合併數量</li>
+          <li>🧾 <b>物資借用審批</b>頁面：同一張申請嘅幾款物資合成一組顯示，可以「✅ 一次過批准」「📥 整批歸還」「✕ 整批拒絕」——庫存逐款加減，申請人只收一封通知（唔會收 N 封）</li>
+          <li>📨 區職員都只會收到一封「新借物資申請（N 款）」通知</li>
+          <li>後台 4.6.1：<code>StockRequests</code> 加 <code>batchRef</code> 欄（<code>setupSheets()</code> 自動補，唔清空）、新增 <code>setStockBatchStatus</code>；單件申請一切照舊</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.6.0 — 消息發佈（成員系統首頁置頂）</h3>
         <ul>
           <li>📢 新卡片 <b>消息發佈</b>（/news）：寫標題＋內容就發到<b>成員系統 member-portal 首頁頂部置頂顯示</b>；呢邊一刪／一下架，嗰邊下次載入即刻消失（純拉取顯示，冇推送）</li>

@@ -196,6 +196,8 @@ export interface StockItem {
 export interface StockRequest {
   id: string;
   refCode?: string;
+  /** 一次過借多款物資時共用嘅批次編號（v4.6.1）；單件申請為空 */
+  batchRef?: string;
   submittedAt?: string;
   itemId?: string;
   itemName?: string;

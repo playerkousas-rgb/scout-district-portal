@@ -183,6 +183,10 @@ export const api = {
   getStockRequests: (token: string): Promise<ApiResult<StockRequest[]>> => callGet('getStockRequests', { token }),
   setStockRequestStatus: (token: string, id: string, status: string): Promise<ApiResult<{ saved: boolean }>> =>
     callPost('setStockRequestStatus', { token, id, status }),
+  /** 一次過批核整張多款物資申請（同一 batchRef）；庫存逐行加減，只寄一封通知 */
+  setStockBatchStatus: (token: string, batchRef: string, status: string):
+    Promise<ApiResult<{ saved: boolean; batchRef: string; count: number; failed: string[] }>> =>
+    callPost('setStockBatchStatus', { token, batchRef, status }),
   saveItem: (token: string, item: StockItem): Promise<ApiResult<{ saved: boolean }>> =>
     callPost('saveItem', { token, item }),
   deleteItem: (token: string, itemId: string): Promise<ApiResult<{ deleted: boolean }>> =>

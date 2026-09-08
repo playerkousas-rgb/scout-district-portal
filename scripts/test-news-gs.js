@@ -1,6 +1,7 @@
 /**
- * gs/Code.gs 消息發佈（News）邏輯測試 — 用 node 直接跑，唔使開 Apps Script。
+ * gs/Code.gs 邏輯測試 — 用 node 直接跑，唔使開 Apps Script。
  *   node scripts/test-news-gs.js
+ * 涵蓋：📢 消息發佈（News）＋ 📦 一次過借多款物資（submitStockBatchRequest / setStockBatchStatus）。
  * 做法：喺 vm 入面 stub 幾個 Apps Script 全域物件（SpreadsheetApp / Utilities / Session），
  * 用記憶體 2D 陣列扮 Sheet，然後直接叫 listAnnouncements_ / saveAnnouncement_ 等函數。
  */
@@ -22,6 +23,7 @@ function makeSheet(name, rows) {
     getRange(row, col, numRows = 1, numCols = 1) {
       return {
         getValues: () => data.slice(row - 1, row - 1 + numRows).map(r => r.slice(col - 1, col - 1 + numCols)),
+        getValue: () => (data[row - 1] || [])[col - 1],
         setValue: (v) => { data[row - 1][col - 1] = v; },
         setValues: (vals) => { vals.forEach((r, i) => r.forEach((v, j) => { data[row - 1 + i][col - 1 + j] = v; })); },
         setFontWeight: () => ({ setBackground: () => {} }),
@@ -44,6 +46,21 @@ const sheets = {
   Roles: makeSheet('Roles', [['role', 'label', 'protected', 'level'], ['DC', '區總監', 'TRUE', 1], ['STAFF', '區職員', 'TRUE', 4], ['AL', '助理區領袖', 'TRUE', 5]]),
   News: makeSheet('News', [['id', 'districtCode', 'title', 'body', 'date', 'pinned', 'level', 'link', 'linkLabel',
     'notify', 'active', 'expiresAt', 'publishedAt', 'publishedBy', 'updatedAt', 'createdAt']]),
+  System: makeSheet('System', [['key', 'value'], ['locked', 'FALSE'], ['lockMessage', '維護中']]),
+  Items: makeSheet('Items', [
+    ['itemId', 'districtCode', 'category', 'name', 'totalQty', 'availableQty', 'unit', 'note', 'location', 'active'],
+    ['LAMP', 'SKW', '照明', '營燈', 20, 20, '支', '', '', 'TRUE'],
+    ['ROPE', 'SKW', '繩索', '大繩', 10, 10, '條', '', '', 'TRUE'],
+    ['TENT', 'SKW', '營具', '營幕', 4, 1, '個', '', '', 'TRUE'],
+  ]),
+  StockRequests: makeSheet('StockRequests', [
+    ['id', 'districtCode', 'refCode', 'batchRef', 'submittedAt', 'itemId', 'itemName', 'category', 'qty',
+      'purpose', 'borrowDate', 'returnDate', 'name', 'phone', 'email', 'troop', 'position',
+      'agreeRules', 'status', 'reviewer', 'reviewedAt', 'createdAt'],
+  ]),
+  AllRecords: makeSheet('AllRecords', [
+    ['id', 'districtCode', 'type', 'refCode', 'title', 'requester', 'phone', 'troop', 'status', 'detail', 'createdAt'],
+  ]),
 };
 
 const ctx = {
@@ -216,9 +233,114 @@ check('doGet 公開路由 listAnnouncements 通', () => {
   assert.ok(parsed.data.length >= 0);
 });
 
-check('健康檢查版本 4.6.0', () => {
+check('健康檢查版本 4.6.1', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.6.0');
+  assert.strictEqual(parsed.data.version, '4.6.1');
+});
+
+// ───────────────────────────────────────────────────────────
+console.log('\n一次過借多款物資（submitStockBatchRequest）測試');
+
+const applicant = { name: '陳小明', phone: '91234567', email: 'ming@example.com', troop: '第 1 旅',
+  borrowDate: day(3), returnDate: day(5), purpose: '旅團露營', agreeRules: true };
+const avail = (id) => {
+  const rows = ctx.readSheet_('Items');
+  return Number(rows.filter(r => r.itemId === id)[0].availableQty);
+};
+
+let batchRef;
+check('一次過交 3 款物資 = 3 行，共用同一個 batchRef', () => {
+  const r = ctx.submitStockBatchRequest_({ ...applicant, items: [{ itemId: 'LAMP', qty: 4 }, { itemId: 'ROPE', qty: 2 }] });
+  assert.ok(r.ok, JSON.stringify(r));
+  batchRef = r.data.batchRef;
+  assert.ok(/^SB-/.test(batchRef), batchRef);
+  assert.strictEqual(r.data.submittedCount, 2);
+  assert.strictEqual(r.refCodes.length, 2);          // member-portal proxy 直接讀 refCode / refCodes
+  assert.strictEqual(r.refCode, batchRef);
+  const rows = ctx.readSheet_('StockRequests').filter(x => x.batchRef === batchRef);
+  assert.strictEqual(rows.length, 2);
+  assert.ok(rows.every(x => x.status === 'pending'));
+});
+
+check('提交唔會即扣庫存（批准先扣）', () => {
+  assert.strictEqual(avail('LAMP'), 20);
+});
+
+check('同一款物資揀兩次會自動合併數量', () => {
+  const r = ctx.submitStockBatchRequest_({ ...applicant, items: [{ itemId: 'LAMP', qty: 2 }, { itemId: 'LAMP', qty: 3 }] });
+  assert.ok(r.ok);
+  const rows = ctx.readSheet_('StockRequests').filter(x => x.batchRef === r.data.batchRef);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(Number(rows[0].qty), 5);
+});
+
+check('任何一款唔夠貨 → 成批唔寫（唔會寫一半）', () => {
+  const before = ctx.readSheet_('StockRequests').length;
+  const r = ctx.submitStockBatchRequest_({ ...applicant, items: [{ itemId: 'ROPE', qty: 1 }, { itemId: 'TENT', qty: 99 }] });
+  assert.strictEqual(r.ok, false);
+  assert.ok(/營幕/.test(r.error), r.error);
+  assert.strictEqual(ctx.readSheet_('StockRequests').length, before);
+});
+
+check('物資唔存在 → 整批唔寫', () => {
+  const before = ctx.readSheet_('StockRequests').length;
+  const r = ctx.submitStockBatchRequest_({ ...applicant, items: [{ itemId: 'NOPE', qty: 1 }] });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(ctx.readSheet_('StockRequests').length, before);
+});
+
+check('成員系統自訂 batchRef 會沿用；亂碼會被丟棄', () => {
+  const good = ctx.submitStockBatchRequest_({ ...applicant, batchRef: 'SB-20260908-ABC123', items: [{ itemId: 'ROPE', qty: 1 }] });
+  assert.strictEqual(good.data.batchRef, 'SB-20260908-ABC123');
+  const bad = ctx.submitStockBatchRequest_({ ...applicant, batchRef: 'x'.repeat(80), items: [{ itemId: 'ROPE', qty: 1 }] });
+  assert.ok(/^SB-/.test(bad.data.batchRef));
+});
+
+check('一次過批准整批：逐行扣庫存、狀態全部 approved', () => {
+  const r = ctx.setStockBatchStatus_(dcToken, batchRef, 'approved');
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.count, 2);
+  const rows = ctx.readSheet_('StockRequests').filter(x => x.batchRef === batchRef);
+  assert.ok(rows.every(x => x.status === 'approved'));
+  assert.strictEqual(avail('LAMP'), 16);   // 20 - 4
+  assert.strictEqual(avail('ROPE'), 8);    // 10 - 2（另外兩批仲係 pending）
+});
+
+check('重複批准唔會重複扣庫存', () => {
+  ctx.setStockBatchStatus_(dcToken, batchRef, 'approved');
+  assert.strictEqual(avail('LAMP'), 16);
+});
+
+check('整批歸還會回補庫存', () => {
+  assert.ok(ctx.setStockBatchStatus_(dcToken, batchRef, 'returned').ok);
+  assert.strictEqual(avail('LAMP'), 20);
+  assert.strictEqual(avail('ROPE'), 10);
+});
+
+check('搵唔到批次／狀態唔啱會報錯', () => {
+  assert.strictEqual(ctx.setStockBatchStatus_(dcToken, 'SB-XXXX', 'approved').ok, false);
+  assert.strictEqual(ctx.setStockBatchStatus_(dcToken, batchRef, 'whatever').ok, false);
+});
+
+check('冇 canStock 權限唔可以批核', () => {
+  assert.strictEqual(ctx.setStockBatchStatus_(alToken, batchRef, 'approved').ok, false);
+});
+
+check('單件 submitStockRequest 照舊work（冇 batchRef）', () => {
+  const r = ctx.submitStockRequest_({ ...applicant, itemId: 'ROPE', qty: 1 });
+  assert.ok(r.ok, JSON.stringify(r));
+  const row = ctx.readSheet_('StockRequests').filter(x => x.refCode === r.refCode)[0];
+  assert.strictEqual(String(row.batchRef || ''), '');
+  assert.ok(ctx.setStockRequestStatus_(dcToken, row.id, 'approved').ok);
+  assert.strictEqual(avail('ROPE'), 9);
+});
+
+check('doPost 路由 submitStockBatchRequest 通', () => {
+  const out = JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({
+    action: 'submitStockBatchRequest', ...applicant, items: [{ itemId: 'LAMP', qty: 1 }],
+  }) } }));
+  assert.strictEqual(out.ok, true);
+  assert.ok(out.refCode);
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);
