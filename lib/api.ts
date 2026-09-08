@@ -8,7 +8,7 @@ import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
   CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
-  Announcement,
+  Announcement, AwardsBoard, AwardMember, AwardType,
 } from './types';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers';
 import type { IcsEvent } from './ics';
@@ -214,6 +214,22 @@ export const api = {
   /** 新增（id 留空）或更新消息 */
   saveAnnouncement: (token: string, announcement: Partial<Announcement>): Promise<ApiResult<{ saved: boolean; id: string; created: boolean }>> =>
     callPost('saveAnnouncement', { token, announcement }),
+  // ── 🎖 獎勵提名（v4.7.0）──────────────────────────────
+  /** 一次過攞名冊 + 年期規則 */
+  getAwardsBoard: (token: string): Promise<ApiResult<AwardsBoard>> =>
+    callGet('getAwardsBoard', { token }),
+  /** 新增（id 留空）或更新一位成員 */
+  saveAwardMember: (token: string, member: Partial<AwardMember>): Promise<ApiResult<{ saved: boolean; id: string; created: boolean }>> =>
+    callPost('saveAwardMember', { token, member }),
+  deleteAwardMember: (token: string, id: string): Promise<ApiResult<{ deleted: boolean; id: string }>> =>
+    callPost('deleteAwardMember', { token, id }),
+  /** 由 Excel 貼上批量匯入；mode: merge（同名同旅團更新）／replace（清空重寫） */
+  importAwardMembers: (token: string, rows: Partial<AwardMember>[], mode: 'merge' | 'replace'): Promise<ApiResult<{ added: number; updated: number; skipped: number }>> =>
+    callPost('importAwardMembers', { token, rows, mode }),
+  /** 儲存獎項及年期設定（整張表覆寫） */
+  saveAwardTypes: (token: string, types: AwardType[]): Promise<ApiResult<{ saved: boolean; count: number; newColumns: string[] }>> =>
+    callPost('saveAwardTypes', { token, types }),
+
   deleteAnnouncement: (token: string, id: string): Promise<ApiResult<{ deleted: boolean; id: string }>> =>
     callPost('deleteAnnouncement', { token, id }),
   setAnnouncementPinned: (token: string, id: string, pinned: boolean): Promise<ApiResult<{ saved: boolean; id: string; pinned: boolean }>> =>

@@ -335,6 +335,47 @@ export interface Announcement {
   live?: boolean;
 }
 
+/**
+ * 🎖 獎勵提名（v4.7.0）— Awards / AwardTypes 表。
+ * 一人一行，每個獎項存獲獎年份（字串，可以係 "2015"、"2015?" 未確定、"無"）。
+ * 年期規則（邊個獎跟邊個、要相隔幾多年、屬邊個提名期）全部喺 AwardTypes 表，可喺 /awards 改。
+ */
+export type AwardRound = 'founder' | 'rally' | 'other';
+export type AwardMemberStatus = 'active' | 'noAppointment' | 'notInDistrict' | 'applying' | 'left';
+
+export interface AwardType {
+  code: string;            // 代號（同時係 Awards 表嘅欄名），例如 GSA
+  label: string;           // 全名，例如 優良服務獎章
+  short?: string;          // 表格用短名，例如 LSM*
+  category?: string;       // 功績榮譽／長期服務／嘉許／外部嘉許／其他
+  prevCode?: string;       // 上一級代號（空 = 入門級，冇得自動推算）
+  minYears?: number | null;// 距上一級最少年數（空 = 唔設限）
+  round: AwardRound;       // founder 創辦人紀念日／rally 大會操（童軍獎勵）／other 自行申請
+  note?: string;
+  enabled?: boolean;
+  orderNo?: number;
+}
+
+export interface AwardMember {
+  id: string;
+  districtCode?: string;
+  name: string;
+  nameEn?: string;
+  troop?: string;          // 旅團編號
+  position?: string;       // 職位（GSL / ASL / LAY …）
+  status?: AwardMemberStatus;
+  note?: string;
+  awards: Record<string, string>;  // { GSA: '2015', LSM: '2020?' }
+  updatedAt?: string;
+}
+
+export interface AwardsBoard {
+  types: AwardType[];
+  members: AwardMember[];
+  counts: Record<string, number>;
+  total: number;
+}
+
 export interface ActivityNotice {
   id: string;
   refCode?: string;

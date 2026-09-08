@@ -51,7 +51,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.6.2"` 即通。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.7.0"` 即通。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -64,7 +64,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.6.2"` 即代表用緊最新後台。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.7.0"` 即代表用緊最新後台。
 
 ---
 
@@ -82,6 +82,23 @@
 - 要令舊後台出現呢張新卡片：貼新 `gs/Code.gs` → 執行 `setupSheets()`（自動補建缺失卡片＋權限，唔會洗資料）。
 
 ---
+
+## 🎖 獎勵提名（v4.7.0）
+
+`/awards` 一站式：**名冊 + 自動計「今年邊個夠期可以提名下一級」+ 年期自己改**。
+
+| 分頁 | 做咩 |
+|---|---|
+| 🏅 提名建議 | 揀頒獎年份 → 自動分「創辦人紀念日獎勵」「童軍獎勵（大會操）」「自行申請」三組，列出夠期人選（等最耐排最前）、顯示提名截止日同倒數、一鍵匯出 CSV 名單 |
+| 📋 獎勵名冊 | 全區獎勵記錄，搜尋／按狀態／按已有獎項篩選；新增、編輯、刪除；匯出 CSV |
+| ⚙️ 年期設定 | 每個獎項嘅**上一級**同**相隔年數**、分類、提名期、啟用與否，全部喺網頁改，唔使改程式；亦可以自己加新獎項（會自動喺 Sheet 補一欄） |
+| ⬆️ 匯入名單 | 由 Excel 直接複製貼上（支援 `GSA1985`／`LSM*2005`／`CCM2025?` 或「表頭 + 淨係年份」兩種寫法），可合併更新或清空重寫 |
+
+- **點計夠期**：未有嗰個獎 + 已有上一級 + （上一級年份 ＋ 設定年期）≤ 頒獎年份。入門級（優良服務獎章、感謝狀）冇上一級，唔會自動推算。
+- **內建 18 個獎項**：GSA 優良服務獎章、DSA 優異服務獎章、DSM 功績榮譽獎章、DSC 功績榮譽十字章、銅／銀／金獅勳章、LSM 長期服務獎章及一至四星、香港總監嘉許／高級嘉許、民政及青年事務局局長嘉許、五年／十年長期服務獎狀、感謝狀。預設年期係參考區會歷年紀錄推算，**唔啱就自己喺「年期設定」改**。
+- **提名截止**（總會 ACR 20/2024）：創辦人紀念日獎勵 區部 10/31 → 總會 11/30（頒獎年前一年）；童軍獎勵 區部 4/30 → 總會 5/31（同年）。
+- 後台 4.7.0：新增 `Awards`（一人一行、每個獎一欄）同 `AwardTypes`（年期規則）兩張表 + `getAwardsBoard`／`saveAwardMember`／`deleteAwardMember`／`importAwardMembers`／`saveAwardTypes`；權限用卡片 `awards` = ✏️。
+- 測試：`node scripts/test-awards-gs.js`（17 項後台）、`node --experimental-strip-types scripts/test-awards-logic.ts`（15 項推算／匯入解析）。
 
 ## 📦 一次過借多款物資（v4.6.1）
 
@@ -193,5 +210,8 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 | `lib/district.ts` | 區目錄（區碼 → apiBase 對照） |
 | `app/venue-regs/` | 場地借用審批頁 |
 | `app/news/` | 消息發佈（發去成員系統首頁置頂） |
+| `app/awards/` | 獎勵提名（名冊 · 夠期推算 · 年期設定 · Excel 匯入） |
 | `scripts/test-news-gs.js` | 後台邏輯測試：消息發佈 + 批次借物資（node 直接跑，35 項） |
+| `scripts/test-awards-gs.js` | 獎勵提名後台測試（17 項） |
+| `scripts/test-awards-logic.ts` | 獎勵夠期推算／Excel 匯入解析測試（15 項，`node --experimental-strip-types`） |
 | `scripts/check-member-alignment.js` | 成員系統 ↔ 後台對齊檢查（action 缺漏 / proxy 白名單 / 安全邊界） |

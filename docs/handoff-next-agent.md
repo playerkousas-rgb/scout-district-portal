@@ -1,5 +1,17 @@
-# 下一手 Agent 交接備忘（v4.6.2）
+# 下一手 Agent 交接備忘（v4.7.0）
 
+> 2026-09-08（第七輪）v4.7.0：**🎖 獎勵提名**（用戶指定「一站式，全部喺 app 入面睇同改」）。
+> 後台加 `Awards`（一人一行，每個獎一欄＝獲獎年份，值可以係 `2015` / `2015?` / `無`）同 `AwardTypes`（年期規則）兩張表，
+> action：`getAwardsBoard`（一 call 攞晒名冊＋規則）／`saveAwardMember`／`deleteAwardMember`／`importAwardMembers`（merge／replace）／`saveAwardTypes`；
+> 權限卡片 `awards` = edit。**加新獎項會由 `ensureAwardColumns_` 自動喺 Awards 表補欄**，唔會清舊資料。
+> 前端 `app/awards/page.tsx` 四個分頁（提名建議／名冊／年期設定／匯入），推算邏輯全部喺純函數 `lib/awards.ts`（好測）。
+> ⚠️ 年期預設值（GSA→DSA 5 年、DSA→DSM 7、DSM→DSC 7、DSC→銅獅 5、LSM 每 10 年一星）**係參考用戶歷年 Excel 推算出嚟，唔係官方公佈**；
+> 用戶自己喺「年期設定」改得，所以千祈唔好 hardcode 返落程式。
+> 提名截止（總會 ACR 20/2024）：創辦人紀念日 區部 10/31 → 總會 11/30（頒獎年前一年）；童軍獎勵（大會操）區部 4/30 → 總會 5/31（同年）。
+> 縮寫對照：CCM 香港總監嘉許（黃笛繩）／CCH 香港總監高級嘉許／HAB 民政及青年事務局局長嘉許（前稱民政事務局）／THANKS 感謝狀（DA2）／FIVE・TEN 五年十年長期服務獎狀（會務委員）。
+> 🔒 **用戶份真實獎勵 Excel（100+ 真名）冇 commit 落 repo，亦唔應該 commit**；要試就用 `/tmp/mockgs/server.js` 入面嘅假名 seed。
+> 順手補咗 `app/visit/page.tsx`（之前主控台「旅團探訪」卡撳落去 404）。測試：`node scripts/test-awards-gs.js`（17）＋ `node --experimental-strip-types scripts/test-awards-logic.ts`（15）。
+>
 > 2026-09-08（第六輪）v4.6.2：**欄位對齊成員系統**。member-portal 上咗自己嗰版消息功能（`bb44fe6`：`AnnouncementBanner` + Web Push），
 > 佢個 proxy `publicAnnouncement()` 白名單讀 `{ id, title, content, date, pinned, level }` 而且 `level` 只認 `info|warning|important`
 > —— 我哋以前回 `body` + `warn/urgent`，結果**內容空白兼全部藍色，兩邊都唔會報錯**。修正：`newsPublic_` 多回 `content`（＝`body`）、

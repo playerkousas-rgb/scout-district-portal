@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.6.2
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.7.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -93,6 +93,16 @@
  *      （舊資料 warn → warning、urgent → important 自動對應，Sheet 唔使改）。
  * 佢個 proxy 唔會轉發 link / linkLabel / notify / districtCode，呢啲欄位只有管理系統用。
  *
+ * ── 獎勵提名 Awards（v4.7.0）───────────────────────────────
+ * 管理系統 /awards：區會獎勵名冊（一人一行）＋「今年夠期可提名」自動推算。
+ *   Awards 表      一人一行；每個獎項一欄，格入面填獲獎年份（可加「?」表示未確定）
+ *   AwardTypes 表  獎項清單同年期規則（label／上一級 prevCode／最少相隔 minYears／
+ *                  提名期 round：founder 創辦人紀念日、rally 大會操（童軍獎勵）、other 自行申請）
+ *                  ★ 全部可以喺 /awards「年期設定」頁面改，唔使改程式、唔使重新部署
+ * 加新獎項 → 自動喺 Awards 表補一欄（唔會清走舊資料）。
+ * 提名期（總會 ACR 20/2024）：創辦人紀念日 區部 10/31 → 總會 11/30；
+ *                              童軍獎勵（大會操）區部 4/30 → 總會 5/31。
+ *
  * ── 部署 ──────────────────────────────────────────────────
  * 擴充功能 → Apps Script → 貼上本檔 → 執行 setupSheets()
  * → 部署為網頁應用程式（執行身分：我自己；存取：任何人）
@@ -113,6 +123,8 @@ var SHEET = {
   ITEMS: 'Items', STOCK_REQ: 'StockRequests',
   ACTIVITY_REQ: 'ActivityNotices',
   NEWS: 'News',                  // 消息發佈（管理系統發 → 成員系統首頁置頂顯示）
+  AWARDS: 'Awards',              // 獎勵提名名冊（一人一行，每個獎一欄＝獲獎年份）
+  AWARD_TYPES: 'AwardTypes',     // 獎項及年期設定（可喺管理系統改，唔使改程式）
   INCIDENT_REQ: 'IncidentReports', // 意外報告（HKSA ACC-RPT 2019/07 欄位）
   COURSE_LINKS: 'CourseLinks',   // 訓練班目錄（單一資料來源）
   COURSES: 'Courses',            // 舊版內建課程（保留相容）
@@ -253,7 +265,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.6.2',
+      version: '4.7.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -298,6 +310,7 @@ function doGet(e) {
       case 'getStockRequests':    return json(getStockRequests_(p.token));
       case 'getPendingInbox':     return json(getPendingInbox_(p.token));
       case 'getActivityNotices':  return json(getActivityNotices_(p.token));
+      case 'getAwardsBoard':      return json(getAwardsBoard_(p.token));
       case 'getAnnouncements':    return json(getAnnouncements_(p.token));
       case 'getAllRecords':       return json(getAllRecords_(p.token));
       case 'listIncidentReports': return json(listIncidentReports_(p.token));
@@ -367,6 +380,10 @@ function doPost(e) {
       case 'deleteActivityNotice': return json(deleteActivityNotice_(b.token, b.id));
 
       // ---------- 消息發佈（管理系統發，成員系統首頁顯示） ----------
+      case 'saveAwardMember':     return json(saveAwardMember_(b.token, b.member || b.award));
+      case 'deleteAwardMember':   return json(deleteAwardMember_(b.token, b.id));
+      case 'importAwardMembers':  return json(importAwardMembers_(b.token, b.rows, b.mode));
+      case 'saveAwardTypes':      return json(saveAwardTypes_(b.token, b.types));
       case 'saveAnnouncement':      return json(saveAnnouncement_(b.token, b.announcement || b.news || b));
       case 'deleteAnnouncement':    return json(deleteAnnouncement_(b.token, b.id));
       case 'setAnnouncementPinned': return json(setAnnouncementPinned_(b.token, b.id, b.pinned));
@@ -1850,6 +1867,297 @@ function updateAnnouncementFlag_(token, id, field, value) {
   var out = { saved: true, id: String(id).trim() };
   out[field] = on;
   return ok(out);
+}
+
+// ===================== 獎勵提名 Awards（v4.7.0） =====================
+// 一站式：名冊（Awards 表，一人一行、每個獎一欄＝獲獎年份）
+//        + 年期規則（AwardTypes 表，可喺管理系統改）
+//        + 「今年夠期可提名」由前端按規則即時推算（後台只負責存取）。
+// 加新獎項 → ensureAwardColumns_ 自動喺 Awards 表補一欄，唔會清走舊資料。
+
+var AWARD_FIXED_COLS = ['id', 'districtCode', 'name', 'nameEn', 'troop', 'position', 'status', 'note'];
+var AWARD_TAIL_COLS = ['updatedAt', 'createdAt'];
+var AWARD_ROUNDS = ['founder', 'rally', 'other'];
+// 名冊狀態（同用戶原本 Excel 嘅顏色註腳對應）
+var AWARD_STATUSES = ['active', 'noAppointment', 'notInDistrict', 'applying', 'left'];
+
+/** 預設獎項及年期（第一次 setupSheets 會種入 AwardTypes 表；之後全部以表為準） */
+function awardTypeSeed_() {
+  return [
+    // code, label, short, category, prevCode, minYears, round, note, enabled
+    ['GSA',    '優良服務獎章',            'GSA',   '功績榮譽', '',      '',   'founder', 'Good Service Award；由區提名，經地域交總會', 'TRUE'],
+    ['DSA',    '優異服務獎章',            'DSA',   '功績榮譽', 'GSA',   5,    'founder', 'Dedicated Service Award', 'TRUE'],
+    ['DSM',    '功績榮譽獎章',            'DSM',   '功績榮譽', 'DSA',   7,    'rally',   'Distinguished Service Medal；獎勵委員會批准', 'TRUE'],
+    ['DSC',    '功績榮譽十字章',          'DSC',   '功績榮譽', 'DSM',   7,    'rally',   'Distinguished Service Cross；成年成員最高功績獎勵', 'TRUE'],
+    ['BRL',    '銅獅勳章',                '銅獅',  '獅勳章',   'DSC',   5,    'rally',   'Bronze Lion', 'TRUE'],
+    ['SVL',    '銀獅勳章',                '銀獅',  '獅勳章',   'BRL',   5,    'rally',   'Silver Lion', 'TRUE'],
+    ['GDL',    '金獅勳章',                '金獅',  '獅勳章',   'SVL',   5,    'rally',   'Gold Lion；制服成年成員最高功績獎勵', 'TRUE'],
+    ['LSM',    '長期服務獎章',            'LSM',   '長期服務', '',      15,   'other',   '服務實職滿 15 年；可自行向總會申請', 'TRUE'],
+    ['LSM1',   '長期服務一星獎章',        'LSM*',  '長期服務', 'LSM',   10,   'other',   '再服務滿 10 年（共 25 年）', 'TRUE'],
+    ['LSM2',   '長期服務二星獎章',        'LSM**', '長期服務', 'LSM1',  10,   'other',   '共 35 年', 'TRUE'],
+    ['LSM3',   '長期服務三星獎章',        'LSM***','長期服務', 'LSM2',  10,   'other',   '共 45 年', 'TRUE'],
+    ['LSM4',   '長期服務四星獎章',        'LSM****','長期服務','LSM3',  10,   'other',   '共 55 年', 'TRUE'],
+    ['CCM',    '香港總監嘉許',            '總監嘉許', '嘉許',  '',      '',   'other',   '黃色笛繩（榮譽笛子）；香港總監全權批准', 'TRUE'],
+    ['CCH',    '香港總監高級嘉許',        '高級嘉許', '嘉許',  'CCM',   5,    'other',   '黃紫綠笛繩；獲總監嘉許後有超卓表現', 'TRUE'],
+    ['HAB',    '民政及青年事務局局長嘉許', '民青局',  '外部嘉許', '',    10,   'other',   '前稱民政事務局局長嘉許計劃；制服團隊義務領袖須服務滿 10 年', 'TRUE'],
+    ['FIVE',   '五年長期服務獎狀',        '五年',  '長期服務', '',      5,    'other',   '會務委員', 'TRUE'],
+    ['TEN',    '十年長期服務獎狀',        '十年',  '長期服務', 'FIVE',  5,    'other',   '會務委員', 'TRUE'],
+    ['THANKS', '感謝狀',                  '感謝狀', '其他',   '',      '',   'founder', '表格 DA2；頒予配偶／家長／支持童軍運動人士', 'TRUE'],
+  ];
+}
+
+function awardCode_(v) {
+  var c = String(v == null ? '' : v).trim().toUpperCase().replace(/[^A-Z0-9_]/g, '');
+  return c.slice(0, 16);
+}
+function awardRound_(v) {
+  var r = String(v || '').trim().toLowerCase();
+  return AWARD_ROUNDS.indexOf(r) >= 0 ? r : 'other';
+}
+function awardStatus_(v) {
+  var t = String(v || '').trim();
+  if (!t) return 'active';
+  return AWARD_STATUSES.indexOf(t) >= 0 ? t : 'active';
+}
+/** 獎年份格：可以係 2015、"2015"、"2015?"（未確定）、"無"、日期物件 */
+function awardYearCell_(v) {
+  if (v === null || v === undefined) return '';
+  if (v instanceof Date) return String(v.getFullYear());
+  var t = String(v).trim();
+  if (!t) return '';
+  if (/^(無|冇|N\/A|NA|-)$/i.test(t)) return '無';
+  var m = t.match(/(\d{4})/);
+  if (!m) return t.slice(0, 20);
+  return m[1] + (/\?/.test(t) ? '?' : '');
+}
+
+/** AwardTypes 表 → 陣列（未有表 / 空表 → 用預設種子，唔會炸） */
+function awardTypes_() {
+  var rows = readSheet_(SHEET.AWARD_TYPES);
+  var list = rows.map(function (r, i) {
+    return {
+      code: awardCode_(r.code),
+      label: String(r.label || '').trim(),
+      short: String(r.short || '').trim(),
+      category: String(r.category || '').trim() || '其他',
+      prevCode: awardCode_(r.prevCode),
+      minYears: r.minYears === '' || r.minYears === null || r.minYears === undefined ? null : (Number(r.minYears) || 0),
+      round: awardRound_(r.round),
+      note: String(r.note || '').trim(),
+      enabled: String(r.enabled).toUpperCase() !== 'FALSE',
+      orderNo: i,
+    };
+  }).filter(function (t) { return !!t.code; });
+  if (list.length) return list;
+  return awardTypeSeed_().map(function (r, i) {
+    return {
+      code: awardCode_(r[0]), label: r[1], short: r[2], category: r[3],
+      prevCode: awardCode_(r[4]), minYears: r[5] === '' ? null : Number(r[5]),
+      round: awardRound_(r[6]), note: r[7], enabled: String(r[8]).toUpperCase() !== 'FALSE', orderNo: i,
+    };
+  });
+}
+
+/** Awards 表要有嘅欄 = 固定欄 + 每個獎項一欄 + 尾欄；缺就補（唔會清資料） */
+function ensureAwardColumns_(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.AWARDS);
+  if (!sh) return [];
+  var want = AWARD_FIXED_COLS.concat(awardTypes_().map(function (t) { return t.code; })).concat(AWARD_TAIL_COLS);
+  var have = sheetHeadersBySheet_(sh);
+  if (!have.length) {
+    sh.getRange(1, 1, 1, want.length).setValues([want]);
+    sh.getRange(1, 1, 1, want.length).setFontWeight('bold').setBackground('#fde68a');
+    sh.setFrozenRows(1);
+    return want;
+  }
+  var missing = want.filter(function (h) { return have.indexOf(h) < 0; });
+  if (missing.length) {
+    sh.getRange(1, have.length + 1, 1, missing.length).setValues([missing]);
+    sh.getRange(1, 1, 1, have.length + missing.length).setFontWeight('bold');
+  }
+  return missing;
+}
+
+/** 一行 Awards → 物件（awards 收埋做 map） */
+function awardMemberRow_(r, types) {
+  var awards = {};
+  types.forEach(function (t) {
+    var y = awardYearCell_(r[t.code]);
+    if (y) awards[t.code] = y;
+  });
+  return {
+    id: String(r.id || '').trim(),
+    districtCode: String(r.districtCode || '').trim() || districtCode_(),
+    name: String(r.name || '').trim(),
+    nameEn: String(r.nameEn || '').trim(),
+    troop: String(r.troop == null ? '' : r.troop).trim(),
+    position: String(r.position || '').trim(),
+    status: awardStatus_(r.status),
+    note: String(r.note || '').trim(),
+    awards: awards,
+    updatedAt: String(r.updatedAt || ''),
+  };
+}
+
+/** 一次過攞晒名冊＋規則（管理系統 /awards 只需呢一個 call） */
+function getAwardsBoard_(token) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss.getSheetByName(SHEET.AWARDS)) return err('尚未執行 setupSheets()（缺 Awards 表）');
+  var types = awardTypes_();
+  var members = readSheet_(SHEET.AWARDS).map(function (r) { return awardMemberRow_(r, types); })
+    .filter(function (m) { return !!m.name; });
+  var counts = {};
+  types.forEach(function (ty) {
+    counts[ty.code] = members.filter(function (m) { return m.awards[ty.code] && m.awards[ty.code] !== '無'; }).length;
+  });
+  return ok({ types: types, members: members, counts: counts, total: members.length });
+}
+
+function awardWriteFields_(sh, rowIdx, a, types) {
+  setCellByHeader_(sh, rowIdx, 'name', String(a.name || '').trim());
+  setCellByHeader_(sh, rowIdx, 'nameEn', String(a.nameEn || '').trim());
+  setCellByHeader_(sh, rowIdx, 'troop', String(a.troop == null ? '' : a.troop).trim());
+  setCellByHeader_(sh, rowIdx, 'position', String(a.position || '').trim());
+  setCellByHeader_(sh, rowIdx, 'status', awardStatus_(a.status));
+  setCellByHeader_(sh, rowIdx, 'note', String(a.note || '').trim());
+  var awards = a.awards || {};
+  types.forEach(function (ty) {
+    if (!Object.prototype.hasOwnProperty.call(awards, ty.code)) return;
+    setCellByHeader_(sh, rowIdx, ty.code, awardYearCell_(awards[ty.code]));
+  });
+  setCellByHeader_(sh, rowIdx, 'updatedAt', new Date().toISOString());
+}
+
+/** 新增／更新一位成員（awards 卡片 edit 權限）；a.id 留空 = 新增 */
+function saveAwardMember_(token, a) {
+  var t = requireCardEdit_(token, 'awards'); if (t.error) return err(t.error);
+  a = a || {};
+  var name = String(a.name || '').trim();
+  if (!name) return err('姓名必填');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.AWARDS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Awards 表）');
+  ensureAwardColumns_(ss);
+  var types = awardTypes_();
+
+  var id = String(a.id || '').trim();
+  if (id) {
+    var idx = rowIndexByCol_(sh, 'id', id);
+    if (idx < 0) return err('找不到該成員');
+    awardWriteFields_(sh, idx, a, types);
+    return ok({ saved: true, id: id, created: false });
+  }
+  id = genId_('aw');
+  var now = new Date().toISOString();
+  var row = { id: id, districtCode: districtCode_(), createdAt: now, updatedAt: now };
+  appendRowObj_(sh, row);
+  var newIdx = rowIndexByCol_(sh, 'id', id);
+  if (newIdx < 0) return err('寫入失敗');
+  awardWriteFields_(sh, newIdx, a, types);
+  return ok({ saved: true, id: id, created: true });
+}
+
+function deleteAwardMember_(token, id) {
+  var t = requireCardEdit_(token, 'awards'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.AWARDS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Awards 表）');
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該成員');
+  sh.deleteRow(idx);
+  return ok({ deleted: true, id: String(id).trim() });
+}
+
+/**
+ * 批量匯入（由 Excel／Google Sheet 複製貼上）。
+ * rows: [{ name, nameEn, troop, position, status, note, awards:{CODE:year} }]
+ * mode: 'merge'（預設，同名同旅團就更新，其餘新增）／'replace'（清空重寫）
+ */
+function importAwardMembers_(token, rows, mode) {
+  var t = requireCardEdit_(token, 'awards'); if (t.error) return err(t.error);
+  if (!rows || !rows.length) return err('冇資料可匯入');
+  if (rows.length > 2000) return err('一次最多匯入 2000 行');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.AWARDS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Awards 表）');
+  ensureAwardColumns_(ss);
+  var types = awardTypes_();
+  var replace = String(mode || 'merge') === 'replace';
+
+  if (replace && sh.getLastRow() > 1) sh.deleteRows(2, sh.getLastRow() - 1);
+
+  var existing = {};
+  if (!replace) {
+    readSheet_(SHEET.AWARDS).forEach(function (r) {
+      var key = String(r.name || '').trim() + '|' + String(r.troop == null ? '' : r.troop).trim();
+      if (String(r.name || '').trim()) existing[key] = String(r.id || '').trim();
+    });
+  }
+
+  var added = 0, updated = 0, skipped = 0;
+  var now = new Date().toISOString();
+  for (var i = 0; i < rows.length; i++) {
+    var a = rows[i] || {};
+    var name = String(a.name || '').trim();
+    if (!name) { skipped++; continue; }
+    var key = name + '|' + String(a.troop == null ? '' : a.troop).trim();
+    var id = existing[key];
+    if (id) {
+      var idx = rowIndexByCol_(sh, 'id', id);
+      if (idx < 0) { skipped++; continue; }
+      awardWriteFields_(sh, idx, a, types);
+      updated++;
+    } else {
+      var newId = genId_('aw');
+      appendRowObj_(sh, { id: newId, districtCode: districtCode_(), createdAt: now, updatedAt: now });
+      var ni = rowIndexByCol_(sh, 'id', newId);
+      if (ni < 0) { skipped++; continue; }
+      awardWriteFields_(sh, ni, a, types);
+      existing[key] = newId;
+      added++;
+    }
+  }
+  return ok({ imported: true, added: added, updated: updated, skipped: skipped, mode: replace ? 'replace' : 'merge' });
+}
+
+/** 儲存獎項及年期設定（整張表覆寫）；新增獎項會自動補 Awards 欄 */
+function saveAwardTypes_(token, types) {
+  var t = requireCardEdit_(token, 'awards'); if (t.error) return err(t.error);
+  if (!types || !types.length) return err('至少要有一個獎項');
+  if (types.length > 60) return err('獎項最多 60 個');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.AWARD_TYPES);
+  if (!sh) return err('尚未執行 setupSheets()（缺 AwardTypes 表）');
+
+  var seen = {}, out = [];
+  for (var i = 0; i < types.length; i++) {
+    var ty = types[i] || {};
+    var code = awardCode_(ty.code);
+    if (!code) return err('第 ' + (i + 1) + ' 行：代號只可以用英文字母／數字／底線');
+    if (seen[code]) return err('代號重複：' + code);
+    seen[code] = true;
+    var label = String(ty.label || '').trim();
+    if (!label) return err(code + '：獎項名稱必填');
+    var minYears = (ty.minYears === '' || ty.minYears === null || ty.minYears === undefined) ? '' : Math.max(0, Math.min(99, Number(ty.minYears) || 0));
+    out.push([code, label, String(ty.short || '').trim(), String(ty.category || '其他').trim(),
+      awardCode_(ty.prevCode), minYears, awardRound_(ty.round), String(ty.note || '').trim(),
+      (ty.enabled === false || String(ty.enabled).toUpperCase() === 'FALSE') ? 'FALSE' : 'TRUE']);
+  }
+  // 上一級唔可以指向唔存在嘅代號（否則永遠計唔到夠期）
+  for (var j = 0; j < out.length; j++) {
+    if (out[j][4] && !seen[out[j][4]]) return err(out[j][0] + '：上一級代號「' + out[j][4] + '」唔存在');
+    if (out[j][4] === out[j][0]) return err(out[j][0] + '：上一級唔可以係自己');
+  }
+
+  var header = ['code', 'label', 'short', 'category', 'prevCode', 'minYears', 'round', 'note', 'enabled'];
+  sh.clear();
+  sh.getRange(1, 1, 1, header.length).setValues([header]);
+  sh.getRange(1, 1, 1, header.length).setFontWeight('bold').setBackground('#fde68a');
+  sh.setFrozenRows(1);
+  sh.getRange(2, 1, out.length, header.length).setValues(out);
+  var addedCols = ensureAwardColumns_(ss);
+  return ok({ saved: true, count: out.length, newColumns: addedCols });
 }
 
 // ===================== 意外／應變：意外報告（v4.3.0） =====================
@@ -3435,7 +3743,7 @@ function blueprint_() {
       ['cardId', 'title', 'icon', 'type', 'url', 'description', 'order', 'enabled', 'embed', 'source', 'category'],
       ['visit', '旅團探訪', '🏕', 'builtin', '/visit', '年度旅團探訪', 1, 'TRUE', 'FALSE', 'core', 'todo'],
       ['contacts', '聯結簿', '📇', 'builtin', '/contacts', '旅團 · 港島地域 · 總會 聯絡資料', 2, 'TRUE', 'FALSE', 'core', 'done'],
-      ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '讀獲獎名單 · 推下一級', 3, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '獎勵名冊 · 自動計夠期可提名 · 年期自訂', 3, 'TRUE', 'FALSE', 'core', 'done'],
       ['budget', '區年度預算', '📑', 'builtin', '/budget', '直讀區方預算 Sheet · 按月／支部 · 資助合計', 5, 'TRUE', 'FALSE', 'core', 'done'],
       ['committee', '委任系統', '🗂', 'builtin', '/committee', '委任 · 續任 · R02', 7, 'TRUE', 'FALSE', 'core', 'todo'],
       ['unit', '旅團管理系統', '🧭', 'builtin', '/unit', '旅名冊 · 人數統計', 8, 'TRUE', 'FALSE', 'core', 'todo'],
@@ -3491,6 +3799,12 @@ function blueprint_() {
       ['id', 'districtCode', 'title', 'body', 'date', 'pinned', 'level', 'link', 'linkLabel',
         'notify', 'active', 'expiresAt', 'publishedAt', 'publishedBy', 'updatedAt', 'createdAt'],
     ] },
+    { name: SHEET.AWARDS, headerColor: '#fde68a', frozenCols: 1, rows: [
+      AWARD_FIXED_COLS.concat(awardTypeSeed_().map(function (r) { return r[0]; })).concat(AWARD_TAIL_COLS),
+    ] },
+    { name: SHEET.AWARD_TYPES, headerColor: '#fde68a', rows: [
+      ['code', 'label', 'short', 'category', 'prevCode', 'minYears', 'round', 'note', 'enabled'],
+    ].concat(awardTypeSeed_()) },
     // 意外報告：欄位對應香港童軍總會行政署「意外報告」(ACC-RPT 2019/07) 兩頁內容
     { name: SHEET.INCIDENT_REQ, headerColor: '#fee2e2', rows: [
       INCIDENT_FIELDS.slice(),
@@ -3563,6 +3877,7 @@ function setupSheets() {
   blueprint_()[0].rows.slice(1).forEach(function (r) { ensureConfigRow_(cfg, r[0], r[1], r[2]); });
 
   seedCourseParams_(ss);
+  ensureAwardColumns_(ss);
   ensureCardRows_(ss);
   patchCardRows_(ss);
   ensurePermsRows_(ss);
@@ -3626,6 +3941,8 @@ function patchCardRows_(ss) {
     contacts: { oldTitle: '旅團聯絡簿', title: '聯結簿', oldDesc: '聯絡資料 · 分組 · 群發', desc: '旅團 · 港島地域 · 總會 聯絡資料' },
     // v4.5.0 區年度預算已完成（直讀區方 Google Sheet）
     budget: { oldDesc: '預算編列與追蹤', desc: '直讀區方預算 Sheet · 按月／支部 · 資助合計' },
+    // v4.7.0 獎勵提名已完成（名冊 + 夠期提名推算 + 年期可自訂）
+    awards: { oldDesc: '讀獲獎名單 · 推下一級', desc: '獎勵名冊 · 自動計夠期可提名 · 年期自訂' },
   };
   var descOnly = { incident: { oldDesc: '即時應變 · 總會指引 · 意外報告', desc: '天氣決策 · 即時應變 · 總會指引 · 意外報告' } };
   var removeIds = { meeting: true, annual: true }; // v4.4.0 刪會議行事曆；v4.5.0 刪週年會議文件

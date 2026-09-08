@@ -5,6 +5,17 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.7.0 — 🎖 獎勵提名（名冊 · 自動計夠期 · 年期自己改）</h3>
+        <ul>
+          <li>🏅 <b>提名建議</b>：揀年份，即刻列出邊個夠期可以提名下一級，分「創辦人紀念日獎勵」「童軍獎勵（大會操）」「自行申請」三組，等最耐嘅排最前，仲有提名截止日倒數同一鍵匯出名單</li>
+          <li>📋 <b>獎勵名冊</b>：全區記錄一頁睇晒，可搜尋、按狀態／已有獎項篩選，新增編輯刪除；未確定年份可以寫「2025?」</li>
+          <li>⚙️ <b>年期設定</b>：每個獎跟邊個、要相隔幾多年、屬邊個提名期，全部喺網頁改，改完即刻生效；仲可以自己加新獎項（Sheet 會自動補欄）</li>
+          <li>⬆️ <b>匯入名單</b>：由你原本份 Excel 直接複製貼上，識得讀 <code>GSA1985</code>、<code>LSM*2005</code>、<code>CCM2025?</code>，亦支援「表頭 + 淨係年份」；可合併更新或清空重寫</li>
+          <li>內建 18 個獎項（優良／優異服務獎章、功績榮譽獎章／十字章、銅銀金獅、長期服務獎章及一至四星、香港總監嘉許／高級嘉許、民政及青年事務局局長嘉許、五年／十年獎狀、感謝狀）</li>
+          <li>後台 4.7.0：新增 <code>Awards</code> 同 <code>AwardTypes</code> 兩張表；貼新 <code>Code.gs</code> → <code>setupSheets()</code>（補建唔清空）→ 重新部署</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.6.2 — 消息欄位對齊成員系統（要換新 Code.gs）</h3>
         <ul>
           <li>📢 成員系統首頁「最新消息」而家<b>睇到內容同顏色</b>：佢嗰邊讀 <code>content</code> 同 <code>level = info / warning / important</code>，舊後台回嘅係 <code>body</code> 同 <code>warn / urgent</code> ——兩邊都唔會報錯，但成員只會見到<b>空白內容、全部藍色</b>。後台 4.6.2 已對齊</li>

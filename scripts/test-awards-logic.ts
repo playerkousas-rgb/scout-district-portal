@@ -1,0 +1,155 @@
+/**
+ * 🎖 提名推算 / 匯入解析邏輯測試（純函數）。
+ *   node --experimental-strip-types scripts/test-awards-logic.ts
+ */
+import assert from 'node:assert';
+import {
+  awardYear, isUncertain, eligibilityFor, nominationBoard, deadlines, parseAwardPaste, toCsv,
+} from '../lib/awards.ts';
+import type { AwardMember, AwardType } from '../lib/types.ts';
+
+const types: AwardType[] = [
+  { code: 'GSA', label: '優良服務獎章', short: 'GSA', category: '功績榮譽', prevCode: '', minYears: null, round: 'founder' },
+  { code: 'DSA', label: '優異服務獎章', short: 'DSA', category: '功績榮譽', prevCode: 'GSA', minYears: 5, round: 'founder' },
+  { code: 'DSM', label: '功績榮譽獎章', short: 'DSM', category: '功績榮譽', prevCode: 'DSA', minYears: 7, round: 'rally' },
+  { code: 'DSC', label: '功績榮譽十字章', short: 'DSC', category: '功績榮譽', prevCode: 'DSM', minYears: 7, round: 'rally' },
+  { code: 'LSM', label: '長期服務獎章', short: 'LSM', category: '長期服務', prevCode: '', minYears: 15, round: 'other' },
+  { code: 'LSM1', label: '長期服務一星獎章', short: 'LSM*', category: '長期服務', prevCode: 'LSM', minYears: 10, round: 'other' },
+  { code: 'OFF', label: '停用咗嘅獎', short: 'OFF', category: '其他', prevCode: 'GSA', minYears: 1, round: 'other', enabled: false },
+];
+
+const member = (name: string, awards: Record<string, string>, extra: Partial<AwardMember> = {}): AwardMember =>
+  ({ id: 'id-' + name, name, troop: '206', position: 'GSL', status: 'active', awards, ...extra });
+
+let pass = 0;
+function check(label: string, fn: () => void) { fn(); pass++; console.log('  ✓ ' + label); }
+
+console.log('獎勵提名推算邏輯測試');
+
+check('年份解析：2015 / 2015? / 無 / 空', () => {
+  assert.strictEqual(awardYear('2015'), 2015);
+  assert.strictEqual(awardYear('2015?'), 2015);
+  assert.strictEqual(awardYear('無'), null);
+  assert.strictEqual(awardYear(''), null);
+  assert.strictEqual(awardYear(undefined), null);
+  assert.strictEqual(isUncertain('2015?'), true);
+  assert.strictEqual(isUncertain('2015'), false);
+});
+
+check('夠期：GSA 2015 + 5 年 → 2020 年可提名 DSA', () => {
+  const e = eligibilityFor(member('甲', { GSA: '2015' }), types, 2020);
+  const dsa = e.find(x => x.type.code === 'DSA')!;
+  assert.strictEqual(dsa.eligibleYear, 2020);
+  assert.strictEqual(dsa.ready, true);
+  assert.strictEqual(dsa.waited, 0);
+});
+
+check('未夠期：2019 年未到', () => {
+  const dsa = eligibilityFor(member('甲', { GSA: '2015' }), types, 2019).find(x => x.type.code === 'DSA')!;
+  assert.strictEqual(dsa.ready, false);
+  assert.strictEqual(dsa.waited, -1);
+});
+
+check('已經有嗰個獎就唔會再提', () => {
+  const e = eligibilityFor(member('甲', { GSA: '2015', DSA: '2020' }), types, 2030);
+  assert.strictEqual(e.some(x => x.type.code === 'DSA'), false);
+  assert.strictEqual(e.some(x => x.type.code === 'DSM'), true);   // 跳到下一級
+});
+
+check('未有上一級 → 唔會出現；入門級唔會自動推算', () => {
+  const e = eligibilityFor(member('乙', {}), types, 2030);
+  assert.strictEqual(e.length, 0);
+});
+
+check('停用咗嘅獎項唔會計', () => {
+  const e = eligibilityFor(member('甲', { GSA: '2015' }), types, 2030);
+  assert.strictEqual(e.some(x => x.type.code === 'OFF'), false);
+});
+
+check('上一級年份標咗「?」會標示出嚟', () => {
+  const dsa = eligibilityFor(member('甲', { GSA: '2015?' }), types, 2025).find(x => x.type.code === 'DSA')!;
+  assert.strictEqual(dsa.uncertain, true);
+  assert.strictEqual(dsa.ready, true);
+});
+
+check('全區推算：分提名期、等最耐排最前', () => {
+  const members = [
+    member('等好耐', { GSA: '2000' }),          // DSA 2005 起夠期 → 等咗 20 年
+    member('啱啱夠', { GSA: '2020' }),          // DSA 2025
+    member('大會操組', { GSA: '2000', DSA: '2008' }),  // DSM 2015 起
+    member('未夠', { GSA: '2022' }),            // DSA 2027 → 兩年內會夠（soon）
+    member('非現役', { GSA: '2000' }, { status: 'notInDistrict' }),
+  ];
+  const board = nominationBoard(members, types, 2025);
+  const founder = board.find(b => b.round === 'founder')!;
+  assert.strictEqual(founder.ready.length, 2);
+  assert.strictEqual(founder.ready[0].member.name, '等好耐');
+  assert.strictEqual(founder.ready[0].waited, 20);
+  assert.strictEqual(founder.soon.length, 1);
+  assert.strictEqual(founder.soon[0].member.name, '未夠');
+  const rally = board.find(b => b.round === 'rally')!;
+  assert.strictEqual(rally.ready.length, 1);
+  assert.strictEqual(rally.ready[0].member.name, '大會操組');
+});
+
+check('非現役預設唔計，開咗掣就計', () => {
+  const members = [member('非現役', { GSA: '2000' }, { status: 'notInDistrict' })];
+  assert.strictEqual(nominationBoard(members, types, 2025)[0].ready.length, 0);
+  assert.strictEqual(nominationBoard(members, types, 2025, { includeInactive: true })[0].ready.length, 1);
+});
+
+check('提名截止日：創辦人前一年 10/31、大會操同年 4/30', () => {
+  assert.deepStrictEqual(
+    { ...deadlines('founder', 2026) },
+    { district: '2025-10-31', hq: '2025-11-30', note: '區部提名須於前一年 10 月 31 日前送地域，總會截止 11 月 30 日' },
+  );
+  assert.strictEqual(deadlines('rally', 2026)!.district, '2026-04-30');
+  assert.strictEqual(deadlines('rally', 2026)!.hq, '2026-05-31');
+  assert.strictEqual(deadlines('other', 2026), null);
+});
+
+console.log('\n匯入解析測試');
+
+check('Excel 貼上：格入面連代號（GSA1985 / LSM*2005 / CCM2025?）', () => {
+  const text = [
+    '陳大文\t206\tGSL\tGSA2001\tDSA2008\tLSM*2005',
+    '李小明\t86\tASL\tGSA2019',
+  ].join('\n');
+  const r = parseAwardPaste(text, types);
+  assert.strictEqual(r.rows.length, 2);
+  assert.strictEqual(r.rows[0].name, '陳大文');
+  assert.strictEqual(r.rows[0].troop, '206');
+  assert.strictEqual(r.rows[0].position, 'GSL');
+  assert.strictEqual(r.rows[0].awards!.GSA, '2001');
+  assert.strictEqual(r.rows[0].awards!.DSA, '2008');
+  assert.strictEqual(r.rows[0].awards!.LSM1, '2005');   // LSM* → LSM1
+});
+
+check('有表頭 + 淨係年份都讀到，問號會保留', () => {
+  const text = [
+    '姓名\t旅團\t職位\tGSA\tDSA',
+    '陳大文\t206\tGSL\t2001\t2008?',
+  ].join('\n');
+  const r = parseAwardPaste(text, types);
+  assert.strictEqual(r.rows.length, 1);
+  assert.strictEqual(r.rows[0].awards!.GSA, '2001');
+  assert.strictEqual(r.rows[0].awards!.DSA, '2008?');
+});
+
+check('CSV（逗號）都食到；合計行會略過', () => {
+  const r = parseAwardPaste('陳大文,206,GSL,GSA2001\n合計,,,112', types);
+  assert.strictEqual(r.rows.length, 1);
+  assert.strictEqual(r.skipped, 1);
+});
+
+check('認唔到嘅代號會報返出嚟，唔會靜靜哋吞咗', () => {
+  const r = parseAwardPaste('陳大文\t206\tGSL\tXYZ2001', types);
+  assert.deepStrictEqual(r.unknown, ['XYZ']);
+  assert.strictEqual(Object.keys(r.rows[0].awards!).length, 0);
+});
+
+check('CSV 匯出會處理逗號同引號', () => {
+  assert.strictEqual(toCsv([['a', 'b,c'], ['d"e', 1]]), 'a,"b,c"\n"d""e",1');
+});
+
+console.log(`\n全部通過（${pass} 項）✓`);
