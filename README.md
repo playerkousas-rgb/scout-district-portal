@@ -89,7 +89,7 @@
 
 | 分頁 | 做咩 |
 |---|---|
-| 🗺 探訪登記 | 全區旅團一格格排開，**未探過紅框、探過綠框**（顯示最近日期、次數、邊個探）。撳一下 → 日期預設今日、幹部預設你自己 → 儲存就完 |
+| 🗺 探訪登記 | 全區旅團排成**方塊磚**：**未探紅框、探過綠框**。撳方塊 = 揀咗（藍色 ✔），可以一次過揀幾個旅；撳「💾 儲存登記」先會寫後端（**未撳 Save 咩都唔會入數**）。日期預設今日、**Save 嗰日就係探訪日期**；聽日入返嚟自動清零，同一個旅下個月再探再撳過就得。方塊右下「✎ 詳細」可以補日期／備註／跟進 |
 | 📊 探訪報告 | 揀「由幾月到幾月」（有本季／全年／上下半年／9 月–8 月童軍年度快捷掣）→ 探訪 list ＋ **邊個幹部探咗幾多次、探過邊啲旅** ＋ 仲有邊幾旅未探 → 一鍵匯出 CSV 交總會 |
 | ⚙️ 旅團名單 | 全區 28 個旅（旅號、主辦機構、五個支部團數），可直接改或者由官網／Excel 貼上；改完會順手同步 `Config TROOP_LIST`，「活動知會」「聯結簿」一齊更新 |
 
@@ -97,7 +97,8 @@
 - **支部分開計**：探咗 17 旅童軍團，唔會當幼童軍團都探咗；冇填支部嘅記錄當「全旅」，邊個支部都計入。
 - 內建旅團名單跟港島地域官網「筲箕灣區旅團一覽表」（覆檢日期 2026-03-31），`101` 旅嗰啲 `1+A1+S1`（空童軍團／海童軍團）寫法照樣保留。
 - 後台 4.8.0：新增 `Units`（旅團名單）同 `Visits`（探訪記錄）兩張表 + `getVisitBoard`／`saveVisit`／`deleteVisit`／`saveUnits`；權限用卡片 `visit` = ✏️。
-- 測試：`node scripts/test-visit-gs.js`（15 項後台）、`node --experimental-strip-types scripts/test-visit-logic.ts`（14 項報告邏輯）。
+- **防呆**：揀咗未儲存唔會寫後端；離開頁面會提示；同一日同一支部再撳會問「係咪要再加多一次」；儲存前有確認清單；寫失敗嗰啲會留返喺揀選度可以再試。
+- 測試：`node scripts/test-visit-gs.js`（15 項後台）、`node --experimental-strip-types scripts/test-visit-logic.ts`（16 項報告邏輯）。
 
 ## 🎖 獎勵提名（v4.7.3）
 
@@ -238,7 +239,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 | `scripts/test-news-gs.js` | 後台邏輯測試：消息發佈 + 批次借物資（node 直接跑，35 項） |
 | `scripts/test-awards-gs.js` | 獎勵提名後台測試（21 項） |
 | `scripts/test-visit-gs.js` | 旅團探訪後台測試（15 項） |
-| `scripts/test-visit-logic.ts` | 探訪報告／支部篩選測試（14 項，`node --experimental-strip-types`） |
+| `scripts/test-visit-logic.ts` | 探訪報告／支部篩選測試（16 項，`node --experimental-strip-types`） |
 | `scripts/mock-gs-server.js` | 本機模擬 Apps Script 後台（`node scripts/mock-gs-server.js` → `PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec PORTAL_SKW_APIKEY=dev npx next dev`，登入 `sheep`／`0728`） |
 | `scripts/test-awards-logic.ts` | 獎勵夠期推算／Excel 匯入解析測試（24 項，`node --experimental-strip-types`） |
 | `scripts/check-member-alignment.js` | 成員系統 ↔ 後台對齊檢查（action 缺漏 / proxy 白名單 / 安全邊界） |

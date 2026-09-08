@@ -14,7 +14,7 @@ import type { ScoutUnit, Visit, VisitBoard, VisitKind, VisitSection } from '@/li
 import {
   SECTIONS, SECTION_LABEL, SECTION_EMOJI, KIND_LABEL, VISIT_KINDS,
   troopStats, coverage, visitorStats, sortUnits, rangePresets, quarterOf,
-  parseUnitPaste, toCsv, todayStr,
+  parseUnitPaste, toCsv, todayStr, hasVisitOn,
 } from '@/lib/visits';
 import BackLink, { BackBar } from '@/components/BackLink';
 
@@ -167,7 +167,7 @@ function SectionPicker({ board, section, onPick }: {
   );
 }
 
-// ───────────────────────── 🗺 探訪登記 ─────────────────────────
+// ───────────────────────── 🗺 探訪登記（方塊磚：揀完先儲存） ─────────────────────────
 
 function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
   board: VisitBoard; section: VisitSection | ''; canEdit: boolean; token: string;
@@ -175,6 +175,10 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
 }) {
   const [editing, setEditing] = useState<Partial<Visit> | null>(null);
   const [onlyMine, setOnlyMine] = useState(false);
+  // 未撳「儲存」之前，一切都淨係喺畫面度，唔會寫後端
+  const [picked, setPicked] = useState<string[]>([]);
+  const [date, setDate] = useState(board.today);
+  const [saving, setSaving] = useState(false);
 
   const visits = useMemo(
     () => (onlyMine ? board.visits.filter(v => (v.visitorName || '') === board.me.name) : board.visits),
@@ -185,6 +189,48 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
     [board, visits, section],
   );
   const cov = coverage(stats);
+
+  // 換日子／換支部 → 揀咗嘅清零（「聽日就係新一日」）
+  useEffect(() => { setPicked([]); }, [date, section]);
+
+  // 防呆：仲有揀咗未儲存就離開／refresh，會提你
+  useEffect(() => {
+    if (!picked.length) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [picked.length]);
+
+  function toggle(troop: string, alreadyToday: boolean) {
+    if (!canEdit) return;
+    if (picked.includes(troop)) { setPicked(prev => prev.filter(t => t !== troop)); return; }
+    if (alreadyToday && !confirm(`${troop} 旅喺 ${date} 已經登記過一次，係咪要再加多一次？`)) return;
+    setPicked(prev => [...prev, troop]);
+  }
+
+  async function savePicked() {
+    if (!picked.length) return;
+    const label = (t: string) => board.units.find(u => u.troop === t)?.label || t;
+    if (!confirm(
+      `確定登記以下 ${picked.length} 個旅團嘅探訪？\n探訪日期：${date}\n支部：${section ? SECTION_LABEL[section] : '全旅／唔分支部'}\n\n` +
+      picked.map(t => `· ${label(t)}`).join('\n')
+    )) return;
+
+    setSaving(true);
+    const failed: string[] = [];
+    for (const troop of picked) {
+      const r = await api.saveVisit(token, {
+        troop, section: section || '', visitDate: date,
+        kind: 'general', visitorName: board.me.name,
+      });
+      if (!r.ok) { failed.push(troop); setError(`${label(troop)}：${r.error || '寫入失敗'}`); }
+    }
+    setSaving(false);
+    setPicked(failed);                    // 寫失敗嗰啲留返喺度，可以再試
+    await reload();
+    const done = picked.length - failed.length;
+    if (done > 0) flash(`已登記 ${done} 個旅團嘅探訪（${date}）✓`);
+  }
 
   return (
     <>
@@ -204,56 +250,104 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
         </label>
       </div>
 
+      {canEdit && (
+        <div className="info-card vs-howto">
+          <b>點登記</b>
+          <p>
+            撳一下方塊 = <b>揀咗</b>（藍色），可以一次過揀幾個旅；撳多次可以取消。
+            揀好之後撳下面「<b>💾 儲存登記</b>」先會寫入後台 —— 未撳儲存，咩都唔會入數。
+            日期預設今日，<b>儲存嗰日就係探訪日期</b>；聽日入返嚟就係新一日，方塊自動清零，同一個旅下個月再探再撳過就得。
+          </p>
+        </div>
+      )}
+
       <div className="vs-grid">
         {stats.length === 0 && (
           <div className="info-card" style={{ gridColumn: '1 / -1' }}>
             <p className="empty">呢個支部冇旅團（可以去「⚙️ 旅團名單」加返）</p>
           </div>
         )}
-        {stats.map(st => (
-          <button
-            key={st.unit.troop}
-            className={`vs-card${st.visited ? ' done' : ''}`}
-            disabled={!canEdit}
-            title={canEdit ? '撳一下登記探訪' : '你冇登記權限'}
-            onClick={() => setEditing({
-              troop: st.unit.troop,
-              section: section || '',
-              visitDate: board.today,
-              kind: 'general',
-              visitorName: board.me.name,
-            })}
-          >
-            <div className="vs-card-top">
-              <b>{st.unit.label || st.unit.troop}</b>
-              {st.visited
-                ? <span className="vs-badge ok">✓ {st.count} 次</span>
-                : <span className="vs-badge no">未探</span>}
-            </div>
-            <div className="vs-card-org">{st.unit.org || '—'}</div>
-            <div className="vs-card-sections">
-              {SECTIONS.filter(k => String(st.unit.sections?.[k] || '').trim()).map(k => (
-                <span key={k} className={`vs-chip${section === k ? ' on' : ''}`}>
-                  {SECTION_EMOJI[k]} {SECTION_LABEL[k]} {st.unit.sections[k]}
-                </span>
-              ))}
-            </div>
-            {st.visited && (
-              <div className="vs-card-last">
-                最近 {st.last}
-                {st.visitors.length > 0 && <> · {st.visitors.slice(0, 2).join('、')}{st.visitors.length > 2 ? ' 等' : ''}</>}
+        {stats.map(st => {
+          const isPicked = picked.includes(st.unit.troop);
+          const doneToday = hasVisitOn(board.visits, st.unit.troop, date, section);
+          return (
+            <div
+              key={st.unit.troop}
+              className={`vs-tile${st.visited ? ' done' : ''}${isPicked ? ' picked' : ''}${doneToday ? ' today' : ''}`}
+              role="button" tabIndex={0}
+              title={canEdit ? '撳一下揀／取消，最後撳「儲存登記」' : '你冇登記權限'}
+              onClick={() => toggle(st.unit.troop, doneToday)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(st.unit.troop, doneToday); } }}
+            >
+              <div className="vs-tile-top">
+                <b>{st.unit.label || st.unit.troop}</b>
+                {isPicked
+                  ? <span className="vs-badge pick">✔ 揀咗</span>
+                  : doneToday
+                    ? <span className="vs-badge ok">今日已登記</span>
+                    : st.visited
+                      ? <span className="vs-badge ok">✓ {st.count} 次</span>
+                      : <span className="vs-badge no">未探</span>}
               </div>
-            )}
-          </button>
-        ))}
+              <div className="vs-tile-org">{st.unit.org || '—'}</div>
+              <div className="vs-card-sections">
+                {SECTIONS.filter(k => String(st.unit.sections?.[k] || '').trim()).map(k => (
+                  <span key={k} className={`vs-chip${section === k ? ' on' : ''}`}>
+                    {SECTION_EMOJI[k]} {SECTION_LABEL[k]} {st.unit.sections[k]}
+                  </span>
+                ))}
+              </div>
+              <div className="vs-tile-foot">
+                <span className="vs-card-last">
+                  {st.visited
+                    ? <>最近 {st.last}{st.visitors.length > 0 ? ` · ${st.visitors[0]}${st.visitors.length > 1 ? ' 等' : ''}` : ''}</>
+                    : <span className="vs-none">今年未探過</span>}
+                </span>
+                {canEdit && (
+                  <button
+                    className="vs-detail"
+                    title="填備註／跟進，或者補返以前嘅探訪"
+                    onClick={e => {
+                      e.stopPropagation();
+                      setEditing({
+                        troop: st.unit.troop, section: section || '', visitDate: date,
+                        kind: 'general', visitorName: board.me.name,
+                      });
+                    }}
+                  >✎ 詳細</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
+
+      {canEdit && (
+        <div className={`vs-savebar${picked.length ? ' on' : ''}`}>
+          <label className="aw-field vs-savebar-date">
+            <span>探訪日期</span>
+            <input type="date" value={date} max={board.today} onChange={e => setDate(e.target.value)} />
+          </label>
+          <span className="vs-savebar-info">
+            {picked.length
+              ? <>已揀 <b>{picked.length}</b> 個旅團 · {section ? SECTION_LABEL[section] : '全旅'} · 未儲存</>
+              : <>撳方塊揀旅團，撳完先儲存</>}
+          </span>
+          {picked.length > 0 && (
+            <button className="mini-btn" disabled={saving} onClick={() => setPicked([])}>清除揀選</button>
+          )}
+          <button className="btn-sm" disabled={!picked.length || saving} onClick={savePicked}>
+            {saving ? '儲存中…' : `💾 儲存登記${picked.length ? `（${picked.length}）` : ''}`}
+          </button>
+        </div>
+      )}
 
       {stats.some(s => s.visited) && (
         <div className="info-card">
           <div className="section-head">
             <div>
               <h3>最近登記</h3>
-              <p>撳記錄可以改日期／備註，或者刪除</p>
+              <p>撳「編輯」可以改日期／加備註，或者刪除</p>
             </div>
           </div>
           <VisitList

@@ -687,14 +687,35 @@ a{color:inherit;text-decoration:none;}
 .vs-pct{font-size:16px;font-weight:700;color:#0f766e;}
 .vs-range{font-size:11.5px;color:#94a3b8;}
 .vs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:10px;margin:12px 0;}
-.vs-card{text-align:left;background:#fff;border:1px solid #e2e8f0;border-left:4px solid #f87171;border-radius:12px;
-  padding:10px 12px;cursor:pointer;transition:.15s;display:flex;flex-direction:column;gap:6px;}
-.vs-card:hover:not(:disabled){box-shadow:0 4px 14px rgba(15,23,42,.10);transform:translateY(-1px);}
-.vs-card:disabled{cursor:default;opacity:.85;}
-.vs-card.done{border-left-color:#22c55e;background:#f6fffa;}
-.vs-card-top{display:flex;justify-content:space-between;align-items:center;gap:8px;}
-.vs-card-top b{font-size:14px;color:#0f172a;}
-.vs-card-org{font-size:11.5px;color:#64748b;line-height:1.4;}
+.vs-tile{position:relative;text-align:left;background:#fff;border:2px solid #fecaca;border-radius:14px;
+  padding:10px 12px;cursor:pointer;transition:.12s;display:flex;flex-direction:column;gap:6px;
+  user-select:none;-webkit-tap-highlight-color:transparent;}
+.vs-tile:hover{box-shadow:0 4px 14px rgba(15,23,42,.10);transform:translateY(-1px);}
+.vs-tile:active{transform:scale(.985);}
+.vs-tile.done{border-color:#bbf7d0;background:#f6fffa;}
+.vs-tile.today{border-color:#86efac;background:#ecfdf5;}
+.vs-tile.picked{border-color:#2563eb;background:#eff6ff;box-shadow:0 0 0 3px rgba(37,99,235,.18);}
+.vs-tile.picked::after{content:'✔';position:absolute;top:-9px;right:-7px;width:24px;height:24px;border-radius:50%;
+  background:#2563eb;color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;font-weight:700;}
+.vs-tile-top{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+.vs-tile-top b{font-size:14.5px;color:#0f172a;}
+.vs-tile-org{font-size:11.5px;color:#64748b;line-height:1.4;min-height:16px;}
+.vs-tile-foot{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-top:2px;}
+.vs-detail{border:1px solid #e2e8f0;background:#fff;border-radius:7px;font-size:11px;color:#475569;
+  padding:1px 7px;cursor:pointer;}
+.vs-detail:hover{border-color:#94a3b8;background:#f8fafc;}
+.vs-none{color:#b91c1c;}
+.vs-badge.pick{background:#dbeafe;color:#1d4ed8;}
+.vs-howto{border-left:4px solid #2563eb;}
+.vs-howto b{font-size:13px;color:#1e3a8a;}
+.vs-howto p{font-size:12.5px;color:#475569;line-height:1.75;margin:5px 0 0;}
+.vs-savebar{position:sticky;bottom:10px;z-index:20;display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;
+  background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:10px 14px;margin:12px 0;
+  box-shadow:0 6px 20px rgba(15,23,42,.10);}
+.vs-savebar.on{border-color:#2563eb;box-shadow:0 8px 24px rgba(37,99,235,.20);}
+.vs-savebar-date{margin:0;}
+.vs-savebar-info{font-size:12.5px;color:#475569;margin-right:auto;padding-bottom:4px;}
+.vs-savebar.on .vs-savebar-info{color:#1d4ed8;}
 .vs-card-sections{display:flex;flex-wrap:wrap;gap:4px;}
 .vs-chip{font-size:10.5px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;border-radius:999px;padding:1px 6px;}
 .vs-chip.on{background:#ccfbf1;border-color:#5eead4;color:#0f766e;font-weight:600;}

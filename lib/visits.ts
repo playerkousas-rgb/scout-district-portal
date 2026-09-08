@@ -131,6 +131,16 @@ export function visitorStats(visits: Visit[]): VisitorStat[] {
   return out.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
+/** 嗰日（同一支部）已經登記過未 —— 防止重複登記／畀方塊標「今日已登記」 */
+export function hasVisitOn(
+  visits: Visit[], troop: string, date: string, section: VisitSection | '' = '',
+): boolean {
+  return visits.some(v =>
+    String(v.troop).trim() === String(troop).trim() &&
+    v.visitDate === date &&
+    (!section || !v.section || v.section === section));
+}
+
 /** 旅號排序：數字細到大 */
 export function sortUnits(units: ScoutUnit[]): ScoutUnit[] {
   const num = (t: string) => {

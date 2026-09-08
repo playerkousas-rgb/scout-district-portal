@@ -5,7 +5,7 @@
 import assert from 'node:assert';
 import {
   troopStats, coverage, visitorStats, unitsOfSection, sortUnits,
-  quarterOf, yearOf, rangePresets, parseUnitPaste, toCsv, SECTION_LABEL, KIND_LABEL,
+  quarterOf, yearOf, rangePresets, parseUnitPaste, toCsv, SECTION_LABEL, KIND_LABEL, hasVisitOn,
 } from '../lib/visits.ts';
 import type { ScoutUnit, Visit, VisitSection } from '../lib/types.ts';
 
@@ -91,6 +91,22 @@ check('冇填幹部名 → 歸「（未填）」，唔會靜靜咁跌咗', () =>
   const v = { ...visit('17', '2026-01-01'), visitorName: '' };
   const people = visitorStats([v]);
   assert.strictEqual(people[0].name, '（未填）');
+});
+
+check('防呆：同一日同一支部已登記過會認得出（第二日就唔算）', () => {
+  const visits = [visit('206', '2026-03-08', 'gh')];
+  assert.strictEqual(hasVisitOn(visits, '206', '2026-03-08', 'gh'), true);
+  assert.strictEqual(hasVisitOn(visits, '206', '2026-03-09', 'gh'), false);   // 第二日 = 新一日，清零
+  assert.strictEqual(hasVisitOn(visits, '206', '2026-03-08', 'scout'), false);
+  assert.strictEqual(hasVisitOn(visits, '82', '2026-03-08', 'gh'), false);
+});
+
+check('同一旅一年可以探幾次（今月一次、下月再一次都記得晒）', () => {
+  const visits = [visit('206', '2026-03-08', 'gh'), visit('206', '2026-04-19', 'gh')];
+  const st = troopStats(units, visits, 'gh').find(s => s.unit.troop === '206')!;
+  assert.strictEqual(st.count, 2);
+  assert.strictEqual(st.last, '2026-04-19');
+  assert.strictEqual(hasVisitOn(visits, '206', '2026-04-19', 'gh'), true);
 });
 
 check('季度／年份：由日期計', () => {
