@@ -1,4 +1,4 @@
-# 下一手 Agent 交接備忘（v4.7.2）
+# 下一手 Agent 交接備忘（v4.7.3）
 
 > 2026-09-08（第七輪）v4.7.0：**🎖 獎勵提名**（用戶指定「一站式，全部喺 app 入面睇同改」）。
 > 後台加 `Awards`（一人一行，每個獎一欄＝獲獎年份，值可以係 `2015` / `2015?` / `無`）同 `AwardTypes`（年期規則）兩張表，
@@ -14,13 +14,16 @@
 > 前端加 `AlertBanner`（用 `upcomingRounds()` 搵返每個提名期死線仲未過嗰屆 → `nominationBoard` 數人 → 🔥 chips），
 > 名冊用 `readyByMember()` 標亮成行（`.aw-hot-row`）＋「只睇夠期可提名」篩選＋標亮年份選擇器＋CSV 多一欄。
 > seed 再改：**LSM 第一個 minYears 留空**（用戶話第一個佢自己入），LSM1–4 維持 10；HAB／FIVE 亦留空免雜訊。
+> **v4.7.3**：提名建議每行加剔格 →「✅ 登記 N 項獲獎」→ 按人合併 `saveAwardMember({id,name,awards:{CODE:year}})`。
+> 配合改咗 `awardWriteFields_(sh,row,a,types,isNew)`：**只寫 payload 有嘅欄**（isNew 例外，寫齊做預設），
+> 所以局部更新唔會清走 troop／position／serviceStart／note。`importAwardMembers_` 兩個 call site 已跟住傳 isNew。
 > ⏭ **用戶未來想要**：全區領袖「委任年期 list」——有新委任就登記入去，令「無 → GSA（服務滿 7 年）」呢級真正計得準。
 > 而家係靠 `Awards.serviceStart` 逐個人填；下一步可以考慮同 Staff／成員系統委任資料對接，或者做一張 `Appointments` 表。
 > 用戶自己喺「年期設定」改得，所以千祈唔好 hardcode 返落程式。
 > 提名截止（總會 ACR 20/2024）：創辦人紀念日 區部 10/31 → 總會 11/30（頒獎年前一年）；童軍獎勵（大會操）區部 4/30 → 總會 5/31（同年）。
 > 縮寫對照：CCM 香港總監嘉許（黃笛繩）／CCH 香港總監高級嘉許／HAB 民政及青年事務局局長嘉許（前稱民政事務局）／THANKS 感謝狀（DA2）／FIVE・TEN 五年十年長期服務獎狀（會務委員）。
 > 🔒 **用戶份真實獎勵 Excel（100+ 真名）冇 commit 落 repo，亦唔應該 commit**；要試就用 `/tmp/mockgs/server.js` 入面嘅假名 seed。
-> 順手補咗 `app/visit/page.tsx`（之前主控台「旅團探訪」卡撳落去 404）。測試：`node scripts/test-awards-gs.js`（20）＋ `node --experimental-strip-types scripts/test-awards-logic.ts`（24）。
+> 順手補咗 `app/visit/page.tsx`（之前主控台「旅團探訪」卡撳落去 404）。測試：`node scripts/test-awards-gs.js`（21）＋ `node --experimental-strip-types scripts/test-awards-logic.ts`（24）。
 >
 > 2026-09-08（第六輪）v4.6.2：**欄位對齊成員系統**。member-portal 上咗自己嗰版消息功能（`bb44fe6`：`AnnouncementBanner` + Web Push），
 > 佢個 proxy `publicAnnouncement()` 白名單讀 `{ id, title, content, date, pinned, level }` 而且 `level` 只認 `info|warning|important`

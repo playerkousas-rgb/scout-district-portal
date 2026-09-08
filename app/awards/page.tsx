@@ -1,6 +1,6 @@
 'use client';
 /**
- * 🎖 獎勵提名（v4.7.2）
+ * 🎖 獎勵提名（v4.7.3）
  *
  * 一站式：名冊（Awards 表）＋ 年期規則（AwardTypes 表）＋ 每年「夠期可提名」自動推算。
  * 年期／獎項名稱全部可以喺「年期設定」頁改，唔使改程式、唔使重新部署。
@@ -83,7 +83,7 @@ export default function AwardsPage() {
 
       {needUpgrade && (
         <div className="info-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <h3>⚠️ 後台未升級到 v4.7.2</h3>
+          <h3>⚠️ 後台未升級到 v4.7.3</h3>
           <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.7 }}>
             請去「📢 更新 / 下載」下載最新 <code>Code.gs</code> 貼上 Apps Script →
             執行 <code>setupSheets()</code>（會自動建立 <code>Awards</code> 同 <code>AwardTypes</code> 兩張表，
@@ -105,7 +105,12 @@ export default function AwardsPage() {
             onGo={(y) => { setYear(y); setTab('nominate'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
             onRoster={(y) => { setYear(y); setTab('roster'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
           />
-          {tab === 'nominate' && <NominateTab board={board} year={year} setYear={setYear} />}
+          {tab === 'nominate' && (
+            <NominateTab
+              board={board} year={year} setYear={setYear} canEdit={canEdit}
+              token={session.token} reload={load} flash={flash} setError={setError}
+            />
+          )}
           {tab === 'roster' && (
             <RosterTab
               board={board} canEdit={canEdit} busy={busy} setBusy={setBusy} year={year} setYear={setYear}
@@ -194,9 +199,54 @@ function AlertBanner({ board, onGo, onRoster }: {
 
 // ───────────────────────── 🏅 提名建議 ─────────────────────────
 
-function NominateTab({ board, year, setYear }: { board: AwardsBoard; year: number; setYear: (y: number) => void }) {
+function NominateTab({ board, year, setYear, canEdit, token, reload, flash, setError }: {
+  board: AwardsBoard; year: number; setYear: (y: number) => void; canEdit: boolean;
+  token: string; reload: () => Promise<void>; flash: (s: string) => void; setError: (s: string) => void;
+}) {
   const thisYear = new Date().getFullYear();
   const [includeInactive, setIncludeInactive] = useState(false);
+  const [picked, setPicked] = useState<Record<string, Eligibility>>({});   // key = memberId:code
+  const [saving, setSaving] = useState(false);
+
+  function toggle(e: Eligibility) {
+    const key = e.member.id + ':' + e.type.code;
+    setPicked(prev => {
+      const next = { ...prev };
+      if (next[key]) delete next[key]; else next[key] = e;
+      return next;
+    });
+  }
+
+  /** 頒完獎 → 打勾 → 一次過寫返落名冊（每個獎項寫低獲獎年份） */
+  async function registerWinners(round: AwardRound) {
+    const list = Object.values(picked).filter(e => e.type.round === round);
+    if (!list.length) return;
+    const names = [...new Set(list.map(e => e.member.name))];
+    if (!confirm(
+      `確定將以下 ${list.length} 項記錄寫入名冊，獲獎年份 ${year}？\n\n` +
+      list.slice(0, 12).map(e => `· ${e.member.name} — ${e.type.label}`).join('\n') +
+      (list.length > 12 ? `\n…另外 ${list.length - 12} 項` : '') +
+      `\n\n（寫入後佢哋就唔會再喺提名建議出現，會自動跳去下一級）`
+    )) return;
+
+    setSaving(true);
+    // 同一個人可能一次過攞多過一個獎 → 合併埋一次過寫
+    const byMember = new Map<string, { name: string; awards: Record<string, string> }>();
+    list.forEach(e => {
+      const cur = byMember.get(e.member.id) || { name: e.member.name, awards: {} };
+      cur.awards[e.type.code] = String(year);
+      byMember.set(e.member.id, cur);
+    });
+    let fail = 0;
+    for (const [id, v] of byMember) {
+      const r = await api.saveAwardMember(token, { id, name: v.name, awards: v.awards });
+      if (!r.ok) { fail++; setError(`${v.name}：${r.error || '寫入失敗'}`); }
+    }
+    setSaving(false);
+    setPicked({});
+    await reload();
+    if (!fail) flash(`已登記 ${names.length} 位領袖、${list.length} 項 ${year} 年獲獎記錄 🎉`);
+  }
 
   const buckets = useMemo(
     () => nominationBoard(board.members, board.types, year, { includeInactive }),
@@ -294,13 +344,23 @@ function NominateTab({ board, year, setYear }: { board: AwardsBoard; year: numbe
                 <table className="perm-table aw-table">
                   <thead>
                     <tr>
+                      {canEdit && <th style={{ width: 34 }} title="打勾＝已頒獎，之後可以一次過寫入名冊">✅</th>}
                       <th>姓名</th><th>旅團</th><th>職位</th>
                       <th>建議提名</th><th>由邊度計起</th><th>已夠期</th>
                     </tr>
                   </thead>
                   <tbody>
                     {b.ready.map(e => (
-                      <tr key={e.member.id + e.type.code}>
+                      <tr key={e.member.id + e.type.code} className={picked[e.member.id + ':' + e.type.code] ? 'aw-picked' : undefined}>
+                        {canEdit && (
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={!!picked[e.member.id + ':' + e.type.code]}
+                              onChange={() => toggle(e)}
+                            />
+                          </td>
+                        )}
                         <td><b>{e.member.name}</b>{e.member.status !== 'active' && <span className="aw-tag">{STATUS_LABEL[e.member.status || 'active']}</span>}</td>
                         <td>{e.member.troop || '—'}</td>
                         <td>{e.member.position || '—'}</td>
@@ -319,6 +379,22 @@ function NominateTab({ board, year, setYear }: { board: AwardsBoard; year: numbe
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {canEdit && b.ready.length > 0 && (
+              <div className="aw-winner-bar">
+                <span>
+                  🎉 <b>頒完獎？</b>喺上面打勾，就可以一次過寫入名冊（獲獎年份 = <b>{year}</b>）。
+                  寫咗之後佢哋自動跳去下一級。
+                </span>
+                <button
+                  className="btn-sm"
+                  disabled={saving || Object.values(picked).filter(e => e.type.round === b.round).length === 0}
+                  onClick={() => registerWinners(b.round)}
+                >
+                  {saving ? '寫緊…' : `✅ 登記 ${Object.values(picked).filter(e => e.type.round === b.round).length} 項獲獎`}
+                </button>
               </div>
             )}
 

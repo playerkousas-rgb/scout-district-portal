@@ -225,6 +225,24 @@ check('刪除成員', () => {
   assert.strictEqual(ctx.deleteAwardMember_(dcToken, 'nope').ok, false);
 });
 
+check('頒完獎登記：只帶 id + name + 一個獎年份，其他欄唔會被清走', () => {
+  const created = ctx.saveAwardMember_(dcToken, {
+    name: '登記測試', troop: '206', position: 'GSL', serviceStart: '2004',
+    status: 'active', note: '測試備註', awards: { GSA: '2015' },
+  });
+  const id = created.data.id;
+  const r = ctx.saveAwardMember_(dcToken, { id: id, name: '登記測試', awards: { DSA: '2027' } });
+  assert.strictEqual(r.data.saved, true);
+  const after = ctx.getAwardsBoard_(dcToken).data.members.filter(m => m.id === id)[0];
+  assert.strictEqual(after.awards.DSA, '2027');
+  assert.strictEqual(after.awards.GSA, '2015');
+  assert.strictEqual(after.troop, '206');
+  assert.strictEqual(after.position, 'GSL');
+  assert.strictEqual(after.serviceStart, '2004');
+  assert.strictEqual(after.note, '測試備註');
+  ctx.deleteAwardMember_(dcToken, id);
+});
+
 check('儲存年期設定：寫入 AwardTypes 表', () => {
   const r = ctx.saveAwardTypes_(dcToken, [
     { code: 'GSA', label: '優良服務獎章', round: 'founder' },
@@ -284,9 +302,9 @@ check('getAwardsBoard 有回內建建議年期（畀「套用建議」用）', (
   assert.strictEqual(d.filter(t => t.code === 'BRL')[0].minYears, null);
 });
 
-check('健康檢查版本 4.7.2', () => {
+check('健康檢查版本 4.7.3', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.7.2');
+  assert.strictEqual(parsed.data.version, '4.7.3');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

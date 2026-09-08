@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.7.2
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.7.3
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -93,7 +93,7 @@
  *      （舊資料 warn → warning、urgent → important 自動對應，Sheet 唔使改）。
  * 佢個 proxy 唔會轉發 link / linkLabel / notify / districtCode，呢啲欄位只有管理系統用。
  *
- * ── 獎勵提名 Awards（v4.7.0／年期修訂 v4.7.2）──────────────
+ * ── 獎勵提名 Awards（v4.7.0／年期修訂 v4.7.2／登記獲獎 v4.7.3）──────────────
  * 管理系統 /awards：區會獎勵名冊（一人一行）＋「今年夠期可提名」自動推算。
  *   Awards 表      一人一行；每個獎項一欄，格入面填獲獎年份（可加「?」表示未確定）
  *                  serviceStart = 服務開始年份（委任年份）；入門級獎項（優良服務獎章 7 年、
@@ -267,7 +267,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.7.2',
+      version: '4.7.3',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -2033,16 +2033,22 @@ function getAwardsBoard_(token) {
   return ok({ types: types, members: members, counts: counts, total: members.length, defaults: defaults });
 }
 
-function awardWriteFields_(sh, rowIdx, a, types) {
+/**
+ * 寫入一位成員嘅欄位。
+ * ⚠️ 只會寫「payload 有帶」嘅欄（新增時例外，會寫齊做預設值）——
+ *    咁前端先可以做「淨係更新某個獎嘅年份」（例如頒完獎登記獲獎），唔會意外清走旅團／職位。
+ */
+function awardWriteFields_(sh, rowIdx, a, types, isNew) {
+  var has = function (k) { return Object.prototype.hasOwnProperty.call(a, k); };
   setCellByHeader_(sh, rowIdx, 'name', String(a.name || '').trim());
-  setCellByHeader_(sh, rowIdx, 'nameEn', String(a.nameEn || '').trim());
-  setCellByHeader_(sh, rowIdx, 'troop', String(a.troop == null ? '' : a.troop).trim());
-  setCellByHeader_(sh, rowIdx, 'position', String(a.position || '').trim());
-  if (Object.prototype.hasOwnProperty.call(a, 'serviceStart')) {
+  if (isNew || has('nameEn')) setCellByHeader_(sh, rowIdx, 'nameEn', String(a.nameEn || '').trim());
+  if (isNew || has('troop')) setCellByHeader_(sh, rowIdx, 'troop', String(a.troop == null ? '' : a.troop).trim());
+  if (isNew || has('position')) setCellByHeader_(sh, rowIdx, 'position', String(a.position || '').trim());
+  if (isNew || has('serviceStart')) {
     setCellByHeader_(sh, rowIdx, 'serviceStart', awardServiceStart_(a.serviceStart));
   }
-  setCellByHeader_(sh, rowIdx, 'status', awardStatus_(a.status));
-  setCellByHeader_(sh, rowIdx, 'note', String(a.note || '').trim());
+  if (isNew || has('status')) setCellByHeader_(sh, rowIdx, 'status', awardStatus_(a.status));
+  if (isNew || has('note')) setCellByHeader_(sh, rowIdx, 'note', String(a.note || '').trim());
   var awards = a.awards || {};
   types.forEach(function (ty) {
     if (!Object.prototype.hasOwnProperty.call(awards, ty.code)) return;
@@ -2067,7 +2073,7 @@ function saveAwardMember_(token, a) {
   if (id) {
     var idx = rowIndexByCol_(sh, 'id', id);
     if (idx < 0) return err('找不到該成員');
-    awardWriteFields_(sh, idx, a, types);
+    awardWriteFields_(sh, idx, a, types, false);
     return ok({ saved: true, id: id, created: false });
   }
   id = genId_('aw');
@@ -2076,7 +2082,7 @@ function saveAwardMember_(token, a) {
   appendRowObj_(sh, row);
   var newIdx = rowIndexByCol_(sh, 'id', id);
   if (newIdx < 0) return err('寫入失敗');
-  awardWriteFields_(sh, newIdx, a, types);
+  awardWriteFields_(sh, newIdx, a, types, true);
   return ok({ saved: true, id: id, created: true });
 }
 
@@ -2127,14 +2133,14 @@ function importAwardMembers_(token, rows, mode) {
     if (id) {
       var idx = rowIndexByCol_(sh, 'id', id);
       if (idx < 0) { skipped++; continue; }
-      awardWriteFields_(sh, idx, a, types);
+      awardWriteFields_(sh, idx, a, types, false);
       updated++;
     } else {
       var newId = genId_('aw');
       appendRowObj_(sh, { id: newId, districtCode: districtCode_(), createdAt: now, updatedAt: now });
       var ni = rowIndexByCol_(sh, 'id', newId);
       if (ni < 0) { skipped++; continue; }
-      awardWriteFields_(sh, ni, a, types);
+      awardWriteFields_(sh, ni, a, types, true);
       existing[key] = newId;
       added++;
     }

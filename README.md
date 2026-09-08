@@ -51,7 +51,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.7.2"` 即通。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.7.3"` 即通。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -64,7 +64,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.7.2"` 即代表用緊最新後台。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.7.3"` 即代表用緊最新後台。
 
 ---
 
@@ -83,7 +83,7 @@
 
 ---
 
-## 🎖 獎勵提名（v4.7.2）
+## 🎖 獎勵提名（v4.7.3）
 
 `/awards` 一站式：**名冊 + 自動計「今年邊個夠期可以提名下一級」+ 年期自己改**。
 一入頁最上面就有 **🔔 提示橫額**（而家有幾多人夠期、跟邊個提名期、距區部死線幾多日、🔥 逐個名列出），
@@ -91,7 +91,7 @@
 
 | 分頁 | 做咩 |
 |---|---|
-| 🏅 提名建議 | 揀頒獎年份 → 自動分「創辦人紀念日獎勵」「童軍獎勵（大會操）」「自行申請」三組，列出夠期人選（等最耐排最前）、顯示提名截止日同倒數、一鍵匯出 CSV 名單 |
+| 🏅 提名建議 | **頒完獎打勾一次過登記獲獎**（寫返落名冊，自動跳去下一級）；揀頒獎年份 → 自動分「創辦人紀念日獎勵」「童軍獎勵（大會操）」「自行申請」三組，列出夠期人選（等最耐排最前）、顯示提名截止日同倒數、一鍵匯出 CSV 名單 |
 | 📋 獎勵名冊 | 全區獎勵記錄，搜尋／按狀態／按已有獎項篩選；新增、編輯、刪除；匯出 CSV |
 | ⚙️ 年期設定 | 每個獎項嘅**上一級**同**相隔年數**、分類、提名期、啟用與否，全部喺網頁改，唔使改程式；亦可以自己加新獎項（會自動喺 Sheet 補一欄） |
 | ⬆️ 匯入名單 | 由 Excel 直接複製貼上（支援 `GSA1985`／`LSM*2005`／`CCM2025?` 或「表頭 + 淨係年份」兩種寫法，亦識讀「86th since 2004/01/15」做服務開始年份），可合併更新或清空重寫 |
@@ -102,8 +102,10 @@
   3. 冇上一級又冇年期（例：感謝狀、**第一個長期服務獎章**）→ 唔自動推算，自己入紀錄（長期服務**一星之後**就會自動每 10 年提你）。年期留空但有上一級（例：銅獅勳章跟功績榮譽十字章）→ 一有上一級就列出，標「冇年期規定」。
 - **內建 18 個獎項**：GSA 優良服務獎章、DSA 優異服務獎章、DSM 功績榮譽獎章、DSC 功績榮譽十字章、銅／銀／金獅勳章、LSM 長期服務獎章及一至四星、香港總監嘉許／高級嘉許、民政及青年事務局局長嘉許、五年／十年長期服務獎狀、感謝狀。**預設年期**（用戶提供）：服務滿 **7 年**→優良服務獎章、之後 **5 年**→優異服務獎章、**7 年**→功績榮譽獎章、**5 年**→功績榮譽十字章、獅勳章**冇固定年期**；長期服務獎章**第一個由區會自己入**（預設唔自動推算，想自動就喺年期設定填 15），**一星之後**每 **10 年**自動提示。唔啱就自己喺「年期設定」改（有「↺ 套用建議年期」一鍵還原內建建議）。
 - **提名截止**（總會 ACR 20/2024）：創辦人紀念日獎勵 區部 10/31 → 總會 11/30（頒獎年前一年）；童軍獎勵 區部 4/30 → 總會 5/31（同年）。
-- 後台 4.7.2：新增 `Awards`（一人一行、每個獎一欄）同 `AwardTypes`（年期規則）兩張表 + `getAwardsBoard`／`saveAwardMember`／`deleteAwardMember`／`importAwardMembers`／`saveAwardTypes`；權限用卡片 `awards` = ✏️。
-- 測試：`node scripts/test-awards-gs.js`（20 項後台）、`node --experimental-strip-types scripts/test-awards-logic.ts`（24 項推算／匯入解析）。
+- 後台 4.7.3：新增 `Awards`（一人一行、每個獎一欄）同 `AwardTypes`（年期規則）兩張表 + `getAwardsBoard`／`saveAwardMember`／`deleteAwardMember`／`importAwardMembers`／`saveAwardTypes`；權限用卡片 `awards` = ✏️。
+- **每年加新獲獎人有三個入口**：①「🏅 提名建議」打勾 →「✅ 登記 N 項獲獎」（最快，頒完獎用）；②「📋 獎勵名冊 → ＋ 新增成員／編輯」逐個入（新人、補舊資料）；③「⬆️ 匯入名單」由 Excel 貼上（大批）。
+- `saveAwardMember` **只會寫 payload 有帶嘅欄**，所以淨係更新一個獎年份唔會清走旅團／職位／服務開始年份。
+- 測試：`node scripts/test-awards-gs.js`（21 項後台）、`node --experimental-strip-types scripts/test-awards-logic.ts`（24 項推算／匯入解析）。
 
 ## 📦 一次過借多款物資（v4.6.1）
 
@@ -217,6 +219,6 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 | `app/news/` | 消息發佈（發去成員系統首頁置頂） |
 | `app/awards/` | 獎勵提名（名冊 · 夠期推算 · 年期設定 · Excel 匯入） |
 | `scripts/test-news-gs.js` | 後台邏輯測試：消息發佈 + 批次借物資（node 直接跑，35 項） |
-| `scripts/test-awards-gs.js` | 獎勵提名後台測試（20 項） |
+| `scripts/test-awards-gs.js` | 獎勵提名後台測試（21 項） |
 | `scripts/test-awards-logic.ts` | 獎勵夠期推算／Excel 匯入解析測試（24 項，`node --experimental-strip-types`） |
 | `scripts/check-member-alignment.js` | 成員系統 ↔ 後台對齊檢查（action 缺漏 / proxy 白名單 / 安全邊界） |
