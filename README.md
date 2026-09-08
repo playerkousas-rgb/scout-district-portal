@@ -190,4 +190,5 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 | `lib/district.ts` | 區目錄（區碼 → apiBase 對照） |
 | `app/venue-regs/` | 場地借用審批頁 |
 | `app/news/` | 消息發佈（發去成員系統首頁置頂） |
-| `scripts/test-news-gs.js` | 消息發佈後台邏輯測試（node 直接跑） |
+| `scripts/test-news-gs.js` | 後台邏輯測試：消息發佈 + 批次借物資（node 直接跑，32 項） |
+| `scripts/check-member-alignment.js` | 成員系統 ↔ 後台對齊檢查（action 缺漏 / proxy 白名單 / 安全邊界） |

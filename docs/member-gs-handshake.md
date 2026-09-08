@@ -11,6 +11,14 @@
 >
 > 例外：成員系統首頁連去嘅**通告圖書館**係外接系統（`scout-circulars.vercel.app`），
 > 唔經 Sheet、唔經 GS，同本合約無關。
+>
+> **對齊檢查（每次成員系統更新後跑一次）：**
+> ```bash
+> node scripts/check-member-alignment.js               # 自動 clone 最新 member-portal
+> node scripts/check-member-alignment.js ../member-portal
+> ```
+> 會列出：① 成員端叫緊但後台冇嘅 action（＝佢會收到「未知的 action」）② proxy GET 白名單對唔對得上
+> ③ 有冇不小心放行咗需要登入／批核嘅 action。
 
 > 2026-09-07 已直接讀過 `https://github.com/playerkousas-rgb/member-portal.git`（HEAD `149f910`，Next 16 / React 19）核對：
 > 借場、借物資、活動知會、訓練班報名嘅欄名同呢邊 GS 一致。member-portal 自己嘅合約文件係 `docs/integration-contract.md`。
