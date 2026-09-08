@@ -196,6 +196,8 @@ export interface StockItem {
 export interface StockRequest {
   id: string;
   refCode?: string;
+  /** 一次過借多款物資時共用嘅批次編號（v4.6.1）；單件申請為空 */
+  batchRef?: string;
   submittedAt?: string;
   itemId?: string;
   itemName?: string;
@@ -302,6 +304,81 @@ export interface IncidentReport {
   createdAt?: string;
 }
 
+/**
+ * 消息發佈（v4.6.0）— News 表。
+ * 管理系統 /news 發佈 → 成員系統 member-portal 首頁頂部置頂顯示（純拉取，冇推送）。
+ * 呢邊刪咗／下架（active=false）／過咗 expiresAt → 成員系統下次載入即刻消失。
+ */
+/** 同成員系統 AnnouncementBanner 一致嘅詞彙（後台 v4.6.2 起；舊 warn/urgent 會自動對應）。 */
+export type NewsLevel = 'info' | 'warning' | 'important';
+
+export interface Announcement {
+  id: string;
+  districtCode?: string;
+  title: string;
+  body: string;
+  content?: string;       // = body，後台額外回一份畀成員系統讀（欄位名對齊）
+  date?: string;          // yyyy-MM-dd：顯示日期；日期喺將來 = 未到發佈日，成員端未見到
+  pinned?: boolean;       // 置頂：成員系統首頁頂部一直顯示
+  level?: NewsLevel;      // info 一般 / warning 請留意 / important 緊急
+  link?: string;          // 選填「查看詳情」連結
+  linkLabel?: string;
+  notify?: boolean;       // 允許成員端彈系統通知（Notification API；純顯示可忽略）
+  active?: boolean;       // 發佈中；FALSE = 下架
+  expiresAt?: string;     // yyyy-MM-dd：自動落架日（留空 = 一直顯示）
+  publishedAt?: string;
+  publishedBy?: string;
+  updatedAt?: string;
+  // 只喺管理系統 getAnnouncements 回傳
+  expired?: boolean;
+  scheduled?: boolean;
+  live?: boolean;
+}
+
+/**
+ * 🎖 獎勵提名（v4.7.1）— Awards / AwardTypes 表。
+ * 一人一行，每個獎項存獲獎年份（字串，可以係 "2015"、"2015?" 未確定、"無"）。
+ * 年期規則（邊個獎跟邊個、要相隔幾多年、屬邊個提名期）全部喺 AwardTypes 表，可喺 /awards 改。
+ */
+export type AwardRound = 'founder' | 'rally' | 'other';
+export type AwardMemberStatus = 'active' | 'noAppointment' | 'notInDistrict' | 'applying' | 'left';
+
+export interface AwardType {
+  code: string;            // 代號（同時係 Awards 表嘅欄名），例如 GSA
+  label: string;           // 全名，例如 優良服務獎章
+  short?: string;          // 表格用短名，例如 LSM*
+  category?: string;       // 功績榮譽／長期服務／嘉許／外部嘉許／其他
+  prevCode?: string;       // 上一級代號（空 = 入門級，冇得自動推算）
+  minYears?: number | null;// 距上一級最少年數（空 = 唔設限）
+  round: AwardRound;       // founder 創辦人紀念日／rally 大會操（童軍獎勵）／other 自行申請
+  note?: string;
+  enabled?: boolean;
+  orderNo?: number;
+}
+
+export interface AwardMember {
+  id: string;
+  districtCode?: string;
+  name: string;
+  nameEn?: string;
+  troop?: string;          // 旅團編號
+  position?: string;       // 職位（GSL / ASL / LAY …）
+  serviceStart?: string;   // 服務開始（委任）年份；入門級獎項（GSA 7 年、LSM 15 年）由呢個年份起計
+  status?: AwardMemberStatus;
+  note?: string;
+  awards: Record<string, string>;  // { GSA: '2015', LSM: '2020?' }
+  updatedAt?: string;
+}
+
+export interface AwardsBoard {
+  types: AwardType[];
+  members: AwardMember[];
+  counts: Record<string, number>;
+  total: number;
+  /** 後台內建建議年期（「↺ 套用建議」用，唔會自動覆蓋你改過嘅設定） */
+  defaults?: AwardType[];
+}
+
 export interface ActivityNotice {
   id: string;
   refCode?: string;
@@ -322,4 +399,48 @@ export interface ActivityNotice {
   leaderEmail?: string;
   note?: string;
   districtCode?: string;
+}
+
+/**
+ * 🏕 旅團探訪（v4.8.1）— Units（旅團名單）＋ Visits（探訪記錄）。
+ * 幹部撳一下旅團格仔就登記；DC 揀日期範圍出報告，仲睇到邊個幹部探咗邊啲旅。
+ */
+export type VisitSection = 'gh' | 'cub' | 'scout' | 'venture' | 'rover';
+export type VisitKind = 'general' | 'inspection' | 'meeting' | 'section' | 'event' | 'other';
+
+export interface ScoutUnit {
+  troop: string;                              // 旅號，例如 "206"
+  label: string;                              // 港島第206旅
+  org?: string;                               // 主辦機構
+  sections: Record<VisitSection, string>;     // 各支部團數（"" = 冇該支部）
+  active?: boolean;
+  note?: string;
+}
+
+export interface Visit {
+  id: string;
+  districtCode?: string;
+  troop: string;
+  section?: VisitSection | '';
+  visitDate: string;        // yyyy-MM-dd
+  year?: number;
+  quarter?: number;         // 1..4
+  kind: VisitKind;
+  visitorName?: string;
+  visitorEmail?: string;
+  note?: string;
+  followUp?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface VisitBoard {
+  from: string;
+  to: string;
+  today: string;
+  units: ScoutUnit[];
+  visits: Visit[];
+  years: number[];
+  sections: { key: VisitSection; label: string }[];
+  me: { email: string; role: string; name: string; defaultSection: VisitSection | '' };
 }

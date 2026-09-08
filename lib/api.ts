@@ -8,6 +8,7 @@ import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
   CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
+  Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
 } from './types';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers';
 import type { IcsEvent } from './ics';
@@ -182,6 +183,10 @@ export const api = {
   getStockRequests: (token: string): Promise<ApiResult<StockRequest[]>> => callGet('getStockRequests', { token }),
   setStockRequestStatus: (token: string, id: string, status: string): Promise<ApiResult<{ saved: boolean }>> =>
     callPost('setStockRequestStatus', { token, id, status }),
+  /** 一次過批核整張多款物資申請（同一 batchRef）；庫存逐行加減，只寄一封通知 */
+  setStockBatchStatus: (token: string, batchRef: string, status: string):
+    Promise<ApiResult<{ saved: boolean; batchRef: string; count: number; failed: string[] }>> =>
+    callPost('setStockBatchStatus', { token, batchRef, status }),
   saveItem: (token: string, item: StockItem): Promise<ApiResult<{ saved: boolean }>> =>
     callPost('saveItem', { token, item }),
   deleteItem: (token: string, itemId: string): Promise<ApiResult<{ deleted: boolean }>> =>
@@ -194,6 +199,53 @@ export const api = {
     callPost('submitActivityNotice', data),
   deleteActivityNotice: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteActivityNotice', { token, id }),
+
+  // 消息發佈（v4.6.0）：呢邊發 → 成員系統 member-portal 首頁頂部置頂顯示；呢邊刪／下架即刻消失
+  /** 公開讀（同成員系統睇到嘅完全一樣）：pinnedOnly 只要置頂 */
+  listAnnouncements: (params: { pinnedOnly?: boolean; limit?: number; since?: string } = {}): Promise<ApiResult<Announcement[]>> =>
+    callGet('listAnnouncements', {
+      ...(params.pinnedOnly ? { pinnedOnly: '1' } : {}),
+      ...(params.limit ? { limit: String(params.limit) } : {}),
+      ...(params.since ? { since: params.since } : {}),
+    }),
+  /** 管理系統列表：連未到期／已過期／已下架都回 */
+  getAnnouncements: (token: string): Promise<ApiResult<Announcement[]>> =>
+    callGet('getAnnouncements', { token }),
+  /** 新增（id 留空）或更新消息 */
+  saveAnnouncement: (token: string, announcement: Partial<Announcement>): Promise<ApiResult<{ saved: boolean; id: string; created: boolean }>> =>
+    callPost('saveAnnouncement', { token, announcement }),
+  // ── 🎖 獎勵提名（v4.7.0）──────────────────────────────
+  /** 一次過攞名冊 + 年期規則 */
+  getAwardsBoard: (token: string): Promise<ApiResult<AwardsBoard>> =>
+    callGet('getAwardsBoard', { token }),
+  /** 新增（id 留空）或更新一位成員 */
+  saveAwardMember: (token: string, member: Partial<AwardMember>): Promise<ApiResult<{ saved: boolean; id: string; created: boolean }>> =>
+    callPost('saveAwardMember', { token, member }),
+  deleteAwardMember: (token: string, id: string): Promise<ApiResult<{ deleted: boolean; id: string }>> =>
+    callPost('deleteAwardMember', { token, id }),
+  /** 由 Excel 貼上批量匯入；mode: merge（同名同旅團更新）／replace（清空重寫） */
+  importAwardMembers: (token: string, rows: Partial<AwardMember>[], mode: 'merge' | 'replace'): Promise<ApiResult<{ added: number; updated: number; skipped: number }>> =>
+    callPost('importAwardMembers', { token, rows, mode }),
+  /** 儲存獎項及年期設定（整張表覆寫） */
+  // ── 🏕 旅團探訪（v4.8.1）──────────────────────────────
+  getVisitBoard: (token: string, from?: string, to?: string): Promise<ApiResult<VisitBoard>> =>
+    callGet('getVisitBoard', { token, ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  saveVisit: (token: string, visit: Partial<Visit>): Promise<ApiResult<{ saved: boolean; id: string; troop: string; visitDate: string }>> =>
+    callPost('saveVisit', { token, visit }),
+  deleteVisit: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
+    callPost('deleteVisit', { token, id }),
+  saveUnits: (token: string, units: ScoutUnit[]): Promise<ApiResult<{ saved: boolean; count: number }>> =>
+    callPost('saveUnits', { token, units }),
+
+  saveAwardTypes: (token: string, types: AwardType[]): Promise<ApiResult<{ saved: boolean; count: number; newColumns: string[] }>> =>
+    callPost('saveAwardTypes', { token, types }),
+
+  deleteAnnouncement: (token: string, id: string): Promise<ApiResult<{ deleted: boolean; id: string }>> =>
+    callPost('deleteAnnouncement', { token, id }),
+  setAnnouncementPinned: (token: string, id: string, pinned: boolean): Promise<ApiResult<{ saved: boolean; id: string; pinned: boolean }>> =>
+    callPost('setAnnouncementPinned', { token, id, pinned }),
+  setAnnouncementActive: (token: string, id: string, active: boolean): Promise<ApiResult<{ saved: boolean; id: string; active: boolean }>> =>
+    callPost('setAnnouncementActive', { token, id, active }),
 
   // 意外／應變：意外報告（只喺按「確定提交」時先送後台；草稿留喺本機）
   submitIncidentReport: (token: string, report: IncidentReport): Promise<ApiResult<{ refCode: string; id: string }>> =>

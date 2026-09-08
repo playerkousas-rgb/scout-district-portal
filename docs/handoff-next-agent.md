@@ -1,5 +1,62 @@
-# 下一手 Agent 交接備忘（v4.5.0）
+# 下一手 Agent 交接備忘（v4.8.1）
 
+> 2026-09-08（第七輪）v4.7.0：**🎖 獎勵提名**（用戶指定「一站式，全部喺 app 入面睇同改」）。
+> 後台加 `Awards`（一人一行，每個獎一欄＝獲獎年份，值可以係 `2015` / `2015?` / `無`）同 `AwardTypes`（年期規則）兩張表，
+> action：`getAwardsBoard`（一 call 攞晒名冊＋規則）／`saveAwardMember`／`deleteAwardMember`／`importAwardMembers`（merge／replace）／`saveAwardTypes`；
+> 權限卡片 `awards` = edit。**加新獎項會由 `ensureAwardColumns_` 自動喺 Awards 表補欄**，唔會清舊資料。
+> 前端 `app/awards/page.tsx` 四個分頁（提名建議／名冊／年期設定／匯入），推算邏輯全部喺純函數 `lib/awards.ts`（好測）。
+> **v4.7.1（同日修訂，用戶親口更正年期）**：
+> 入門級唔跟上一級，而係跟**服務開始年份**——所以 `Awards` 表加咗 `serviceStart` 欄（`awardServiceStart_` 會由 `2004`／`2004-01-15`／Date／`86th since 2004/01/15` 抽 4 位年份）。
+> 正確年期：服務 **7 年** → GSA → **5** → DSA → **7** → DSM → **5** → DSC → 銅獅（**冇固定年期**，`minYears` 留空＝有上一級就列出並標 `noRule`）；LSM 服務 **15 年**，其後每 **10** 年一星。
+> `eligibilityFor` 三分支：① 有 `prevCode` ② 冇 prevCode 但有 minYears → `serviceStart + minYears`（`fromService: true`；冇服務年份就略過，靠 `missingServiceStart()` 喺提名頁提示）③ 兩樣都冇 → 唔推算。
+> `getAwardsBoard` 多回 `defaults`（＝`awardTypeSeed_()`），前端「⚙️ 年期設定 → ↺ 套用建議年期」用嚟一鍵還原。
+> **v4.7.2（同日再修）**：用戶要求「一撳入成人獎勵就要提示同標亮邊個可以被提名」。
+> 前端加 `AlertBanner`（用 `upcomingRounds()` 搵返每個提名期死線仲未過嗰屆 → `nominationBoard` 數人 → 🔥 chips），
+> 名冊用 `readyByMember()` 標亮成行（`.aw-hot-row`）＋「只睇夠期可提名」篩選＋標亮年份選擇器＋CSV 多一欄。
+> seed 再改：**LSM 第一個 minYears 留空**（用戶話第一個佢自己入），LSM1–4 維持 10；HAB／FIVE 亦留空免雜訊。
+> **v4.7.3**：提名建議每行加剔格 →「✅ 登記 N 項獲獎」→ 按人合併 `saveAwardMember({id,name,awards:{CODE:year}})`。
+> 配合改咗 `awardWriteFields_(sh,row,a,types,isNew)`：**只寫 payload 有嘅欄**（isNew 例外，寫齊做預設），
+> 所以局部更新唔會清走 troop／position／serviceStart／note。`importAwardMembers_` 兩個 call site 已跟住傳 isNew。
+> **v4.8.1 🏕 旅團探訪**（用戶自己諗掂點做）：幹部撳一下旅團格仔就登記，DC 揀日期範圍出報告。
+> 後台加 `Units`（旅團名單，seed = 港島地域官網筲箕灣區 28 旅，連五個支部團數）同 `Visits`（一次探訪一行，有 `section` 欄）；
+> action `getVisitBoard(token, from, to)`／`saveVisit`／`deleteVisit`／`saveUnits`（會同步 `Config TROOP_LIST`）；卡片 `visit` = edit。
+> 角色 → 預設支部：`VISIT_ROLE_SECTION`（ADC_GH/ADC_CUBS/ADC_SCOUT），前端仲會用 localStorage `skw.visit.section` 記住揀擇。
+> 純邏輯喺 `lib/visits.ts`（`troopStats`／`coverage`／`visitorStats`／`rangePresets`／`parseUnitPaste`）。
+> ⚠️ vm 測試提醒：`v instanceof Date` 跨 realm 會 false，所以 `visitDate_` 改用 `Object.prototype.toString.call(v)`。
+> 🧪 本機預覽用 `node scripts/mock-gs-server.js`（in-repo，sandbox 重置都唔會冇；apiKey 固定 `dev`，登入 sheep/0728）。
+> 🛑 **委任系統／旅團管理系統暫時 hold**：用戶話委任資料難搞；旅團管理佢自己另有一套系統，日後先接，仲要處理私隱。
+> ⏭ **用戶未來想要**：全區領袖「委任年期 list」——有新委任就登記入去，令「無 → GSA（服務滿 7 年）」呢級真正計得準。
+> 而家係靠 `Awards.serviceStart` 逐個人填；下一步可以考慮同 Staff／成員系統委任資料對接，或者做一張 `Appointments` 表。
+> 用戶自己喺「年期設定」改得，所以千祈唔好 hardcode 返落程式。
+> 提名截止（總會 ACR 20/2024）：創辦人紀念日 區部 10/31 → 總會 11/30（頒獎年前一年）；童軍獎勵（大會操）區部 4/30 → 總會 5/31（同年）。
+> 縮寫對照：CCM 香港總監嘉許（黃笛繩）／CCH 香港總監高級嘉許／HAB 民政及青年事務局局長嘉許（前稱民政事務局）／THANKS 感謝狀（DA2）／FIVE・TEN 五年十年長期服務獎狀（會務委員）。
+> 🔒 **用戶份真實獎勵 Excel（100+ 真名）冇 commit 落 repo，亦唔應該 commit**；要試就用 `/tmp/mockgs/server.js` 入面嘅假名 seed。
+> 順手補咗 `app/visit/page.tsx`（之前主控台「旅團探訪」卡撳落去 404）。測試：`node scripts/test-awards-gs.js`（21）＋ `node --experimental-strip-types scripts/test-awards-logic.ts`（24）。
+>
+> 2026-09-08（第六輪）v4.6.2：**欄位對齊成員系統**。member-portal 上咗自己嗰版消息功能（`bb44fe6`：`AnnouncementBanner` + Web Push），
+> 佢個 proxy `publicAnnouncement()` 白名單讀 `{ id, title, content, date, pinned, level }` 而且 `level` 只認 `info|warning|important`
+> —— 我哋以前回 `body` + `warn/urgent`，結果**內容空白兼全部藍色，兩邊都唔會報錯**。修正：`newsPublic_` 多回 `content`（＝`body`）、
+> `NEWS_LEVELS` 改 `info|warning|important` 並用 `NEWS_LEVEL_ALIAS` 自動對應舊 `warn|urgent`（Sheet 舊資料唔使改）、
+> `saveAnnouncement_` 接受 `content` 別名、`courseLinkPublic_` 補回 `active`。前端 `NewsLevel` 同 `/news` 選項改新詞彙，CSS 保留舊 class 做別名。
+> **`scripts/check-member-alignment.js` 加咗第 [4] 欄位名對齊同第 [5] level 值域檢查**（就係為咗自動捉呢類「唔報錯但顯示錯」問題）——
+> 以後成員系統一更新，跑呢個 script 就夠。member-portal 嘅 Web Push 用 Supabase + VAPID，**唔經 GS**，後台唔使加嘢。
+> 已刪 `docs/member-portal-news-banner.patch`（成員端已有自己實作，個 patch 會誤導；要睇就翻 git 歷史）。測試 32 → **35 項**。
+>
+> 2026-09-08（第五輪）v4.6.1：用戶定案 **`gs/Code.gs` 係兩邊唯一後台**（member-portal 由另一個 agent 負責，只讀＋提交，唔會養第二份 GS；首頁通告圖書館係外接系統，同 Sheet／GS 無關）。
+> 對數發現唯一缺口 `submitStockBatchRequest`（member-portal proxy 一直有叫，之前 fallback 逐件 POST）→ 已補：全部夠貨先寫、同款合併數量、共用 `batchRef`、只寄一封通知；
+> `StockRequests` 加 `batchRef` 欄；新 `setStockBatchStatus`（batch 批核，庫存逐行加減、只寄一封）；重構出 `resolveStockLines_` / `writeStockRow_` / `applyStockStatusRow_`（單件同批次共用，庫存永遠只加減一次）。
+> `/stock-regs` 前端按 `batchRef` 分組顯示「🧾 一張申請 · N 款」＋整批掣。測試 `node scripts/test-news-gs.js` 由 19 → **32 項**。
+> ⚠️ 加新 action 之後記得同步：`docs/member-gs-handshake.md`（合約）＋ health check `version`（而家 4.6.1）＋ README／updates 頁。
+>
+> 2026-09-08（第四輪）v4.6.0：**消息發佈 News**——管理系統 `/news` 發 → 成員系統 member-portal 首頁置頂顯示（方案 2「一直置頂」，pull on open，冇推送）。
+> 後台 `gs/Code.gs` 4.6.0：新 `News` 表（`title/body/date/pinned/level/link/linkLabel/notify/active/expiresAt/publishedAt/publishedBy/updatedAt`）、
+> 公開 `listAnnouncements`（參數 `pinnedOnly`／`limit`≤50／`since`；已下架、`expiresAt` 過期、`date` 喺將來嘅一律唔回；公開版剝走 `active`／`publishedBy`）、
+> 登入 `getAnnouncements`（加 `expired`／`scheduled`／`live`）、`saveAnnouncement`／`deleteAnnouncement`／`setAnnouncementPinned`／`setAnnouncementActive`。
+> 權限用**新 helper `requireCardEdit_(token, cardId)`**（直接讀 Perms 矩陣，唔再加 `canXxx` 欄；level 0 超管永遠可）——之後新卡片照跟呢個做法。
+> 前端：卡片 `news`（order 4，opsEdit）、`app/news/page.tsx`（發佈／編輯／置頂／下架／刪除＋成員端預覽）、`components/NewsBanner.tsx`（主控台頂部，同成員睇到同一份資料）、`lib/types.ts` `Announcement`、`lib/api.ts` 6 個 wrapper、`app/globals.css` `.news-*`。
+> 測試：`node scripts/test-news-gs.js`（vm stub Apps Script，19 項，唔使開 GAS）。本機預覽：`/tmp/mockgs/server.js`（載入真 Code.gs + 記憶體 Sheet + seed 3 則消息）＋ `PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec npx next dev`，登入 `sheep` / `0728`（MASTER）。
+> member-portal 嗰邊後來自己實作咗（`bb44fe6`），原本嘅 patch 已刪（見第六輪）。
+>
 > 2026-09-07（第三輪）v4.5.0：**外部資料全部由 Vercel `app/api/external/route.ts` 代抓**（sandbox 對外連線被封，只能用 fixture 測；`PORTAL_DEV_EXTERNAL_BASE` 指向 mock `/upstream?u=`）。解析器 `lib/externalParsers.ts`（職員表／總監架構／諮議會／各署／預算 CSV，純函數）、`lib/ics.ts`（ICS + RRULE 展開，香港時間）、`lib/roomsDirectory.ts`（11 間房日曆 ID、打通關係 `combo`）、`lib/orgDirectory.ts`（架構靜態備援）、`lib/externalSources.ts`（來源網址）。頁面：`/budget`（`api.extBudget`，Config `BUDGET_SHEET_URL` 覆蓋 Sheet）、`/rooms`（逐間房逐日／今日總覽／原版 iframe）、`/orgchart`（地域＋總會）、`/contacts` 港島地域只剩 `staff` 組並即時同步，`rc/dc/hq/ahq` 組已刪（搬去 orgchart 備援）。後台 Code.gs 4.5.0：Cards +`rooms`／`orgchart`（ALL_VIEW）、`budget` done、Config `BUDGET_SHEET_URL`、`getConfig` 回 `budgetSheetUrl`；**刪 `annual` 週年會議文件卡**（`removeIds` 內，`app/annual-docs` 已刪；刪 route 後記得 `rm -rf .next/types/app/annual-docs` 先過 tsc）。mock：`/tmp/mockgs/gas-emu.js`（Apps Script 模擬器）+ `server.js`（GS `/exec` + 上游 fixture `/upstream`）+ `test45.js`（33 assertions，包括 v4.4.0→4.5.0 升級路徑）——sandbox 重置會冇咗，要用時照 README 描述重寫。
 > ⚠️ 真實網頁解析未經真機驗證（sandbox 出唔到網）：部署後請開 `/api/external?kind=regionStaff`／`regionOrg`／`hksaCouncil`／`hksaDepts`／`budget`／`rooms` 逐個睇 `ok:true`；scout.org.hk 對非瀏覽器 UA 可能 403（route 已帶 Chrome UA），如仍失敗前端會自動用內建備援並標「⚪ 官方網頁暫時讀唔到」。
 >

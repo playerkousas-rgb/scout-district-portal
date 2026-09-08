@@ -1,9 +1,142 @@
-# member-portal ↔ 統一後台（GS）對接合約 v4.3.0
+# member-portal ↔ 統一後台（GS）對接合約 v4.6.2
 
 兩邊共用同一份 `gs/Code.gs`、同一張 Sheet、同一個 `/exec` + API Key。
 
+> ## ⭐ 唯一後台原則（2026-09-08 定案）
+> **`scout-district-portal/gs/Code.gs` 係唯一後台來源**：所有 Sheet 結構、action、權限、電郵、庫存邏輯一律喺呢邊改，
+> member-portal **唔會**、亦**唔應該**自己養一份 Code.gs 或者自己 patch Sheet。
+> 成員系統嗰邊只做三件事：① 揀區 ② 經自己 proxy 用**公開 action** 讀選項 ③ 提交表格。
+> 佢個 proxy 嘅 action allowlist ／ 欄位白名單係**安全邊界**，唔係業務邏輯——後台加咗新 action，
+> 成員端唔加白名單就淨係「用唔到」，唔會出錯。
+>
+> 例外：成員系統首頁連去嘅**通告圖書館**係外接系統（`scout-circulars.vercel.app`），
+> 唔經 Sheet、唔經 GS，同本合約無關。
+>
+> **對齊檢查（每次成員系統更新後跑一次）：**
+> ```bash
+> node scripts/check-member-alignment.js               # 自動 clone 最新 member-portal
+> node scripts/check-member-alignment.js ../member-portal
+> ```
+> 會列出：① 成員端叫緊但後台冇嘅 action（＝佢會收到「未知的 action」）② proxy GET 白名單對唔對得上
+> ③ 有冇不小心放行咗需要登入／批核嘅 action。
+
 > 2026-09-07 已直接讀過 `https://github.com/playerkousas-rgb/member-portal.git`（HEAD `149f910`，Next 16 / React 19）核對：
 > 借場、借物資、活動知會、訓練班報名嘅欄名同呢邊 GS 一致。member-portal 自己嘅合約文件係 `docs/integration-contract.md`。
+
+## 📦 一次過借多款物資 `submitStockBatchRequest`（v4.6.1 補上）
+
+成員系統一張表揀幾款物資時會**先叫呢個 action**；舊版後台冇 → 佢要 fallback 逐件 POST
+（N 次來回、可能寫一半、申請人收 N 封信）。而家統一由本檔處理，fallback 唔會再行到。
+
+```
+member-portal 一張表揀 3 款
+   POST submitStockBatchRequest
+   { name, phone, email, troop, position, purpose, borrowDate, returnDate, agreeRules,
+     items: [{itemId, qty}, …], batchRef?（成員端自己生成亦可，格式 [A-Za-z0-9_-]{1,40}） }
+        │
+        ├─ 先**全部核對**（物資存在／數量>0／夠貨）——任何一款唔掂 → 成批唔寫
+        ├─ 同一款物資揀兩次 → 自動合併數量
+        └─ 每款寫一行 StockRequests（status=pending），**共用同一個 `batchRef`**
+        │
+        ▼
+{ "ok": true, "refCode": "SB-…", "refCodes": ["SR-…","SR-…"], "data": { "batchRef": "SB-…",
+  "submittedCount": 2, "requestedCount": 2 } }
+```
+
+- 只寄**一封**通知俾區職員（列晒全部物資），唔會逐件洗版。
+- 提交唔扣庫存（同單件一樣，**批准先扣**）。
+- 管理系統 `/stock-regs` 會將同一 `batchRef` 嘅行合成「🧾 一張申請 · N 款物資」，
+  可以 `setStockBatchStatus`（POST `{token, batchRef, status}`，需 `canStock`）
+  一次過批准／拒絕／歸還：庫存逐行加減（重複批唔會重複扣），申請人只收一封信。
+- `StockRequests` 新增 `batchRef` 欄（`setupSheets()` 會自動補，唔清空）；舊資料留空 = 單件申請，行為完全不變。
+- 單件 `submitStockRequest` 一切照舊；佢亦接受 `batchRef` 透傳。
+
+## 📢 消息發佈（v4.6.0 新增）— 管理系統發，成員系統首頁置頂顯示
+
+做法＝**方案 2「一直置頂」（pull on open + pinned display）**：冇推送、冇 Service Worker、冇 badge。
+member-portal 每次載入首頁 fetch 一次公開 action，有置頂消息就顯示，冇就隱藏。
+
+```
+管理系統 /news「＋ 發佈消息」→ saveAnnouncement（需 Perms 矩陣 news = edit）
+        │
+        ▼
+主 Sheet 新工作表 News（setupSheets() 自動補建，唔清空）
+        │
+        ▼
+GET listAnnouncements（成員端唔帶參數，全部拎，佢自己 filter pinned）← 公開、免登入、no-store
+        │
+        ▼
+member-portal 首頁 <AnnouncementBanner /> 頂部置頂顯示
+        │
+管理系統刪除／下架／過咗自動落架日 → 呢邊下次載入即刻消失
+```
+
+### News 表欄位
+
+| 欄 | 說明 |
+|---|---|
+| `id` | `nw_xxx`，後台自動生成 |
+| `districtCode` | 自動填 |
+| `title` / `body` | 標題／內容（必填）。公開回應會**同時**回一份 `content`（＝`body`），因為成員端讀 `content` |
+| `date` | `yyyy-MM-dd` 顯示日期；**填將來日期＝到嗰日先出現（排期）** |
+| `pinned` | `TRUE` = 成員系統首頁頂部一直顯示 |
+| `level` | `info`（藍）／`warning`（黃）／`important`（紅）※ 舊資料 `warn`／`urgent` 讀寫時自動對應 |
+| `link` / `linkLabel` | 選填「查看詳情」連結（member proxy 只放行 http(s)） |
+| `notify` | 允許成員端彈系統通知（純顯示版可以唔理；升級做方案 1 先用） |
+| `active` | `FALSE` = 下架（記錄仍在，成員端即刻唔見） |
+| `expiresAt` | `yyyy-MM-dd` 自動落架日，過咗自動消失（留空 = 一直顯示） |
+| `publishedAt` / `publishedBy` / `updatedAt` / `createdAt` | 系統自動 |
+
+### Actions
+
+| action | 方式 | 權限 | 用途 |
+|---|---|---|---|
+| `listAnnouncements` | GET | **公開** | 成員系統讀；參數 `pinnedOnly=1`／`limit`（≤50）／`since=ISO`（只回之後更新過嘅，用嚟做「有新消息」判斷） |
+| `getAnnouncements` | GET `token` | 登入 | 管理系統列表：連已下架／已過期／排期中都回，另加 `expired` / `scheduled` / `live` |
+| `saveAnnouncement` | POST `{token, announcement}` | `news` = edit | `announcement.id` 留空 = 新增；`id`／`publishedAt`／`publishedBy` 鎖欄唔改得 |
+| `deleteAnnouncement` | POST `{token, id}` | `news` = edit | |
+| `setAnnouncementPinned` | POST `{token, id, pinned}` | `news` = edit | |
+| `setAnnouncementActive` | POST `{token, id, active}` | `news` = edit | 上架／下架 |
+
+`listAnnouncements` 公開回應**唔會**有 `active` / `publishedBy`；已下架、已過期、未到日期嘅一律唔會出現。
+未建 News 表（舊後台）→ 回空陣列，member-portal 唔會爆。
+
+#### ⚠️ 欄位名／值域必須對齊（v4.6.2 修正）
+
+成員端 `AnnouncementBanner` 只讀 **`{ id, title, content, date, pinned, level }`**，
+而佢個 proxy `publicAnnouncement()` 係欄位白名單 —— 唔喺名單嘅 key（`link`／`linkLabel`／`notify`／`districtCode`／`body`）
+會**靜靜哋被剝走**，唔會報錯。所以後台：
+
+| 佢讀 | 後台回 | 備註 |
+|---|---|---|
+| `content` | `content`（v4.6.2 新增，＝`body`） | 以前只回 `body` → 成員端內容一片空白 |
+| `level` | `info` / `warning` / `important` | 以前回 `warn` / `urgent` → 成員端唔認得，一律降級做藍色 `info` |
+| `pinned` | boolean | 佢接受 `true` 或字串 `"TRUE"` |
+| `date` | `yyyy-MM-dd` | 佢個 proxy 會再按 `date` 由新到舊排 |
+
+`saveAnnouncement` 亦接受 `content` 當內容（`body` 優先），方便兩邊共用同一份 payload。
+
+> **對齊檢查（每次成員系統更新後跑）**：`node scripts/check-member-alignment.js`
+> —— 第 [4]／[5] 項就係專門查呢兩類「唔會報錯但顯示錯」嘅問題。
+
+### member-portal 現況（已上線，commit `bb44fe6`）
+
+| 檔案 | 內容 |
+|---|---|
+| `app/api/proxy/route.ts` | `GET_ACTIONS` 加 `listAnnouncements` + `publicAnnouncement()` 欄位白名單 + 按 `date` 排序 |
+| `lib/types.ts` / `lib/api.ts` | `Announcement`（`id/title/content/date/pinned/level`）＋ `api.listAnnouncements()`（唔帶參數） |
+| `components/AnnouncementBanner.tsx` | 首頁最頂：pinned 全部展示、可展開內容；另用 `localStorage` 記低上次見過嘅最新 id，有新消息就彈一次 Notification |
+| `app/page.tsx` | hero 上面 `<AnnouncementBanner />` |
+
+管理端呢邊照舊：`/news` 發佈／置頂／下架／刪除 → 成員端下次載入即刻同步。
+
+> 🔔 **通告圖書館 Web Push（member-portal `762e35a`）同本後台無關**：
+> 佢用 Supabase（`SUPABASE_URL`／`SUPABASE_SERVICE_KEY`）+ VAPID key 直接同 scout-circulars 對接，
+> 冇經 Apps Script、冇寫 Sheet。GS 呢邊**唔使加任何嘢**，只需要 `listAnnouncements`（已有）。
+
+
+想升級做**方案 1（開 app 彈系統通知）**：唔使再改後台，`NewsBanner.tsx` 檔頭註釋已寫好嗰十行——
+比較 `items[0].updatedAt` 同 `localStorage.news_seen`，新過就 `Notification.requestPermission()`。
 
 ## 訓練班收費 FPS QR（v4.3.0 新增）
 
@@ -180,10 +313,10 @@ member-portal 填表
 健康檢查 `?action=getHealthCheck`（免 Key）會回：
 
 ```json
-{ "version": "4.3.0", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
+{ "version": "4.6.2", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
 ```
 
-`version` 要係 `4.3.0` 先代表呢版 GS 已貼上線。
+`version` 要係 `4.6.2` 先代表呢版 GS 已貼上線。
 
 ## 部署
 

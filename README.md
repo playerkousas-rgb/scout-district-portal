@@ -51,7 +51,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.5.0"` 即通。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.8.1"` 即通。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -64,7 +64,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.5.0"` 即代表用緊最新後台。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.8.1"` 即代表用緊最新後台。
 
 ---
 
@@ -82,6 +82,90 @@
 - 要令舊後台出現呢張新卡片：貼新 `gs/Code.gs` → 執行 `setupSheets()`（自動補建缺失卡片＋權限，唔會洗資料）。
 
 ---
+
+## 🏕 旅團探訪（v4.8.1）
+
+`/visit` — 幹部撳一下旅團格仔就登記探訪；DC 揀日期範圍即出報告。
+
+| 分頁 | 做咩 |
+|---|---|
+| 🗺 探訪登記 | 全區旅團排成**方塊磚**：**未探紅框、探過綠框**。撳方塊 = 揀咗（藍色 ✔），同一日可以一次過揀 X／Y／Z 幾個旅；撳「💾 儲存登記」先會寫後端（**未撳 Save 咩都唔會入數**）。**一日一個旅淨係一次**：已經登記咗嗰日嘅方塊會鎖住（🔒）。日期預設今日、**Save 嗰日就係探訪日期**；聽日入返嚟自動清零，同一個旅下個月再探再撳過就得。方塊右下「✎ 詳細」可以補日期／備註／跟進 |
+| 📊 探訪報告 | 揀「由幾月到幾月」（有本季／全年／上下半年／9 月–8 月童軍年度快捷掣）→ 探訪 list ＋ **邊個幹部探咗幾多次、探過邊啲旅** ＋ 仲有邊幾旅未探 → 一鍵匯出 CSV 交總會 |
+| ⚙️ 旅團名單 | 全區 28 個旅（旅號、主辦機構、五個支部團數），可直接改或者由官網／Excel 貼上；改完會順手同步 `Config TROOP_LIST`，「活動知會」「聯結簿」一齊更新 |
+
+- **一入去只睇自己支部**：跟角色自動揀（`ADC_GH` → 小童軍、`ADC_CUBS` → 幼童軍、`ADC_SCOUT` → 童軍），DC 等其他角色 = 全部支部；頂部隨時切換，揀完會記住（localStorage）。
+- **支部分開計**：探咗 17 旅童軍團，唔會當幼童軍團都探咗；冇填支部嘅記錄當「全旅」，邊個支部都計入。
+- 內建旅團名單跟港島地域官網「筲箕灣區旅團一覽表」（覆檢日期 2026-03-31），`101` 旅嗰啲 `1+A1+S1`（空童軍團／海童軍團）寫法照樣保留。
+- 後台 4.8.1：新增 `Units`（旅團名單）同 `Visits`（探訪記錄）兩張表 + `getVisitBoard`／`saveVisit`／`deleteVisit`／`saveUnits`；權限用卡片 `visit` = ✏️。
+- **一日一個旅一次（v4.8.1）**：同一日、同一個旅、同一位幹部只會有一筆記錄 —— 轉支部撳都當同一次（「今日去咗 206 旅」就係一次）。前端方塊會鎖住，後台 `saveVisit` 都會擋（雙重保險）。第二位幹部同日探同一個旅 = 佢有佢名下嗰筆（會先確認）。第二日、下個月再探同一個旅照樣得。
+- **防呆**：揀咗未儲存唔會寫後端；離開頁面會提示；儲存前有確認清單；寫失敗嗰啲會留返喺揀選度可以再試。
+- 測試：`node scripts/test-visit-gs.js`（18 項後台）、`node --experimental-strip-types scripts/test-visit-logic.ts`（18 項報告邏輯）。
+
+## 🎖 獎勵提名（v4.7.3）
+
+`/awards` 一站式：**名冊 + 自動計「今年邊個夠期可以提名下一級」+ 年期自己改**。
+一入頁最上面就有 **🔔 提示橫額**（而家有幾多人夠期、跟邊個提名期、距區部死線幾多日、🔥 逐個名列出），
+「📋 獎勵名冊」入面夠期嗰啲人會**成行標亮 + 🔥 可提名**並排最前，仲有「🔥 只睇夠期可提名」篩選。
+
+| 分頁 | 做咩 |
+|---|---|
+| 🏅 提名建議 | **頒完獎打勾一次過登記獲獎**（寫返落名冊，自動跳去下一級）；揀頒獎年份 → 自動分「創辦人紀念日獎勵」「童軍獎勵（大會操）」「自行申請」三組，列出夠期人選（等最耐排最前）、顯示提名截止日同倒數、一鍵匯出 CSV 名單 |
+| 📋 獎勵名冊 | 全區獎勵記錄，搜尋／按狀態／按已有獎項篩選；新增、編輯、刪除；匯出 CSV |
+| ⚙️ 年期設定 | 每個獎項嘅**上一級**同**相隔年數**、分類、提名期、啟用與否，全部喺網頁改，唔使改程式；亦可以自己加新獎項（會自動喺 Sheet 補一欄） |
+| ⬆️ 首次匯入 | **開檔一次過用**：由 Excel 直接複製貼上（支援 `GSA1985`／`LSM*2005`／`CCM2025?` 或「表頭 + 淨係年份」兩種寫法，亦識讀「86th since 2004/01/15」做服務開始年份），可合併更新或清空重寫 |
+
+- **點計夠期**（三種情況）：
+  1. **有上一級**（例：DSA 跟 GSA）→ 上一級年份 ＋ 設定年期 ≤ 頒獎年份。
+  2. **入門級**（優良服務獎章、長期服務獎章）→ **服務開始年份 ＋ 設定年期** ≤ 頒獎年份；所以名冊有「服務開始」一欄，未填會喺提名頁出提示。
+  3. 冇上一級又冇年期（例：感謝狀、**第一個長期服務獎章**）→ 唔自動推算，自己入紀錄（長期服務**一星之後**就會自動每 10 年提你）。年期留空但有上一級（例：銅獅勳章跟功績榮譽十字章）→ 一有上一級就列出，標「冇年期規定」。
+- **內建 18 個獎項**：GSA 優良服務獎章、DSA 優異服務獎章、DSM 功績榮譽獎章、DSC 功績榮譽十字章、銅／銀／金獅勳章、LSM 長期服務獎章及一至四星、香港總監嘉許／高級嘉許、民政及青年事務局局長嘉許、五年／十年長期服務獎狀、感謝狀。**預設年期**（用戶提供）：服務滿 **7 年**→優良服務獎章、之後 **5 年**→優異服務獎章、**7 年**→功績榮譽獎章、**5 年**→功績榮譽十字章、獅勳章**冇固定年期**；長期服務獎章**第一個由區會自己入**（預設唔自動推算，想自動就喺年期設定填 15），**一星之後**每 **10 年**自動提示。唔啱就自己喺「年期設定」改（有「↺ 套用建議年期」一鍵還原內建建議）。
+- **提名截止**（總會 ACR 20/2024）：創辦人紀念日獎勵 區部 10/31 → 總會 11/30（頒獎年前一年）；童軍獎勵 區部 4/30 → 總會 5/31（同年）。
+- 後台 4.7.3：新增 `Awards`（一人一行、每個獎一欄）同 `AwardTypes`（年期規則）兩張表 + `getAwardsBoard`／`saveAwardMember`／`deleteAwardMember`／`importAwardMembers`／`saveAwardTypes`；權限用卡片 `awards` = ✏️。
+- **日常流程（每次通常只有幾個人）**：①「🏅 提名建議」打勾 →「✅ 登記 N 項獲獎」（頒完獎用，最快）；②「📋 獎勵名冊 → ＋ 新增成員」加新委任領袖；③ 名冊「編輯」補返舊獎年份。
+  「⬆️ 首次匯入」淨係第一次開檔用，之後唔使再入去。
+- `saveAwardMember` **只會寫 payload 有帶嘅欄**，所以淨係更新一個獎年份唔會清走旅團／職位／服務開始年份。
+- 測試：`node scripts/test-awards-gs.js`（21 項後台）、`node --experimental-strip-types scripts/test-awards-logic.ts`（24 項推算／匯入解析）。
+
+## 📦 一次過借多款物資（v4.6.1）
+
+`gs/Code.gs` 補上 **`submitStockBatchRequest`**（成員系統一張表揀幾款物資時會叫，舊版冇 → 佢要逐件 POST）：
+
+- **全部夠貨先寫**：任何一款唔夠／唔存在 → 成批唔寫，唔會出現「寫咗一半」
+- 同一款揀兩次自動合併數量；只寄一封通知俾區職員
+- 每款仍然係 `StockRequests` 一行（批核／庫存邏輯完全唔變），但共用 **`batchRef`**
+- `/stock-regs` 會合成「🧾 一張申請 · N 款物資」，可 **一次過批准／拒絕／歸還**（`setStockBatchStatus`）：庫存逐款加減、重複批唔會重複扣、申請人只收一封信
+- `StockRequests` 加 `batchRef` 欄，`setupSheets()` 自動補；舊資料留空 = 單件，行為不變
+
+> 🧭 **唯一後台**：`gs/Code.gs` 係兩邊唯一後台來源，成員系統唔會自己養一份。詳見 [`docs/member-gs-handshake.md`](docs/member-gs-handshake.md) 開頭「唯一後台原則」。
+
+## 📢 消息發佈 → 成員系統首頁置頂（v4.6.0，欄位對齊 v4.6.2）
+
+管理系統「📢 消息發佈」（`/news`）發一則消息 → 成員系統 **member-portal 首頁頂部一直置頂顯示**；
+呢邊一刪／一下架，嗰邊下次載入即刻消失。**純粹「讀同顯示」：冇推送、冇 Service Worker、冇 badge。**
+
+```
+/news 發佈 → 主 Sheet「News」表 → GET listAnnouncements（公開免登入）→ member-portal 首頁 banner
+```
+
+| 功能 | 做法 |
+|---|---|
+| 置頂 | `pinned=TRUE`；成員首頁頂部一直顯示（可同時多則） |
+| 類別 | `info` 藍／`warning` 黃／`important` 紅（舊資料 `warn`／`urgent` 自動對應） |
+| 排期出街 | `date` 填將來日期 → 到嗰日先出現 |
+| 自動落架 | `expiresAt` 到期自動消失，唔使記得返嚟刪 |
+| 暫時收起 | 「下架」（`active=FALSE`）→ 成員即刻唔見，記錄仍在，可重新上架 |
+| 詳情連結 | `link` / `linkLabel`（成員端 proxy 只放行 http(s)） |
+| 通知（選用） | `notify=TRUE` 俾成員端日後可以用 Notification API（方案 1），後台唔使再改 |
+
+- 權限：卡片 `news` 喺權限矩陣 = `edit` 先可以發佈／刪除（預設 DC／SYSADMIN／DDC_ADMIN／DDC_TRAINING／STAFF；其餘 `view`）；層級 0 超管永遠可。
+- 主控台頂部亦有同一條「置頂消息」橫額（同成員睇到嘅係同一份資料，方便核對）。
+- 後台 4.6.0：新增 `News` 工作表、公開 action `listAnnouncements`，另 `getAnnouncements` / `saveAnnouncement` / `deleteAnnouncement` / `setAnnouncementPinned` / `setAnnouncementActive`（需登入 + 卡片 edit 權）；Cards 補 `news` 卡片。貼新 `gs/Code.gs` → 執行 `setupSheets()`（補建唔清空）即可。
+- **成員系統已上線**（`AnnouncementBanner`，commit `bb44fe6`）：佢讀 `{ id, title, content, date, pinned, level }`，
+  所以後台 v4.6.2 公開回應除咗 `body` 會**多回一個 `content`**，`level` 亦統一用 `info` / `warning` / `important`
+  （之前回 `warn`／`urgent` + 淨係 `body`，成員端會內容空白兼全部藍色）。詳見 [`docs/member-gs-handshake.md`](docs/member-gs-handshake.md)。
+- 成員系統嘅 🔔 通告圖書館推送（Web Push）行 Supabase + VAPID，**唔經本後台**，GS 唔使加嘢。
+- 後台邏輯測試（唔使開 Apps Script）：`node scripts/test-news-gs.js`（35 項）。
+- 對齊檢查：`node scripts/check-member-alignment.js`（action／欄位名／`level` 值域／proxy 安全邊界）。
 
 ## 📑 區年度預算 / 🏢 地域房間 / 📇 聯結簿自動同步 / 🏛 架構（v4.5.0）
 
@@ -133,7 +217,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 | 文件 | 內容 |
 |---|---|
-| `docs/member-gs-handshake.md` | **member-portal ↔ GS 合約**（借物資打通；借場填表→Teamup→批核） |
+| `docs/member-gs-handshake.md` | **member-portal ↔ GS 合約**（消息發佈置頂；借物資打通；借場填表→Teamup→批核） |
 | `docs/venue-booking-flow.md` | 借場流程（而家：填表+Teamup+批核；密碼稍後） |
 | `docs/booking-setup-merge-checklist.md` | 貼 Code.gs → setup → 填 Key → 驗證 → 測試 嘅逐步操作 |
 | `docs/keys-checklist.md` | **找回 + 驗證 Teamup / TTLock API Key**（你唔記得 Key 睇呢份） |
@@ -151,3 +235,12 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 | `app/api/proxy/route.ts` | 前端 → Apps Script 嘅代理（API Key 唔出前端） |
 | `lib/district.ts` | 區目錄（區碼 → apiBase 對照） |
 | `app/venue-regs/` | 場地借用審批頁 |
+| `app/news/` | 消息發佈（發去成員系統首頁置頂） |
+| `app/awards/` | 獎勵提名（名冊 · 夠期推算 · 年期設定 · Excel 匯入） |
+| `scripts/test-news-gs.js` | 後台邏輯測試：消息發佈 + 批次借物資（node 直接跑，35 項） |
+| `scripts/test-awards-gs.js` | 獎勵提名後台測試（21 項） |
+| `scripts/test-visit-gs.js` | 旅團探訪後台測試（15 項） |
+| `scripts/test-visit-logic.ts` | 探訪報告／支部篩選測試（16 項，`node --experimental-strip-types`） |
+| `scripts/mock-gs-server.js` | 本機模擬 Apps Script 後台（`node scripts/mock-gs-server.js` → `PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec PORTAL_SKW_APIKEY=dev npx next dev`，登入 `sheep`／`0728`） |
+| `scripts/test-awards-logic.ts` | 獎勵夠期推算／Excel 匯入解析測試（24 項，`node --experimental-strip-types`） |
+| `scripts/check-member-alignment.js` | 成員系統 ↔ 後台對齊檢查（action 缺漏 / proxy 白名單 / 安全邊界） |

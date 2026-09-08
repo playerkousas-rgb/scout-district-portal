@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.5.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.8.1
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -66,6 +66,45 @@
  * budget 卡片由 todo → done（patchCardRows_ 只改仍係舊預設值嘅行），
  * 以及刪除 annual（週年會議文件）卡片（setupSheets 會同步移除 Cards／Perms 舊行）。
  *
+ * ── 消息發佈 News（v4.6.0）──────────────────────────────────
+ * 管理系統 /news 發佈 → 成員系統 member-portal 首頁頂部「置頂消息」直接顯示。
+ * 純粹「讀同顯示」，冇推送：member-portal 每次載入 fetch 一次 listAnnouncements。
+ *   listAnnouncements（公開，免登入）  參數 pinnedOnly / limit / since
+ *   getAnnouncements（登入）           連未發佈／已過期／已下架都回，供管理系統列表
+ *   saveAnnouncement / deleteAnnouncement / setAnnouncementPinned / setAnnouncementActive
+ *     （需要 Perms 矩陣入面 news 卡片 = edit；層級 0 超管永遠可）
+ * 呢邊刪咗 / 下架 / 過期 → 成員系統下次載入即刻消失（唔使清 cache）。
+ * News 表欄位：title 標題、body 內容、date 日期、pinned 置頂、level 類別、
+ *   link/linkLabel 詳情連結、notify 是否廣播（member-portal 可選擇彈 Notification）、
+ *   active 發佈中、expiresAt 自動落架日、publishedAt/publishedBy/updatedAt。
+ *
+ * ── 一次過借多款物資 submitStockBatchRequest（v4.6.1）──────────
+ * 成員系統一張表揀多款物資 → 一個 action 搞掂：全部夠貨先寫（唔會寫一半），
+ * 每款仍然係 StockRequests 一行（批核／庫存邏輯完全唔變）但共用 batchRef，
+ * 只寄一封通知。區職員喺 /stock-regs 見到「一張申請 N 款」，可 setStockBatchStatus
+ * 一次過批准／拒絕／歸還（庫存逐行加減，只寄一封俾申請人）。
+ * ⚠️ 呢個 action 舊版冇，成員系統以前要 fallback 逐件 POST；而家統一由本檔處理。
+ *
+ * ── 消息欄位對齊成員系統（v4.6.2）──────────────────────────
+ * 成員系統 AnnouncementBanner 讀 { id, title, content, date, pinned, level }，
+ * 佢個 proxy 會做欄位白名單，唔喺清單嘅 key 會被剝走。所以本檔 listAnnouncements：
+ *   ① 除咗原有 body，額外回一份 content（同內容，畀成員端讀）；
+ *   ② level 統一用成員端詞彙 info / warning / important
+ *      （舊資料 warn → warning、urgent → important 自動對應，Sheet 唔使改）。
+ * 佢個 proxy 唔會轉發 link / linkLabel / notify / districtCode，呢啲欄位只有管理系統用。
+ *
+ * ── 獎勵提名 Awards（v4.7.0／年期修訂 v4.7.2／登記獲獎 v4.7.3）──────────────
+ * 管理系統 /awards：區會獎勵名冊（一人一行）＋「今年夠期可提名」自動推算。
+ *   Awards 表      一人一行；每個獎項一欄，格入面填獲獎年份（可加「?」表示未確定）
+ *                  serviceStart = 服務開始年份（委任年份）；入門級獎項（優良服務獎章 7 年、
+ *                  長期服務獎章 15 年）由呢個年份起計，冇填就計唔到，會喺提名頁提示補資料
+ *   AwardTypes 表  獎項清單同年期規則（label／上一級 prevCode／最少相隔 minYears／
+ *                  提名期 round：founder 創辦人紀念日、rally 大會操（童軍獎勵）、other 自行申請）
+ *                  ★ 全部可以喺 /awards「年期設定」頁面改，唔使改程式、唔使重新部署
+ * 加新獎項 → 自動喺 Awards 表補一欄（唔會清走舊資料）。
+ * 提名期（總會 ACR 20/2024）：創辦人紀念日 區部 10/31 → 總會 11/30；
+ *                              童軍獎勵（大會操）區部 4/30 → 總會 5/31。
+ *
  * ── 部署 ──────────────────────────────────────────────────
  * 擴充功能 → Apps Script → 貼上本檔 → 執行 setupSheets()
  * → 部署為網頁應用程式（執行身分：我自己；存取：任何人）
@@ -85,6 +124,11 @@ var SHEET = {
   VENUES: 'Venues', VENUE_REQ: 'VenueBookings',
   ITEMS: 'Items', STOCK_REQ: 'StockRequests',
   ACTIVITY_REQ: 'ActivityNotices',
+  NEWS: 'News',                  // 消息發佈（管理系統發 → 成員系統首頁置頂顯示）
+  AWARDS: 'Awards',              // 獎勵提名名冊（一人一行，每個獎一欄＝獲獎年份）
+  UNITS: 'Units',                // 全區旅團名單（旅號、主辦機構、各支部團數）
+  VISITS: 'Visits',              // 旅團探訪登記（一次探訪一行）
+  AWARD_TYPES: 'AwardTypes',     // 獎項及年期設定（可喺管理系統改，唔使改程式）
   INCIDENT_REQ: 'IncidentReports', // 意外報告（HKSA ACC-RPT 2019/07 欄位）
   COURSE_LINKS: 'CourseLinks',   // 訓練班目錄（單一資料來源）
   COURSES: 'Courses',            // 舊版內建課程（保留相容）
@@ -225,7 +269,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.5.0',
+      version: '4.8.1',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -255,6 +299,7 @@ function doGet(e) {
       case 'listAllCourses':      return json(ok(listCourseLinks_()));
       case 'listCourseParams':    return json(ok(listCourseParams_()));
       case 'listActivityNotices': return json(ok(listActivityNotices_(p)));
+      case 'listAnnouncements':   return json(ok(listAnnouncements_(p)));
 
       // ---------- 管理系統（角色制） ----------
       case 'verify':              return json(verify_(p.token));
@@ -269,6 +314,9 @@ function doGet(e) {
       case 'getStockRequests':    return json(getStockRequests_(p.token));
       case 'getPendingInbox':     return json(getPendingInbox_(p.token));
       case 'getActivityNotices':  return json(getActivityNotices_(p.token));
+      case 'getAwardsBoard':      return json(getAwardsBoard_(p.token));
+      case 'getVisitBoard':       return json(getVisitBoard_(p.token, p.from, p.to));
+      case 'getAnnouncements':    return json(getAnnouncements_(p.token));
       case 'getAllRecords':       return json(getAllRecords_(p.token));
       case 'listIncidentReports': return json(listIncidentReports_(p.token));
 
@@ -303,6 +351,8 @@ function doPost(e) {
       case 'addVenueRequest':      return json(submitVenueRequest_(b));
       case 'submitStockRequest':
       case 'addStockRequest':      return json(submitStockRequest_(b));
+      case 'submitStockBatchRequest':
+      case 'addStockBatchRequest': return json(submitStockBatchRequest_(b));
       case 'submitActivityNotice': return json(submitActivityNotice_(b));
       case 'submitCourseReg':      return json(submitCourseReg_(b));
 
@@ -319,6 +369,7 @@ function doPost(e) {
       // ---------- 批核（管理系統） ----------
       case 'setVenueBookingStatus': return json(setVenueBookingStatus_(b.token, b.id, b.status));
       case 'setStockRequestStatus': return json(setStockRequestStatus_(b.token, b.id, b.status));
+      case 'setStockBatchStatus':   return json(setStockBatchStatus_(b.token, b.batchRef, b.status));
       case 'confirmVenueBooking':   return json(confirmVenueBooking_(b.token, b.id));
       case 'approveVenueBooking':   return json(approveVenueBooking_(b.token, b.id));
       case 'rejectVenueBooking':    return json(rejectVenueBooking_(b.token, b.id));
@@ -332,6 +383,21 @@ function doPost(e) {
       case 'saveItem':             return json(saveItem_(b.token, b.item));
       case 'deleteItem':           return json(deleteItem_(b.token, b.itemId));
       case 'deleteActivityNotice': return json(deleteActivityNotice_(b.token, b.id));
+
+      // ---------- 消息發佈（管理系統發，成員系統首頁顯示） ----------
+      case 'saveAwardMember':     return json(saveAwardMember_(b.token, b.member || b.award));
+      case 'deleteAwardMember':   return json(deleteAwardMember_(b.token, b.id));
+      case 'importAwardMembers':  return json(importAwardMembers_(b.token, b.rows, b.mode));
+      case 'saveAwardTypes':      return json(saveAwardTypes_(b.token, b.types));
+
+      // ---------- 旅團探訪（v4.8.1） ----------
+      case 'saveVisit':           return json(saveVisit_(b.token, b.visit || b));
+      case 'deleteVisit':         return json(deleteVisit_(b.token, b.id));
+      case 'saveUnits':           return json(saveUnits_(b.token, b.units));
+      case 'saveAnnouncement':      return json(saveAnnouncement_(b.token, b.announcement || b.news || b));
+      case 'deleteAnnouncement':    return json(deleteAnnouncement_(b.token, b.id));
+      case 'setAnnouncementPinned': return json(setAnnouncementPinned_(b.token, b.id, b.pinned));
+      case 'setAnnouncementActive': return json(setAnnouncementActive_(b.token, b.id, b.active));
 
       // ---------- 意外／應變：意外報告（管理系統，需登入） ----------
       case 'submitIncidentReport': return json(submitIncidentReport_(b.token, b.report || b));
@@ -825,6 +891,18 @@ function requirePerm_(token, perm) {
   if (!p[perm]) return { error: '你沒有此功能嘅權限' };
   return { ok: true, email: t.email, role: t.role };
 }
+/**
+ * 需要「某張卡片」嘅編輯權（v4.6.0）：直接跟 Perms 矩陣，唔使再加 canXxx 欄。
+ * 層級 0 超管永遠可以（同 getCards_ 一致）。
+ */
+function requireCardEdit_(token, cardId) {
+  var t = checkToken_(token);
+  if (!t.valid) return { error: '登入已過期' };
+  if (levelOfUser_(t.email, t.role) === LEVEL_SUPER) return { ok: true, email: t.email, role: t.role };
+  var access = (readPerms_()[String(cardId).trim()] || {})[t.role] || '';
+  if (access !== 'edit') return { error: '你沒有此功能嘅權限' };
+  return { ok: true, email: t.email, role: t.role };
+}
 
 // ===================== 綜合記錄（AllRecords） =====================
 
@@ -1271,24 +1349,49 @@ function stockLineItems_(b) {
   return [];
 }
 
-function submitOneStockLine_(ss, applicant, line) {
-  var item = readSheet_(SHEET.ITEMS).filter(function (v) {
-    return String(v.itemId).trim() === String(line.itemId).trim()
-      || String(v.name || '').trim() === String(line.itemId).trim();
-  })[0];
-  if (!item) return { ok: false, error: '物資不存在：' + line.itemId };
+/** 合併同一件物資嘅數量（成員系統一次揀多款時可能重複） */
+function stockMergeLines_(lines) {
+  var out = [], index = {};
+  (lines || []).forEach(function (l) {
+    var key = String(l.itemId || '').trim();
+    if (!key) return;
+    if (index[key] === undefined) { index[key] = out.length; out.push({ itemId: key, qty: Number(l.qty) || 0 }); }
+    else out[index[key]].qty += Number(l.qty) || 0;
+  });
+  return out;
+}
 
-  var qty = Number(line.qty) || 0;
-  if (qty <= 0) return { ok: false, error: '數量不正確（' + (item.name || line.itemId) + '）' };
-  var avail = Number(item.availableQty) || 0;
-  if (qty > avail) return { ok: false, error: '「' + item.name + '」數量超出可借數量（可借 ' + avail + '）' };
+/**
+ * 逐行核對物資（存在／數量正確／夠貨），**唔會寫入**。
+ * items 只讀一次；整批任何一行唔合格就成批唔寫（避免寫一半）。
+ */
+function resolveStockLines_(lines) {
+  var items = readSheet_(SHEET.ITEMS);
+  var rows = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var item = items.filter(function (v) {
+      return String(v.itemId).trim() === String(line.itemId).trim()
+        || String(v.name || '').trim() === String(line.itemId).trim();
+    })[0];
+    if (!item) return { ok: false, error: '物資不存在：' + line.itemId };
+    var qty = Number(line.qty) || 0;
+    if (qty <= 0) return { ok: false, error: '數量不正確（' + (item.name || line.itemId) + '）' };
+    var avail = Number(item.availableQty) || 0;
+    if (qty > avail) return { ok: false, error: '「' + item.name + '」數量超出可借數量（可借 ' + avail + '）' };
+    rows.push({ item: item, qty: qty, avail: avail });
+  }
+  return { ok: true, rows: rows };
+}
 
+/** 寫一行 StockRequests（已核對過）；batchRef 有值＝同一張申請嘅其中一款物資 */
+function writeStockRow_(ss, applicant, item, qty, avail, batchRef) {
   var sh = ss.getSheetByName(SHEET.STOCK_REQ);
   if (!sh) return { ok: false, error: '尚未執行 setupSheets()' };
 
   var rid = genId_('sr'), ref = genRef_('SR'), now = new Date().toISOString();
   appendRowObj_(sh, {
-    id: rid, districtCode: districtCode_(), refCode: ref,
+    id: rid, districtCode: districtCode_(), refCode: ref, batchRef: batchRef || '',
     submittedAt: now, createdAt: now,
     itemId: String(item.itemId).trim(), itemName: item.name || '', category: item.category || '', qty: qty,
     purpose: applicant.purpose || '', borrowDate: applicant.borrowDate || '', returnDate: applicant.returnDate || '',
@@ -1299,13 +1402,22 @@ function submitOneStockLine_(ss, applicant, line) {
   });
 
   if (STOCK_DEDUCT_ON === 'submit') {
-    var iIdx = rowIndexByCol_(ss.getSheetByName(SHEET.ITEMS), 'itemId', String(item.itemId).trim());
-    if (iIdx > 0) setCellByHeader_(ss.getSheetByName(SHEET.ITEMS), iIdx, 'availableQty', avail - qty);
+    var ish = ss.getSheetByName(SHEET.ITEMS);
+    var iIdx = rowIndexByCol_(ish, 'itemId', String(item.itemId).trim());
+    if (iIdx > 0) setCellByHeader_(ish, iIdx, 'availableQty', Math.max(0, avail - qty));
   }
 
   appendRecord_('stock', rid, ref, '📦 借物資：' + item.name, applicant.name, applicant.phone, applicant.troop || '', 'pending',
-    item.name + ' x' + qty + ' · ' + (applicant.borrowDate || '') + ' → ' + (applicant.returnDate || ''));
+    item.name + ' x' + qty + ' · ' + (applicant.borrowDate || '') + ' → ' + (applicant.returnDate || '')
+    + (batchRef ? ' · 批次 ' + batchRef : ''));
   return { ok: true, refCode: ref, id: rid, itemName: item.name, qty: qty };
+}
+
+function submitOneStockLine_(ss, applicant, line, batchRef) {
+  var res = resolveStockLines_([line]);
+  if (!res.ok) return { ok: false, error: res.error };
+  var r = res.rows[0];
+  return writeStockRow_(ss, applicant, r.item, r.qty, r.avail, batchRef);
 }
 
 function submitStockRequest_(b) {
@@ -1327,7 +1439,7 @@ function submitStockRequest_(b) {
 
   var refs = [], names = [];
   for (var i = 0; i < lines.length; i++) {
-    var one = submitOneStockLine_(ss, applicant, lines[i]);
+    var one = submitOneStockLine_(ss, applicant, lines[i], stockBatchRefOf_(b));
     if (!one.ok) return err(one.error);
     refs.push(one.refCode);
     names.push((one.itemName || lines[i].itemId) + ' x' + one.qty);
@@ -1343,6 +1455,63 @@ function submitStockRequest_(b) {
   });
 }
 
+/** 只收安全字元嘅批次編號（成員系統會自己生成 SB-yyyymmdd-XXXXXX） */
+function stockBatchRefOf_(b) {
+  var raw = String((b && (b.batchRef || b.batch_ref || b.batchId)) || '').trim();
+  return /^[A-Za-z0-9_-]{1,40}$/.test(raw) ? raw : '';
+}
+
+/**
+ * 一次過借多款物資（成員系統 member-portal 一張表揀多件時用）。
+ * 同 submitStockRequest 分別：
+ *   1. **全部合格先寫**（任何一款唔夠貨即成批唔寫，唔會出現寫咗一半）；
+ *   2. 每款物資仍然係 StockRequests 一行（批核邏輯、庫存扣減完全唔變），
+ *      但共用同一個 batchRef，區職員可以喺 /stock-regs 一次過批成批；
+ *   3. 只寄一封通知（列晒全部物資），唔會逐件洗版。
+ * 回應包含 refCode（= batchRef）／refCodes／submittedCount，member-portal proxy 直接讀得到。
+ */
+function submitStockBatchRequest_(b) {
+  if (!isFeature_('stock')) return err('服務暫未開放');
+  var g = guardLocked_(); if (g) return g;
+  var applicant = normalizeStockApplicant_(b);
+  var lines = stockMergeLines_(stockLineItems_(b));
+  if (!applicant.name || !applicant.phone) return err('資料不完整（需要姓名、電話）');
+  if (!lines.length) return err('資料不完整（需要物資及數量）');
+
+  // Config 有填外部收表 Script 就照舊轉發（同單件一致）
+  var fwd = callService_('STOCK', 'addRequest', b);
+  if (fwd) {
+    if (fwd.ok) return okSubmit_({ refCode: (fwd.data && fwd.data.refCode) || fwd.refCode || '' });
+    return err(fwd.error || '借物資轉發失敗');
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss.getSheetByName(SHEET.STOCK_REQ)) return err('尚未執行 setupSheets()');
+
+  var checked = resolveStockLines_(lines);
+  if (!checked.ok) return err(checked.error);
+
+  var batchRef = stockBatchRefOf_(b) || genRef_('SB');
+  var refs = [], names = [];
+  for (var i = 0; i < checked.rows.length; i++) {
+    var r = checked.rows[i];
+    var one = writeStockRow_(ss, applicant, r.item, r.qty, r.avail, batchRef);
+    if (!one.ok) return err(one.error);
+    refs.push(one.refCode);
+    names.push((one.itemName || r.item.itemId) + ' x' + one.qty);
+  }
+
+  notifyStaff_('📦 新借物資申請（' + refs.length + ' 款）',
+    '批次：' + batchRef + '\n物資：' + names.join('、') + '\n'
+    + '申請人：' + applicant.name + '（' + applicant.phone + '）\n'
+    + (applicant.borrowDate || '') + ' → ' + (applicant.returnDate || ''));
+
+  return okSubmit_({
+    refCode: batchRef, batchRef: batchRef, refCodes: refs,
+    submittedCount: refs.length, requestedCount: lines.length, count: refs.length,
+  });
+}
+
 // ===================== 借物資：查閱／批核（庫存只扣一次） =====================
 
 function getStockRequests_(token) {
@@ -1354,18 +1523,14 @@ var STOCK_STATUS = ['pending', 'approved', 'rejected', 'returned', 'cancelled'];
 /** 呢啲狀態代表「物資喺申請人手上」，需要佔用庫存 */
 function stockHolds_(status) { return String(status).toLowerCase() === 'approved'; }
 
-function setStockRequestStatus_(token, id, status) {
-  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
-  status = String(status).toLowerCase();
-  if (STOCK_STATUS.indexOf(status) < 0) return err('狀態不正確');
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+/**
+ * 改一行申請嘅狀態 + 調整庫存（**唔寄電郵**，由呼叫者決定寄一封定係唔寄）。
+ * 單件同批次批核共用同一段邏輯，庫存永遠只加減一次。
+ */
+function applyStockStatusRow_(ss, req, status, reviewer) {
   var sh = ss.getSheetByName(SHEET.STOCK_REQ);
-  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
-  if (idx < 0) return err('找不到該申請');
-
-  var req = readSheet_(SHEET.STOCK_REQ).filter(function (r) { return String(r.id).trim() === String(id).trim(); })[0];
-  if (!req) return err('找不到該申請');
+  var idx = rowIndexByCol_(sh, 'id', String(req.id).trim());
+  if (idx < 0) return { ok: false, error: '找不到該申請' };
   var prev = String(req.status || '').toLowerCase();
 
   // ★ 只喺「佔用狀態」轉變時調整庫存，避免重複加減
@@ -1383,9 +1548,62 @@ function setStockRequestStatus_(token, id, status) {
   }
 
   setCellByHeader_(sh, idx, 'status', status);
-  setCellByHeader_(sh, idx, 'reviewer', t.email);
+  setCellByHeader_(sh, idx, 'reviewer', reviewer);
   setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
-  updateRecordStatus_(id, status);
+  updateRecordStatus_(req.id, status);
+  return { ok: true };
+}
+
+/**
+ * 一次過批核／拒絕整張多款物資申請（同一個 batchRef）。
+ * 逐行行返單件嗰套庫存邏輯，但**只寄一封**列晒全部物資嘅通知。
+ */
+function setStockBatchStatus_(token, batchRef, status) {
+  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
+  status = String(status).toLowerCase();
+  if (STOCK_STATUS.indexOf(status) < 0) return err('狀態不正確');
+  batchRef = String(batchRef || '').trim();
+  if (!batchRef) return err('缺少批次編號');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var rows = readSheet_(SHEET.STOCK_REQ).filter(function (r) { return String(r.batchRef || '').trim() === batchRef; });
+  if (!rows.length) return err('找不到該批次');
+
+  var done = 0, failed = [], names = [], email = '', who = '';
+  rows.forEach(function (req) {
+    var res = applyStockStatusRow_(ss, req, status, t.email);
+    if (res.ok) {
+      done++;
+      names.push((req.itemName || req.itemId) + ' x' + (req.qty || 0));
+      email = email || String(req.email || '');
+      who = who || String(req.name || '');
+    } else failed.push(req.refCode || req.id);
+  });
+
+  if (email && done) {
+    try {
+      var label = { approved: '✅ 借物資申請已批核', rejected: '❌ 借物資申請未獲批准', returned: '📥 借物資已登記歸還' }[status] || '';
+      if (label) {
+        MailApp.sendEmail(email, label + '（批次 ' + batchRef + '）',
+          (who ? who + '，你' : '你') + '嘅借物資申請（批次 ' + batchRef + '）共 ' + done + ' 款物資：\n'
+          + names.join('\n') + '\n\n狀態：' + label);
+      }
+    } catch (e) {}
+  }
+  return ok({ saved: true, batchRef: batchRef, count: done, failed: failed });
+}
+
+function setStockRequestStatus_(token, id, status) {
+  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
+  status = String(status).toLowerCase();
+  if (STOCK_STATUS.indexOf(status) < 0) return err('狀態不正確');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var req = readSheet_(SHEET.STOCK_REQ).filter(function (r) { return String(r.id).trim() === String(id).trim(); })[0];
+  if (!req) return err('找不到該申請');
+
+  var applied = applyStockStatusRow_(ss, req, status, t.email);
+  if (!applied.ok) return err(applied.error);
 
   if (req.email) {
     try {
@@ -1474,6 +1692,775 @@ function deleteActivityNotice_(token, id) {
   var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ACTIVITY_REQ), String(id).trim());
   return ok({ deleted: true });
+}
+
+// ===================== 消息發佈 News（v4.6.0） =====================
+// 管理系統 /news 發佈 → 成員系統 member-portal 首頁頂部置頂顯示。
+// 純拉取：member-portal 每次載入 fetch 一次 listAnnouncements，冇推送、冇 cache。
+// 呢邊刪咗 / 下架（active=FALSE）／過咗 expiresAt → 成員系統下次載入即刻消失。
+
+// 統一詞彙（同成員系統 AnnouncementBanner 一致）：info 一般 / warning 請留意 / important 緊急。
+// 舊 Sheet 用過 warn / urgent，讀寫時自動對應，唔使人手改資料。
+var NEWS_LEVELS = ['info', 'warning', 'important'];
+var NEWS_LEVEL_ALIAS = { warn: 'warning', warning: 'warning', urgent: 'important', important: 'important', info: 'info', normal: 'info', '': 'info' };
+var NEWS_LOCKED_FIELDS = ['id', 'districtCode', 'publishedAt', 'publishedBy', 'createdAt'];
+
+function newsLevel_(v) {
+  var s = String(v || '').trim().toLowerCase();
+  var mapped = NEWS_LEVEL_ALIAS[s];
+  if (mapped) return mapped;
+  return NEWS_LEVELS.indexOf(s) >= 0 ? s : 'info';
+}
+/** Sheet 嘅日期格可能係 Date 物件，一律轉 yyyy-MM-dd 字串 */
+function newsDate_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var s = String(v == null ? '' : v).trim();
+  return s;
+}
+function newsToday_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+/** 一行 News → 統一物件（內部用，連 active / publishedBy） */
+function newsRow_(r) {
+  return {
+    id: String(r.id || '').trim(),
+    districtCode: String(r.districtCode || '').trim() || districtCode_(),
+    title: String(r.title == null ? '' : r.title).trim(),
+    body: String(r.body == null ? '' : r.body),
+    date: newsDate_(r.date),
+    pinned: isTrue_(r.pinned),
+    level: newsLevel_(r.level),
+    link: String(r.link || '').trim(),
+    linkLabel: String(r.linkLabel || '').trim(),
+    notify: isTrue_(r.notify),
+    active: String(r.active).toUpperCase() !== 'FALSE',
+    expiresAt: newsDate_(r.expiresAt),
+    publishedAt: String(r.publishedAt || ''),
+    publishedBy: String(r.publishedBy || ''),
+    updatedAt: String(r.updatedAt || r.publishedAt || ''),
+  };
+}
+/** 公開版（成員系統）：唔回 active / publishedBy */
+function newsPublic_(n) {
+  return {
+    id: n.id, districtCode: n.districtCode,
+    // body = 管理系統用；content = 成員系統 AnnouncementBanner 讀嘅欄位名（同一份內容）
+    title: n.title, body: n.body, content: n.body, date: n.date,
+    pinned: n.pinned, level: n.level,
+    link: n.link, linkLabel: n.linkLabel, notify: n.notify,
+    publishedAt: n.publishedAt, updatedAt: n.updatedAt,
+  };
+}
+function newsSort_(a, b) {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  var ad = a.date || String(a.publishedAt || '').slice(0, 10);
+  var bd = b.date || String(b.publishedAt || '').slice(0, 10);
+  if (ad !== bd) return bd.localeCompare(ad);
+  return String(b.publishedAt || '').localeCompare(String(a.publishedAt || ''));
+}
+
+/**
+ * 公開讀消息（成員系統首頁）— 免登入。
+ * 參數：pinnedOnly=1 只要置頂／limit（預設 20，上限 50）／since=ISO（只回之後更新過嘅，供「有新消息」判斷）
+ * 舊 Sheet 未有 News 表 → 回空陣列（成員系統唔會爆）。
+ */
+function listAnnouncements_(p) {
+  p = p || {};
+  if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS)) return [];
+  var today = newsToday_();
+  var pinnedOnly = isTrue_(p.pinnedOnly || p.pinned || '');
+  var since = String(p.since || '').trim();
+  var limit = Math.max(1, Math.min(Number(p.limit) || 20, 50));
+  var list = readSheet_(SHEET.NEWS).map(newsRow_).filter(function (n) {
+    if (!n.id || (!n.title && !n.body)) return false;
+    if (!n.active) return false;
+    if (n.expiresAt && n.expiresAt < today) return false;
+    if (n.date && n.date > today) return false;                 // 預設日期喺將來 = 未到發佈日
+    if (pinnedOnly && !n.pinned) return false;
+    if (since && String(n.updatedAt || '') <= since) return false;
+    return true;
+  });
+  list.sort(newsSort_);
+  return list.slice(0, limit).map(newsPublic_);
+}
+
+/** 管理系統列表（需登入）：連已下架／已過期／未到期都回 */
+function getAnnouncements_(token) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS)) {
+    return err('尚未執行 setupSheets()（缺 News 表）');
+  }
+  var today = newsToday_();
+  var list = readSheet_(SHEET.NEWS).map(newsRow_).filter(function (n) { return !!n.id; });
+  list.sort(newsSort_);
+  return ok(list.map(function (n) {
+    n.expired = !!(n.expiresAt && n.expiresAt < today);
+    n.scheduled = !!(n.date && n.date > today);
+    n.live = n.active && !n.expired && !n.scheduled;
+    return n;
+  }));
+}
+
+/** 新增／更新消息（news 卡片 edit 權限）；a.id 留空 = 新增 */
+function saveAnnouncement_(token, a) {
+  var t = requireCardEdit_(token, 'news'); if (t.error) return err(t.error);
+  a = a || {};
+  var title = String(a.title || '').trim();
+  var body = String((a.body === undefined || a.body === null || a.body === '') ? (a.content || '') : a.body).trim();
+  if (!title) return err('標題必填');
+  if (!body) return err('內容必填');
+
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 News 表）');
+
+  var now = new Date().toISOString();
+  var fields = {
+    title: title,
+    body: body,
+    date: newsDate_(a.date) || newsToday_(),
+    pinned: isTrue_(a.pinned) ? 'TRUE' : 'FALSE',
+    level: newsLevel_(a.level),
+    link: String(a.link || '').trim(),
+    linkLabel: String(a.linkLabel || '').trim(),
+    notify: isTrue_(a.notify) ? 'TRUE' : 'FALSE',
+    active: (a.active === undefined || a.active === '' || isTrue_(a.active)) ? 'TRUE' : 'FALSE',
+    expiresAt: newsDate_(a.expiresAt),
+    updatedAt: now,
+  };
+
+  var id = String(a.id || '').trim();
+  if (id) {
+    var idx = rowIndexByCol_(sh, 'id', id);
+    if (idx < 0) return err('找不到該消息');
+    Object.keys(fields).forEach(function (k) {
+      if (NEWS_LOCKED_FIELDS.indexOf(k) >= 0) return;
+      setCellByHeader_(sh, idx, k, fields[k]);
+    });
+    return ok({ saved: true, id: id, created: false });
+  }
+
+  id = genId_('nw');
+  var row = { id: id, districtCode: districtCode_(), publishedAt: now, publishedBy: t.email || '', createdAt: now };
+  Object.keys(fields).forEach(function (k) { row[k] = fields[k]; });
+  appendRowObj_(sh, row);
+  return ok({ saved: true, id: id, created: true });
+}
+
+/** 刪除消息（成員系統下次載入即刻唔見） */
+function deleteAnnouncement_(token, id) {
+  var t = requireCardEdit_(token, 'news'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 News 表）');
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該消息');
+  sh.deleteRow(idx);
+  return ok({ deleted: true, id: String(id).trim() });
+}
+
+/** 置頂／取消置頂 */
+function setAnnouncementPinned_(token, id, pinned) {
+  return updateAnnouncementFlag_(token, id, 'pinned', pinned);
+}
+/** 上架／下架（下架＝成員系統即刻唔見，但記錄仍在） */
+function setAnnouncementActive_(token, id, active) {
+  return updateAnnouncementFlag_(token, id, 'active', active);
+}
+function updateAnnouncementFlag_(token, id, field, value) {
+  var t = requireCardEdit_(token, 'news'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 News 表）');
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該消息');
+  var on = (value === true || isTrue_(value));
+  setCellByHeader_(sh, idx, field, on ? 'TRUE' : 'FALSE');
+  setCellByHeader_(sh, idx, 'updatedAt', new Date().toISOString());
+  var out = { saved: true, id: String(id).trim() };
+  out[field] = on;
+  return ok(out);
+}
+
+// ===================== 獎勵提名 Awards（v4.7.0） =====================
+// 一站式：名冊（Awards 表，一人一行、每個獎一欄＝獲獎年份）
+//        + 年期規則（AwardTypes 表，可喺管理系統改）
+//        + 「今年夠期可提名」由前端按規則即時推算（後台只負責存取）。
+// 加新獎項 → ensureAwardColumns_ 自動喺 Awards 表補一欄，唔會清走舊資料。
+
+var AWARD_FIXED_COLS = ['id', 'districtCode', 'name', 'nameEn', 'troop', 'position', 'serviceStart', 'status', 'note'];
+var AWARD_TAIL_COLS = ['updatedAt', 'createdAt'];
+var AWARD_ROUNDS = ['founder', 'rally', 'other'];
+// 名冊狀態（同用戶原本 Excel 嘅顏色註腳對應）
+var AWARD_STATUSES = ['active', 'noAppointment', 'notInDistrict', 'applying', 'left'];
+
+/** 預設獎項及年期（第一次 setupSheets 會種入 AwardTypes 表；之後全部以表為準） */
+function awardTypeSeed_() {
+  return [
+    // code, label, short, category, prevCode, minYears, round, note, enabled
+    ['GSA',    '優良服務獎章',            'GSA',   '功績榮譽', '',      7,    'founder', 'Good Service Award；由服務開始年份起計 7 年', 'TRUE'],
+    ['DSA',    '優異服務獎章',            'DSA',   '功績榮譽', 'GSA',   5,    'founder', 'Dedicated Service Award', 'TRUE'],
+    ['DSM',    '功績榮譽獎章',            'DSM',   '功績榮譽', 'DSA',   7,    'rally',   'Distinguished Service Medal；獎勵委員會批准', 'TRUE'],
+    ['DSC',    '功績榮譽十字章',          'DSC',   '功績榮譽', 'DSM',   5,    'rally',   'Distinguished Service Cross；成年成員最高功績獎勵', 'TRUE'],
+    ['BRL',    '銅獅勳章',                '銅獅',  '獅勳章',   'DSC',   '',   'rally',   'Bronze Lion；冇固定年期規定', 'TRUE'],
+    ['SVL',    '銀獅勳章',                '銀獅',  '獅勳章',   'BRL',   '',   'rally',   'Silver Lion；冇固定年期規定', 'TRUE'],
+    ['GDL',    '金獅勳章',                '金獅',  '獅勳章',   'SVL',   '',   'rally',   'Gold Lion；制服成年成員最高功績獎勵，冇固定年期規定', 'TRUE'],
+    ['LSM',    '長期服務獎章',            'LSM',   '長期服務', '',      '',   'other',   '服務實職滿 15 年；第一個由區會自己入紀錄，預設唔自動推算（想自動列出就喺年期設定填 15）', 'TRUE'],
+    ['LSM1',   '長期服務一星獎章',        'LSM*',  '長期服務', 'LSM',   10,   'other',   '再服務滿 10 年（共 25 年）', 'TRUE'],
+    ['LSM2',   '長期服務二星獎章',        'LSM**', '長期服務', 'LSM1',  10,   'other',   '共 35 年', 'TRUE'],
+    ['LSM3',   '長期服務三星獎章',        'LSM***','長期服務', 'LSM2',  10,   'other',   '共 45 年', 'TRUE'],
+    ['LSM4',   '長期服務四星獎章',        'LSM****','長期服務','LSM3',  10,   'other',   '共 55 年', 'TRUE'],
+    ['CCM',    '香港總監嘉許',            '總監嘉許', '嘉許',  '',      '',   'other',   '黃色笛繩（榮譽笛子）；香港總監全權批准', 'TRUE'],
+    ['CCH',    '香港總監高級嘉許',        '高級嘉許', '嘉許',  'CCM',   5,    'other',   '黃紫綠笛繩；獲總監嘉許後有超卓表現', 'TRUE'],
+    ['HAB',    '民政及青年事務局局長嘉許', '民青局',  '外部嘉許', '',    '',   'other',   '前稱民政事務局局長嘉許計劃；義務領袖須服務滿 10 年（限提名名額，預設唔自動推算；想自動列出就喺年期設定填 10）', 'TRUE'],
+    ['FIVE',   '五年長期服務獎狀',        '五年',  '長期服務', '',      '',   'other',   '會務委員專用（預設唔自動推算；想自動列出就喺年期設定填 5）', 'TRUE'],
+    ['TEN',    '十年長期服務獎狀',        '十年',  '長期服務', 'FIVE',  5,    'other',   '會務委員', 'TRUE'],
+    ['THANKS', '感謝狀',                  '感謝狀', '其他',   '',      '',   'founder', '表格 DA2；頒予配偶／家長／支持童軍運動人士', 'TRUE'],
+  ];
+}
+
+function awardCode_(v) {
+  var c = String(v == null ? '' : v).trim().toUpperCase().replace(/[^A-Z0-9_]/g, '');
+  return c.slice(0, 16);
+}
+function awardRound_(v) {
+  var r = String(v || '').trim().toLowerCase();
+  return AWARD_ROUNDS.indexOf(r) >= 0 ? r : 'other';
+}
+function awardStatus_(v) {
+  var t = String(v || '').trim();
+  if (!t) return 'active';
+  return AWARD_STATUSES.indexOf(t) >= 0 ? t : 'active';
+}
+/** 獎年份格：可以係 2015、"2015"、"2015?"（未確定）、"無"、日期物件 */
+function awardYearCell_(v) {
+  if (v === null || v === undefined) return '';
+  if (v instanceof Date) return String(v.getFullYear());
+  var t = String(v).trim();
+  if (!t) return '';
+  if (/^(無|冇|N\/A|NA|-)$/i.test(t)) return '無';
+  var m = t.match(/(\d{4})/);
+  if (!m) return t.slice(0, 20);
+  return m[1] + (/\?/.test(t) ? '?' : '');
+}
+
+/** 服務開始年份：接受 2004、2004/01/15、"86th since 2004/01/15"、日期格 */
+function awardServiceStart_(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (v instanceof Date) return String(v.getFullYear());
+  var m = String(v).match(/(19|20)\d{2}/);
+  return m ? m[0] : '';
+}
+
+/** AwardTypes 表 → 陣列（未有表 / 空表 → 用預設種子，唔會炸） */
+function awardTypes_() {
+  var rows = readSheet_(SHEET.AWARD_TYPES);
+  var list = rows.map(function (r, i) {
+    return {
+      code: awardCode_(r.code),
+      label: String(r.label || '').trim(),
+      short: String(r.short || '').trim(),
+      category: String(r.category || '').trim() || '其他',
+      prevCode: awardCode_(r.prevCode),
+      minYears: r.minYears === '' || r.minYears === null || r.minYears === undefined ? null : (Number(r.minYears) || 0),
+      round: awardRound_(r.round),
+      note: String(r.note || '').trim(),
+      enabled: String(r.enabled).toUpperCase() !== 'FALSE',
+      orderNo: i,
+    };
+  }).filter(function (t) { return !!t.code; });
+  if (list.length) return list;
+  return awardTypeSeed_().map(function (r, i) {
+    return {
+      code: awardCode_(r[0]), label: r[1], short: r[2], category: r[3],
+      prevCode: awardCode_(r[4]), minYears: r[5] === '' ? null : Number(r[5]),
+      round: awardRound_(r[6]), note: r[7], enabled: String(r[8]).toUpperCase() !== 'FALSE', orderNo: i,
+    };
+  });
+}
+
+/** Awards 表要有嘅欄 = 固定欄 + 每個獎項一欄 + 尾欄；缺就補（唔會清資料） */
+function ensureAwardColumns_(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.AWARDS);
+  if (!sh) return [];
+  var want = AWARD_FIXED_COLS.concat(awardTypes_().map(function (t) { return t.code; })).concat(AWARD_TAIL_COLS);
+  var have = sheetHeadersBySheet_(sh);
+  if (!have.length) {
+    sh.getRange(1, 1, 1, want.length).setValues([want]);
+    sh.getRange(1, 1, 1, want.length).setFontWeight('bold').setBackground('#fde68a');
+    sh.setFrozenRows(1);
+    return want;
+  }
+  var missing = want.filter(function (h) { return have.indexOf(h) < 0; });
+  if (missing.length) {
+    sh.getRange(1, have.length + 1, 1, missing.length).setValues([missing]);
+    sh.getRange(1, 1, 1, have.length + missing.length).setFontWeight('bold');
+  }
+  return missing;
+}
+
+/** 一行 Awards → 物件（awards 收埋做 map） */
+function awardMemberRow_(r, types) {
+  var awards = {};
+  types.forEach(function (t) {
+    var y = awardYearCell_(r[t.code]);
+    if (y) awards[t.code] = y;
+  });
+  return {
+    id: String(r.id || '').trim(),
+    districtCode: String(r.districtCode || '').trim() || districtCode_(),
+    name: String(r.name || '').trim(),
+    nameEn: String(r.nameEn || '').trim(),
+    troop: String(r.troop == null ? '' : r.troop).trim(),
+    position: String(r.position || '').trim(),
+    serviceStart: awardServiceStart_(r.serviceStart),
+    status: awardStatus_(r.status),
+    note: String(r.note || '').trim(),
+    awards: awards,
+    updatedAt: String(r.updatedAt || ''),
+  };
+}
+
+/** 一次過攞晒名冊＋規則（管理系統 /awards 只需呢一個 call） */
+function getAwardsBoard_(token) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss.getSheetByName(SHEET.AWARDS)) return err('尚未執行 setupSheets()（缺 Awards 表）');
+  var types = awardTypes_();
+  var members = readSheet_(SHEET.AWARDS).map(function (r) { return awardMemberRow_(r, types); })
+    .filter(function (m) { return !!m.name; });
+  var counts = {};
+  types.forEach(function (ty) {
+    counts[ty.code] = members.filter(function (m) { return m.awards[ty.code] && m.awards[ty.code] !== '無'; }).length;
+  });
+  var defaults = awardTypeSeed_().map(function (r) {
+    return {
+      code: awardCode_(r[0]), label: r[1], short: r[2], category: r[3],
+      prevCode: awardCode_(r[4]), minYears: r[5] === '' ? null : Number(r[5]),
+      round: awardRound_(r[6]), note: r[7], enabled: true,
+    };
+  });
+  return ok({ types: types, members: members, counts: counts, total: members.length, defaults: defaults });
+}
+
+/**
+ * 寫入一位成員嘅欄位。
+ * ⚠️ 只會寫「payload 有帶」嘅欄（新增時例外，會寫齊做預設值）——
+ *    咁前端先可以做「淨係更新某個獎嘅年份」（例如頒完獎登記獲獎），唔會意外清走旅團／職位。
+ */
+function awardWriteFields_(sh, rowIdx, a, types, isNew) {
+  var has = function (k) { return Object.prototype.hasOwnProperty.call(a, k); };
+  setCellByHeader_(sh, rowIdx, 'name', String(a.name || '').trim());
+  if (isNew || has('nameEn')) setCellByHeader_(sh, rowIdx, 'nameEn', String(a.nameEn || '').trim());
+  if (isNew || has('troop')) setCellByHeader_(sh, rowIdx, 'troop', String(a.troop == null ? '' : a.troop).trim());
+  if (isNew || has('position')) setCellByHeader_(sh, rowIdx, 'position', String(a.position || '').trim());
+  if (isNew || has('serviceStart')) {
+    setCellByHeader_(sh, rowIdx, 'serviceStart', awardServiceStart_(a.serviceStart));
+  }
+  if (isNew || has('status')) setCellByHeader_(sh, rowIdx, 'status', awardStatus_(a.status));
+  if (isNew || has('note')) setCellByHeader_(sh, rowIdx, 'note', String(a.note || '').trim());
+  var awards = a.awards || {};
+  types.forEach(function (ty) {
+    if (!Object.prototype.hasOwnProperty.call(awards, ty.code)) return;
+    setCellByHeader_(sh, rowIdx, ty.code, awardYearCell_(awards[ty.code]));
+  });
+  setCellByHeader_(sh, rowIdx, 'updatedAt', new Date().toISOString());
+}
+
+/** 新增／更新一位成員（awards 卡片 edit 權限）；a.id 留空 = 新增 */
+function saveAwardMember_(token, a) {
+  var t = requireCardEdit_(token, 'awards'); if (t.error) return err(t.error);
+  a = a || {};
+  var name = String(a.name || '').trim();
+  if (!name) return err('姓名必填');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.AWARDS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Awards 表）');
+  ensureAwardColumns_(ss);
+  var types = awardTypes_();
+
+  var id = String(a.id || '').trim();
+  if (id) {
+    var idx = rowIndexByCol_(sh, 'id', id);
+    if (idx < 0) return err('找不到該成員');
+    awardWriteFields_(sh, idx, a, types, false);
+    return ok({ saved: true, id: id, created: false });
+  }
+  id = genId_('aw');
+  var now = new Date().toISOString();
+  var row = { id: id, districtCode: districtCode_(), createdAt: now, updatedAt: now };
+  appendRowObj_(sh, row);
+  var newIdx = rowIndexByCol_(sh, 'id', id);
+  if (newIdx < 0) return err('寫入失敗');
+  awardWriteFields_(sh, newIdx, a, types, true);
+  return ok({ saved: true, id: id, created: true });
+}
+
+function deleteAwardMember_(token, id) {
+  var t = requireCardEdit_(token, 'awards'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.AWARDS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Awards 表）');
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該成員');
+  sh.deleteRow(idx);
+  return ok({ deleted: true, id: String(id).trim() });
+}
+
+/**
+ * 批量匯入（由 Excel／Google Sheet 複製貼上）。
+ * rows: [{ name, nameEn, troop, position, status, note, awards:{CODE:year} }]
+ * mode: 'merge'（預設，同名同旅團就更新，其餘新增）／'replace'（清空重寫）
+ */
+function importAwardMembers_(token, rows, mode) {
+  var t = requireCardEdit_(token, 'awards'); if (t.error) return err(t.error);
+  if (!rows || !rows.length) return err('冇資料可匯入');
+  if (rows.length > 2000) return err('一次最多匯入 2000 行');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.AWARDS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Awards 表）');
+  ensureAwardColumns_(ss);
+  var types = awardTypes_();
+  var replace = String(mode || 'merge') === 'replace';
+
+  if (replace && sh.getLastRow() > 1) sh.deleteRows(2, sh.getLastRow() - 1);
+
+  var existing = {};
+  if (!replace) {
+    readSheet_(SHEET.AWARDS).forEach(function (r) {
+      var key = String(r.name || '').trim() + '|' + String(r.troop == null ? '' : r.troop).trim();
+      if (String(r.name || '').trim()) existing[key] = String(r.id || '').trim();
+    });
+  }
+
+  var added = 0, updated = 0, skipped = 0;
+  var now = new Date().toISOString();
+  for (var i = 0; i < rows.length; i++) {
+    var a = rows[i] || {};
+    var name = String(a.name || '').trim();
+    if (!name) { skipped++; continue; }
+    var key = name + '|' + String(a.troop == null ? '' : a.troop).trim();
+    var id = existing[key];
+    if (id) {
+      var idx = rowIndexByCol_(sh, 'id', id);
+      if (idx < 0) { skipped++; continue; }
+      awardWriteFields_(sh, idx, a, types, false);
+      updated++;
+    } else {
+      var newId = genId_('aw');
+      appendRowObj_(sh, { id: newId, districtCode: districtCode_(), createdAt: now, updatedAt: now });
+      var ni = rowIndexByCol_(sh, 'id', newId);
+      if (ni < 0) { skipped++; continue; }
+      awardWriteFields_(sh, ni, a, types, true);
+      existing[key] = newId;
+      added++;
+    }
+  }
+  return ok({ imported: true, added: added, updated: updated, skipped: skipped, mode: replace ? 'replace' : 'merge' });
+}
+
+/** 儲存獎項及年期設定（整張表覆寫）；新增獎項會自動補 Awards 欄 */
+function saveAwardTypes_(token, types) {
+  var t = requireCardEdit_(token, 'awards'); if (t.error) return err(t.error);
+  if (!types || !types.length) return err('至少要有一個獎項');
+  if (types.length > 60) return err('獎項最多 60 個');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.AWARD_TYPES);
+  if (!sh) return err('尚未執行 setupSheets()（缺 AwardTypes 表）');
+
+  var seen = {}, out = [];
+  for (var i = 0; i < types.length; i++) {
+    var ty = types[i] || {};
+    var code = awardCode_(ty.code);
+    if (!code) return err('第 ' + (i + 1) + ' 行：代號只可以用英文字母／數字／底線');
+    if (seen[code]) return err('代號重複：' + code);
+    seen[code] = true;
+    var label = String(ty.label || '').trim();
+    if (!label) return err(code + '：獎項名稱必填');
+    var minYears = (ty.minYears === '' || ty.minYears === null || ty.minYears === undefined) ? '' : Math.max(0, Math.min(99, Number(ty.minYears) || 0));
+    out.push([code, label, String(ty.short || '').trim(), String(ty.category || '其他').trim(),
+      awardCode_(ty.prevCode), minYears, awardRound_(ty.round), String(ty.note || '').trim(),
+      (ty.enabled === false || String(ty.enabled).toUpperCase() === 'FALSE') ? 'FALSE' : 'TRUE']);
+  }
+  // 上一級唔可以指向唔存在嘅代號（否則永遠計唔到夠期）
+  for (var j = 0; j < out.length; j++) {
+    if (out[j][4] && !seen[out[j][4]]) return err(out[j][0] + '：上一級代號「' + out[j][4] + '」唔存在');
+    if (out[j][4] === out[j][0]) return err(out[j][0] + '：上一級唔可以係自己');
+  }
+
+  var header = ['code', 'label', 'short', 'category', 'prevCode', 'minYears', 'round', 'note', 'enabled'];
+  sh.clear();
+  sh.getRange(1, 1, 1, header.length).setValues([header]);
+  sh.getRange(1, 1, 1, header.length).setFontWeight('bold').setBackground('#fde68a');
+  sh.setFrozenRows(1);
+  sh.getRange(2, 1, out.length, header.length).setValues(out);
+  var addedCols = ensureAwardColumns_(ss);
+  return ok({ saved: true, count: out.length, newColumns: addedCols });
+}
+
+
+// ===================== 旅團探訪 Visits（v4.8.1） =====================
+// 區幹部落旅團探訪，喺 /visit 撳一下嗰個旅團格仔就登記低「邊個、幾時、探邊一旅邊個支部」。
+// 幹部一入去預設只睇自己支部（跟角色：小童軍／幼童軍／童軍 ADC），要睇其他支部隨時切換。
+// DC 出報告：揀「幾月到幾月」即刻有探訪 list，仲有邊個幹部探咗幾多次、探過邊啲旅。
+//
+// Units 表 = 全區旅團名單（旅號、主辦機構、各支部團數），預設跟港島地域官網筲箕灣區一覽表；
+// 名單可以喺 app 內改（saveUnits），改完會順手同步 Config TROOP_LIST 畀「活動知會／聯結簿」用。
+
+var VISIT_SECTIONS = ['gh', 'cub', 'scout', 'venture', 'rover'];
+var VISIT_SECTION_LABEL = { gh: '小童軍', cub: '幼童軍', scout: '童軍', venture: '深資童軍', rover: '樂行童軍' };
+// 角色 → 一入去預設睇邊個支部（其他角色 = 全部）
+var VISIT_ROLE_SECTION = { ADC_GH: 'gh', ADC_CUBS: 'cub', ADC_SCOUT: 'scout' };
+var VISIT_KINDS = ['general', 'inspection', 'meeting', 'section', 'event', 'other'];
+
+function visitSection_(v) {
+  var s = String(v || '').trim().toLowerCase();
+  return VISIT_SECTIONS.indexOf(s) >= 0 ? s : '';
+}
+function visitKind_(v) {
+  var s = String(v || '').trim().toLowerCase();
+  return VISIT_KINDS.indexOf(s) >= 0 ? s : 'general';
+}
+/** Sheet 日期格可能係 Date → 一律 yyyy-MM-dd */
+function visitDate_(v) {
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  var s = String(v == null ? '' : v).trim();
+  var m = s.match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+  if (!m) return '';
+  return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+}
+function visitToday_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+function visitQuarter_(dateStr) {
+  var d = visitDate_(dateStr);
+  if (!d) return 0;
+  var mo = Number(d.slice(5, 7));
+  return mo ? Math.floor((mo - 1) / 3) + 1 : 0;
+}
+/** 登入者顯示名（Users 表 displayName，冇就用 email 前半） */
+function visitorName_(email) {
+  var e = String(email || '').trim().toLowerCase();
+  if (!e) return '';
+  var hit = readSheet_(SHEET.USERS).filter(function (u) {
+    return String(u.email || '').trim().toLowerCase() === e;
+  })[0];
+  var nm = hit ? String(hit.displayName || '').trim() : '';
+  return nm || e.split('@')[0];
+}
+
+/** 內建旅團名單（港島地域官網「筲箕灣區」旅團一覽表，覆檢日期 2026-03-31）；喺 app 可改 */
+function unitSeed_() {
+  return [
+    // troop, label, org, gh, cub, scout, venture, rover
+    ['17',   '港島第17旅',   '慈幼中學', '', '1', '1', '1', ''],
+    ['50',   '港島第50旅',   '聖馬可中學', '', '', '1', '1', '1'],
+    ['81',   '港島第81旅',   '筲箕灣官立中學', '', '', '1', '1', ''],
+    ['82',   '港島第82旅',   '香港小童群益會康山兒童中心', '1', '1', '1', '1', '1'],
+    ['86',   '港島第86旅',   '愛秩序灣居民協會', '', '1', '1', '1', '1'],
+    ['101',  '港島第101旅',  '筲箕灣東官立中學', '', '', '1+A1', '1+A1+S1', '1+A1'],
+    ['114',  '港島第114旅',  '香港中國婦女會丘佐榮學校', '', '2', '', '', ''],
+    ['180',  '港島第180旅',  '中華基督教會基灣小學', '', '1', '', '', ''],
+    ['182',  '港島第182旅',  '香港中國婦女會中學', '', '', '1', '', ''],
+    ['183',  '港島第183旅',  '中華基督教會基灣小學（愛蝶灣）', '1', '1', '', '', ''],
+    ['196',  '港島第196旅',  '香港童軍總會港島第一九六旅（公開旅）', '1', '1', '1', '', ''],
+    ['206',  '港島第206旅',  '太古城物業管理聯絡議會', '1', '1', '1', '1', ''],
+    ['219',  '港島第219旅',  '太古小學', '', '1', '', '', ''],
+    ['226',  '港島第226旅',  '佛教中華康山學校', '', '1', '', '', ''],
+    ['227',  '港島第227旅',  '滬江小學', '', '1', '', '', ''],
+    ['242',  '港島第242旅',  '香港中華基督教青年會康怡會所', '1', '2', '1', '1', '1'],
+    ['255',  '港島第255旅',  '香港中華基督教青年會康怡會所', '1', '1', '1', '1', ''],
+    ['257',  '港島第257旅',  '勵志會梁李秀娛紀念小學', '', '1', '', '', ''],
+    ['1095', '港島第1095旅', '東區撲滅罪行委員會', '', '1', '2+S1', '2', '1'],
+    ['1127', '港島第1127旅', '香港小童群益會筲箕灣兒童中心', '1', '1', '1', '', ''],
+    ['1222', '港島第1222旅', '維多利亞幼稚園', '3', '', '', '', ''],
+    ['1368', '港島第1368旅', '鯉景灣物業管理有限公司', '', '1', '', '', ''],
+    ['1423', '港島第1423旅', '愛秩序灣官立小學', '', '1', '', '', ''],
+    ['1544', '港島第1544旅', '基督教康山中英文幼稚園', '2', '', '', '', ''],
+    ['1560', '港島第1560旅', '協康會賽馬會家長資源中心', '1', '1', '', '', ''],
+    ['1682', '港島第1682旅', '康怡維多利亞幼稚園', '1', '', '', '', ''],
+    ['1745', '港島第1745旅', '港島民生書院', '', '', '1', '', ''],
+    ['1762', '港島第1762旅', '筲箕灣官立小學', '', '1', '', '', ''],
+  ];
+}
+function unitRow_(r) {
+  var sections = {};
+  VISIT_SECTIONS.forEach(function (k) { sections[k] = String(r[k] == null ? '' : r[k]).trim(); });
+  return {
+    troop: String(r.troop == null ? '' : r.troop).trim(),
+    label: String(r.label || '').trim() || ('港島第' + String(r.troop || '').trim() + '旅'),
+    org: String(r.org || '').trim(),
+    sections: sections,
+    active: String(r.active).toUpperCase() !== 'FALSE',
+    note: String(r.note || '').trim(),
+  };
+}
+/** 全區旅團名單；Units 表未有資料就用內建 seed */
+function visitUnits_() {
+  var rows = readSheet_(SHEET.UNITS).map(unitRow_).filter(function (u) { return !!u.troop; });
+  if (rows.length) return rows;
+  return unitSeed_().map(function (a) {
+    var sections = {};
+    VISIT_SECTIONS.forEach(function (k, i) { sections[k] = a[3 + i]; });
+    return { troop: a[0], label: a[1], org: a[2], sections: sections, active: true, note: '' };
+  });
+}
+
+function visitRow_(r) {
+  var date = visitDate_(r.visitDate);
+  return {
+    id: String(r.id || '').trim(),
+    districtCode: String(r.districtCode || '').trim() || districtCode_(),
+    troop: String(r.troop == null ? '' : r.troop).trim(),
+    section: visitSection_(r.section),
+    visitDate: date,
+    year: date ? Number(date.slice(0, 4)) : 0,
+    quarter: visitQuarter_(date),
+    kind: visitKind_(r.kind),
+    visitorName: String(r.visitorName || '').trim(),
+    visitorEmail: String(r.visitorEmail || '').trim(),
+    note: String(r.note == null ? '' : r.note).trim(),
+    followUp: String(r.followUp == null ? '' : r.followUp).trim(),
+    createdAt: String(r.createdAt || ''),
+    updatedAt: String(r.updatedAt || r.createdAt || ''),
+  };
+}
+
+/**
+ * 一次過攞：旅團名單（連支部）＋ 探訪記錄。
+ * from / to = yyyy-MM-dd（留空 = 今年 1 月 1 日至 12 月 31 日）。
+ */
+function getVisitBoard_(token, from, to) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss.getSheetByName(SHEET.VISITS)) return err('尚未執行 setupSheets()（缺 Visits 表）');
+  var today = visitToday_();
+  var f = visitDate_(from) || (today.slice(0, 4) + '-01-01');
+  var tt = visitDate_(to) || (today.slice(0, 4) + '-12-31');
+  if (f > tt) { var tmp = f; f = tt; tt = tmp; }
+
+  var all = readSheet_(SHEET.VISITS).map(visitRow_).filter(function (v) { return !!v.troop && !!v.visitDate; });
+  var visits = all.filter(function (v) { return v.visitDate >= f && v.visitDate <= tt; });
+  visits.sort(function (a, b) { return a.visitDate < b.visitDate ? 1 : a.visitDate > b.visitDate ? -1 : 0; });
+
+  var years = {};
+  all.forEach(function (v) { if (v.year) years[v.year] = true; });
+  years[Number(today.slice(0, 4))] = true;
+
+  var role = String(t.role || '').trim();
+  return ok({
+    from: f, to: tt, today: today,
+    units: visitUnits_(),
+    visits: visits,
+    years: Object.keys(years).map(Number).sort(function (a, b) { return b - a; }),
+    sections: VISIT_SECTIONS.map(function (k) { return { key: k, label: VISIT_SECTION_LABEL[k] }; }),
+    me: {
+      email: t.email, role: role,
+      name: visitorName_(t.email),
+      defaultSection: VISIT_ROLE_SECTION[role] || '',
+    },
+  });
+}
+
+/** 登記一次探訪（visit.id 留空 = 新增）；只寫 payload 有帶嘅欄 */
+function saveVisit_(token, v) {
+  var t = requireCardEdit_(token, 'visit'); if (t.error) return err(t.error);
+  v = v || {};
+  var troop = String(v.troop == null ? '' : v.troop).trim();
+  if (!troop) return err('請揀旅團');
+  var date = visitDate_(v.visitDate) || visitToday_();
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VISITS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Visits 表）');
+
+  var id = String(v.id || '').trim();
+  var now = new Date().toISOString();
+  var who = String(v.visitorName == null ? '' : v.visitorName).trim() || visitorName_(t.email);
+  var mail = String(v.visitorEmail || '').trim() || t.email;
+
+  // 一日一個旅一次：同一日、同一個旅、同一位幹部，唔會有兩筆（改緊嗰筆唔計）
+  var dup = readSheet_(SHEET.VISITS).map(visitRow_).filter(function (o) {
+    if (!o || String(o.id) === id) return false;
+    if (String(o.troop).trim() !== troop || o.visitDate !== date) return false;
+    var sameMail = mail && o.visitorEmail && String(o.visitorEmail).trim().toLowerCase() === String(mail).toLowerCase();
+    var sameName = who && o.visitorName && String(o.visitorName).trim() === who;
+    return sameMail || sameName;
+  });
+  if (dup.length) {
+    return err(troop + ' 旅喺 ' + date + ' 已經登記咗（' + (dup[0].visitorName || who) + '）—— 同一日唔使登記兩次');
+  }
+
+  if (!id) {
+    id = genId_('vs');
+    appendRowObj_(sh, {
+      id: id, districtCode: districtCode_(),
+      visitorEmail: mail,
+      visitorName: who,
+      createdAt: now,
+    });
+  }
+  var idx = rowIndexByCol_(sh, 'id', id);
+  if (idx < 0) return err('找不到該探訪記錄');
+  var has = function (k) { return Object.prototype.hasOwnProperty.call(v, k); };
+  setCellByHeader_(sh, idx, 'troop', troop);
+  setCellByHeader_(sh, idx, 'visitDate', date);
+  setCellByHeader_(sh, idx, 'quarter', visitQuarter_(date));
+  if (has('section')) setCellByHeader_(sh, idx, 'section', visitSection_(v.section));
+  if (has('kind')) setCellByHeader_(sh, idx, 'kind', visitKind_(v.kind));
+  if (has('note')) setCellByHeader_(sh, idx, 'note', String(v.note == null ? '' : v.note).trim());
+  if (has('followUp')) setCellByHeader_(sh, idx, 'followUp', String(v.followUp == null ? '' : v.followUp).trim());
+  if (has('visitorName') && String(v.visitorName || '').trim()) {
+    setCellByHeader_(sh, idx, 'visitorName', String(v.visitorName).trim());
+  }
+  setCellByHeader_(sh, idx, 'updatedAt', now);
+  return ok({ saved: true, id: id, troop: troop, section: visitSection_(v.section), visitDate: date });
+}
+
+function deleteVisit_(token, id) {
+  var t = requireCardEdit_(token, 'visit'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VISITS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Visits 表）');
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該探訪記錄');
+  sh.deleteRow(idx);
+  return ok({ deleted: true, id: String(id).trim() });
+}
+
+/** 更新全區旅團名單（整份覆寫 Units 表）；順手同步 Config TROOP_LIST */
+function saveUnits_(token, units) {
+  var t = requireCardEdit_(token, 'visit'); if (t.error) return err(t.error);
+  if (!units || !units.length) return err('旅團名單唔可以空');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.UNITS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Units 表）');
+
+  var seen = {}, out = [], troops = [];
+  for (var i = 0; i < units.length; i++) {
+    var u = units[i] || {};
+    var troop = String(u.troop == null ? '' : u.troop).trim();
+    if (!troop) continue;
+    if (seen[troop]) return err('旅號重複：' + troop);
+    seen[troop] = true;
+    var sec = u.sections || {};
+    var row = [
+      troop,
+      String(u.label || '').trim() || ('港島第' + troop + '旅'),
+      String(u.org || '').trim(),
+    ];
+    VISIT_SECTIONS.forEach(function (k) { row.push(String(sec[k] == null ? '' : sec[k]).trim()); });
+    row.push(u.active === false ? 'FALSE' : 'TRUE');
+    row.push(String(u.note || '').trim());
+    out.push(row);
+    troops.push(troop);
+  }
+  if (!out.length) return err('旅團名單唔可以空');
+
+  var header = ['troop', 'label', 'org'].concat(VISIT_SECTIONS).concat(['active', 'note']);
+  sh.clear();
+  sh.getRange(1, 1, 1, header.length).setValues([header]);
+  sh.getRange(1, 1, 1, header.length).setFontWeight('bold').setBackground('#bbf7d0');
+  sh.setFrozenRows(1);
+  sh.getRange(2, 1, out.length, header.length).setValues(out);
+  setConfigValue_('TROOP_LIST', troops.join(','));
+  return ok({ saved: true, count: out.length });
 }
 
 // ===================== 意外／應變：意外報告（v4.3.0） =====================
@@ -1627,6 +2614,8 @@ function courseLinkPublic_(r) {
     subsidyNote: r.subsidyNote || '', deadline: r.deadline || '',
     quota: Number(r.quota) || 0, filled: Number(r.filled) || 0,
     venue: r.venue || '', noticeUrl: r.noticeUrl || '', contact: r.contact || '',
+    // 成員系統 proxy 嘅 publicCourse 會讀 active 再過濾，所以公開版都要回（listCourseLinks_ 本身已隔走 FALSE）
+    active: String(r.active).toUpperCase() !== 'FALSE',
     // 每班收費 FPS QR（v4.3.0）：成員系統直接畫 QR；冇生成過就全部空字串
     fpsQrPayload: String(r.fpsQrPayload || '').trim(),
     fpsAmount: r.fpsAmount === undefined || r.fpsAmount === null ? '' : String(r.fpsAmount).trim(),
@@ -2973,6 +3962,7 @@ function blueprint_() {
     P.push(row('venueReg', opsEdit()));
     P.push(row('stockReg', opsEdit()));
     P.push(row('activity', opsEdit()));
+    P.push(row('news', opsEdit()));
     P.push(row('incident', ALL_VIEW));
     P.push(row('training', trainingEdit()));
     P.push(row('fps', ALL_EDIT));
@@ -3054,20 +4044,29 @@ function blueprint_() {
 
     { name: SHEET.CARDS, rows: [
       ['cardId', 'title', 'icon', 'type', 'url', 'description', 'order', 'enabled', 'embed', 'source', 'category'],
-      ['visit', '旅團探訪', '🏕', 'builtin', '/visit', '年度旅團探訪', 1, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['visit', '旅團探訪', '🏕', 'builtin', '/visit', '一撳登記探訪 · 未探旅團紅燈 · 季度報告', 1, 'TRUE', 'FALSE', 'core', 'done'],
       ['contacts', '聯結簿', '📇', 'builtin', '/contacts', '旅團 · 港島地域 · 總會 聯絡資料', 2, 'TRUE', 'FALSE', 'core', 'done'],
-      ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '讀獲獎名單 · 推下一級', 3, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '獎勵名冊 · 自動計夠期可提名 · 年期自訂', 3, 'TRUE', 'FALSE', 'core', 'done'],
       ['budget', '區年度預算', '📑', 'builtin', '/budget', '直讀區方預算 Sheet · 按月／支部 · 資助合計', 5, 'TRUE', 'FALSE', 'core', 'done'],
       ['committee', '委任系統', '🗂', 'builtin', '/committee', '委任 · 續任 · R02', 7, 'TRUE', 'FALSE', 'core', 'todo'],
       ['unit', '旅團管理系統', '🧭', 'builtin', '/unit', '旅名冊 · 人數統計', 8, 'TRUE', 'FALSE', 'core', 'todo'],
       ['venueReg', '場地借用審批', '🏛', 'builtin', '/venue-regs', '借場申請批核 · 場地清單', 9, 'TRUE', 'FALSE', 'core', 'done'],
       ['stockReg', '物資借用審批', '📦', 'builtin', '/stock-regs', '借物資批核 · 庫存管理', 10, 'TRUE', 'FALSE', 'core', 'done'],
       ['activity', '活動知會', '🗓', 'builtin', '/activity-notices', '旅團活動知會記錄', 11, 'TRUE', 'FALSE', 'core', 'done'],
+      ['news', '消息發佈', '📢', 'builtin', '/news', '發佈消息到成員系統首頁置頂 · 一刪即消失', 4, 'TRUE', 'FALSE', 'core', 'done'],
       ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '天氣決策 · 即時應變 · 總會指引 · 意外報告', 12, 'TRUE', 'FALSE', 'core', 'done'],
       ['training', '訓練班管理', '🎓', 'builtin', '/training', '開班登記 · 區會目錄', 13, 'TRUE', 'FALSE', 'core', 'done'],
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
       ['rooms', '地域房間使用情況', '🏢', 'builtin', '/rooms', '17／18／19 樓逐間房睇用途時段 · 今日總覽', 15, 'TRUE', 'FALSE', 'core', 'done'],
       ['orgchart', '地域及總會架構', '🏛', 'builtin', '/orgchart', '港島地域總監架構 · 總會領導層，自動跟官網更新', 16, 'TRUE', 'FALSE', 'core', 'done'],
+    ] },
+
+    { name: SHEET.UNITS, headerColor: '#bbf7d0', rows: [
+      ['troop', 'label', 'org', 'gh', 'cub', 'scout', 'venture', 'rover', 'active', 'note'],
+    ].concat(unitSeed_().map(function (a) { return a.concat(['TRUE', '']); })) },
+
+    { name: SHEET.VISITS, rows: [
+      ['id', 'districtCode', 'troop', 'section', 'visitDate', 'quarter', 'kind', 'visitorName', 'visitorEmail', 'note', 'followUp', 'createdAt', 'updatedAt'],
     ] },
 
     { name: SHEET.PERMS, headerColor: '#ede9fe', frozenCols: 1, rows: permRows },
@@ -3096,7 +4095,7 @@ function blueprint_() {
       ['itemId', 'districtCode', 'category', 'name', 'totalQty', 'availableQty', 'unit', 'note', 'location', 'active'],
     ] },
     { name: SHEET.STOCK_REQ, rows: [
-      ['id', 'districtCode', 'refCode', 'submittedAt', 'itemId', 'itemName', 'category', 'qty',
+      ['id', 'districtCode', 'refCode', 'batchRef', 'submittedAt', 'itemId', 'itemName', 'category', 'qty',
         'purpose', 'borrowDate', 'returnDate', 'name', 'phone', 'email', 'troop', 'position',
         'agreeRules', 'status', 'reviewer', 'reviewedAt', 'createdAt'],
     ] },
@@ -3106,6 +4105,17 @@ function blueprint_() {
         'membersCount', 'leadersCount', 'parentsCount',
         'leaderName', 'leaderPhone', 'leaderEmail', 'note', 'createdAt'],
     ] },
+    // 消息發佈（v4.6.0）：管理系統發 → 成員系統 member-portal 首頁頂部置頂顯示
+    { name: SHEET.NEWS, headerColor: '#fef3c7', rows: [
+      ['id', 'districtCode', 'title', 'body', 'date', 'pinned', 'level', 'link', 'linkLabel',
+        'notify', 'active', 'expiresAt', 'publishedAt', 'publishedBy', 'updatedAt', 'createdAt'],
+    ] },
+    { name: SHEET.AWARDS, headerColor: '#fde68a', frozenCols: 1, rows: [
+      AWARD_FIXED_COLS.concat(awardTypeSeed_().map(function (r) { return r[0]; })).concat(AWARD_TAIL_COLS),
+    ] },
+    { name: SHEET.AWARD_TYPES, headerColor: '#fde68a', rows: [
+      ['code', 'label', 'short', 'category', 'prevCode', 'minYears', 'round', 'note', 'enabled'],
+    ].concat(awardTypeSeed_()) },
     // 意外報告：欄位對應香港童軍總會行政署「意外報告」(ACC-RPT 2019/07) 兩頁內容
     { name: SHEET.INCIDENT_REQ, headerColor: '#fee2e2', rows: [
       INCIDENT_FIELDS.slice(),
@@ -3178,6 +4188,7 @@ function setupSheets() {
   blueprint_()[0].rows.slice(1).forEach(function (r) { ensureConfigRow_(cfg, r[0], r[1], r[2]); });
 
   seedCourseParams_(ss);
+  ensureAwardColumns_(ss);
   ensureCardRows_(ss);
   patchCardRows_(ss);
   ensurePermsRows_(ss);
@@ -3241,6 +4252,8 @@ function patchCardRows_(ss) {
     contacts: { oldTitle: '旅團聯絡簿', title: '聯結簿', oldDesc: '聯絡資料 · 分組 · 群發', desc: '旅團 · 港島地域 · 總會 聯絡資料' },
     // v4.5.0 區年度預算已完成（直讀區方 Google Sheet）
     budget: { oldDesc: '預算編列與追蹤', desc: '直讀區方預算 Sheet · 按月／支部 · 資助合計' },
+    // v4.7.0 獎勵提名已完成（名冊 + 夠期提名推算 + 年期可自訂）
+    awards: { oldDesc: '讀獲獎名單 · 推下一級', desc: '獎勵名冊 · 自動計夠期可提名 · 年期自訂' },
   };
   var descOnly = { incident: { oldDesc: '即時應變 · 總會指引 · 意外報告', desc: '天氣決策 · 即時應變 · 總會指引 · 意外報告' } };
   var removeIds = { meeting: true, annual: true }; // v4.4.0 刪會議行事曆；v4.5.0 刪週年會議文件

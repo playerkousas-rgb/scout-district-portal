@@ -10,6 +10,7 @@ import { canDelegate, isSuper, levelLabel, levelOf } from '@/lib/levels';
 import CardItem from '@/components/CardItem';
 import PendingTicker from '@/components/PendingTicker';
 import WeatherDecisionBanner from '@/components/WeatherDecisionBanner';
+import NewsBanner from '@/components/NewsBanner';
 
 const REMEMBER_KEY = 'portal_remember_login';
 
@@ -315,6 +316,12 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      {/* 置頂消息：同成員系統首頁同一份資料（listAnnouncements）；喺 /news 一刪就即刻消失 */}
+      <NewsBanner
+        canManage={cards.some(c => c.cardId === 'news')}
+        onManage={() => router.push(withDistrict('/news'))}
+      />
 
       {/* 天氣決策：而家有咩警告 → 活動應唔應該取消（活動指引通告 04/2018） */}
       <WeatherDecisionBanner districtCode={districtCode || ''} onOpen={() => router.push(withDistrict('/incident?tab=weather'))} />
