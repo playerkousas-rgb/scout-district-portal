@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.7.3
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.8.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -126,6 +126,8 @@ var SHEET = {
   ACTIVITY_REQ: 'ActivityNotices',
   NEWS: 'News',                  // 消息發佈（管理系統發 → 成員系統首頁置頂顯示）
   AWARDS: 'Awards',              // 獎勵提名名冊（一人一行，每個獎一欄＝獲獎年份）
+  UNITS: 'Units',                // 全區旅團名單（旅號、主辦機構、各支部團數）
+  VISITS: 'Visits',              // 旅團探訪登記（一次探訪一行）
   AWARD_TYPES: 'AwardTypes',     // 獎項及年期設定（可喺管理系統改，唔使改程式）
   INCIDENT_REQ: 'IncidentReports', // 意外報告（HKSA ACC-RPT 2019/07 欄位）
   COURSE_LINKS: 'CourseLinks',   // 訓練班目錄（單一資料來源）
@@ -267,7 +269,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.7.3',
+      version: '4.8.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -313,6 +315,7 @@ function doGet(e) {
       case 'getPendingInbox':     return json(getPendingInbox_(p.token));
       case 'getActivityNotices':  return json(getActivityNotices_(p.token));
       case 'getAwardsBoard':      return json(getAwardsBoard_(p.token));
+      case 'getVisitBoard':       return json(getVisitBoard_(p.token, p.from, p.to));
       case 'getAnnouncements':    return json(getAnnouncements_(p.token));
       case 'getAllRecords':       return json(getAllRecords_(p.token));
       case 'listIncidentReports': return json(listIncidentReports_(p.token));
@@ -386,6 +389,11 @@ function doPost(e) {
       case 'deleteAwardMember':   return json(deleteAwardMember_(b.token, b.id));
       case 'importAwardMembers':  return json(importAwardMembers_(b.token, b.rows, b.mode));
       case 'saveAwardTypes':      return json(saveAwardTypes_(b.token, b.types));
+
+      // ---------- 旅團探訪（v4.8.0） ----------
+      case 'saveVisit':           return json(saveVisit_(b.token, b.visit || b));
+      case 'deleteVisit':         return json(deleteVisit_(b.token, b.id));
+      case 'saveUnits':           return json(saveUnits_(b.token, b.units));
       case 'saveAnnouncement':      return json(saveAnnouncement_(b.token, b.announcement || b.news || b));
       case 'deleteAnnouncement':    return json(deleteAnnouncement_(b.token, b.id));
       case 'setAnnouncementPinned': return json(setAnnouncementPinned_(b.token, b.id, b.pinned));
@@ -2187,6 +2195,257 @@ function saveAwardTypes_(token, types) {
   return ok({ saved: true, count: out.length, newColumns: addedCols });
 }
 
+
+// ===================== 旅團探訪 Visits（v4.8.0） =====================
+// 區幹部落旅團探訪，喺 /visit 撳一下嗰個旅團格仔就登記低「邊個、幾時、探邊一旅邊個支部」。
+// 幹部一入去預設只睇自己支部（跟角色：小童軍／幼童軍／童軍 ADC），要睇其他支部隨時切換。
+// DC 出報告：揀「幾月到幾月」即刻有探訪 list，仲有邊個幹部探咗幾多次、探過邊啲旅。
+//
+// Units 表 = 全區旅團名單（旅號、主辦機構、各支部團數），預設跟港島地域官網筲箕灣區一覽表；
+// 名單可以喺 app 內改（saveUnits），改完會順手同步 Config TROOP_LIST 畀「活動知會／聯結簿」用。
+
+var VISIT_SECTIONS = ['gh', 'cub', 'scout', 'venture', 'rover'];
+var VISIT_SECTION_LABEL = { gh: '小童軍', cub: '幼童軍', scout: '童軍', venture: '深資童軍', rover: '樂行童軍' };
+// 角色 → 一入去預設睇邊個支部（其他角色 = 全部）
+var VISIT_ROLE_SECTION = { ADC_GH: 'gh', ADC_CUBS: 'cub', ADC_SCOUT: 'scout' };
+var VISIT_KINDS = ['general', 'inspection', 'meeting', 'section', 'event', 'other'];
+
+function visitSection_(v) {
+  var s = String(v || '').trim().toLowerCase();
+  return VISIT_SECTIONS.indexOf(s) >= 0 ? s : '';
+}
+function visitKind_(v) {
+  var s = String(v || '').trim().toLowerCase();
+  return VISIT_KINDS.indexOf(s) >= 0 ? s : 'general';
+}
+/** Sheet 日期格可能係 Date → 一律 yyyy-MM-dd */
+function visitDate_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var s = String(v == null ? '' : v).trim();
+  var m = s.match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+  if (!m) return '';
+  return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+}
+function visitToday_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+function visitQuarter_(dateStr) {
+  var d = visitDate_(dateStr);
+  if (!d) return 0;
+  var mo = Number(d.slice(5, 7));
+  return mo ? Math.floor((mo - 1) / 3) + 1 : 0;
+}
+/** 登入者顯示名（Users 表 displayName，冇就用 email 前半） */
+function visitorName_(email) {
+  var e = String(email || '').trim().toLowerCase();
+  if (!e) return '';
+  var hit = readSheet_(SHEET.USERS).filter(function (u) {
+    return String(u.email || '').trim().toLowerCase() === e;
+  })[0];
+  var nm = hit ? String(hit.displayName || '').trim() : '';
+  return nm || e.split('@')[0];
+}
+
+/** 內建旅團名單（港島地域官網「筲箕灣區」旅團一覽表，覆檢日期 2026-03-31）；喺 app 可改 */
+function unitSeed_() {
+  return [
+    // troop, label, org, gh, cub, scout, venture, rover
+    ['17',   '港島第17旅',   '慈幼中學', '', '1', '1', '1', ''],
+    ['50',   '港島第50旅',   '聖馬可中學', '', '', '1', '1', '1'],
+    ['81',   '港島第81旅',   '筲箕灣官立中學', '', '', '1', '1', ''],
+    ['82',   '港島第82旅',   '香港小童群益會康山兒童中心', '1', '1', '1', '1', '1'],
+    ['86',   '港島第86旅',   '愛秩序灣居民協會', '', '1', '1', '1', '1'],
+    ['101',  '港島第101旅',  '筲箕灣東官立中學', '', '', '1+A1', '1+A1+S1', '1+A1'],
+    ['114',  '港島第114旅',  '香港中國婦女會丘佐榮學校', '', '2', '', '', ''],
+    ['180',  '港島第180旅',  '中華基督教會基灣小學', '', '1', '', '', ''],
+    ['182',  '港島第182旅',  '香港中國婦女會中學', '', '', '1', '', ''],
+    ['183',  '港島第183旅',  '中華基督教會基灣小學（愛蝶灣）', '1', '1', '', '', ''],
+    ['196',  '港島第196旅',  '香港童軍總會港島第一九六旅（公開旅）', '1', '1', '1', '', ''],
+    ['206',  '港島第206旅',  '太古城物業管理聯絡議會', '1', '1', '1', '1', ''],
+    ['219',  '港島第219旅',  '太古小學', '', '1', '', '', ''],
+    ['226',  '港島第226旅',  '佛教中華康山學校', '', '1', '', '', ''],
+    ['227',  '港島第227旅',  '滬江小學', '', '1', '', '', ''],
+    ['242',  '港島第242旅',  '香港中華基督教青年會康怡會所', '1', '2', '1', '1', '1'],
+    ['255',  '港島第255旅',  '香港中華基督教青年會康怡會所', '1', '1', '1', '1', ''],
+    ['257',  '港島第257旅',  '勵志會梁李秀娛紀念小學', '', '1', '', '', ''],
+    ['1095', '港島第1095旅', '東區撲滅罪行委員會', '', '1', '2+S1', '2', '1'],
+    ['1127', '港島第1127旅', '香港小童群益會筲箕灣兒童中心', '1', '1', '1', '', ''],
+    ['1222', '港島第1222旅', '維多利亞幼稚園', '3', '', '', '', ''],
+    ['1368', '港島第1368旅', '鯉景灣物業管理有限公司', '', '1', '', '', ''],
+    ['1423', '港島第1423旅', '愛秩序灣官立小學', '', '1', '', '', ''],
+    ['1544', '港島第1544旅', '基督教康山中英文幼稚園', '2', '', '', '', ''],
+    ['1560', '港島第1560旅', '協康會賽馬會家長資源中心', '1', '1', '', '', ''],
+    ['1682', '港島第1682旅', '康怡維多利亞幼稚園', '1', '', '', '', ''],
+    ['1745', '港島第1745旅', '港島民生書院', '', '', '1', '', ''],
+    ['1762', '港島第1762旅', '筲箕灣官立小學', '', '1', '', '', ''],
+  ];
+}
+function unitRow_(r) {
+  var sections = {};
+  VISIT_SECTIONS.forEach(function (k) { sections[k] = String(r[k] == null ? '' : r[k]).trim(); });
+  return {
+    troop: String(r.troop == null ? '' : r.troop).trim(),
+    label: String(r.label || '').trim() || ('港島第' + String(r.troop || '').trim() + '旅'),
+    org: String(r.org || '').trim(),
+    sections: sections,
+    active: String(r.active).toUpperCase() !== 'FALSE',
+    note: String(r.note || '').trim(),
+  };
+}
+/** 全區旅團名單；Units 表未有資料就用內建 seed */
+function visitUnits_() {
+  var rows = readSheet_(SHEET.UNITS).map(unitRow_).filter(function (u) { return !!u.troop; });
+  if (rows.length) return rows;
+  return unitSeed_().map(function (a) {
+    var sections = {};
+    VISIT_SECTIONS.forEach(function (k, i) { sections[k] = a[3 + i]; });
+    return { troop: a[0], label: a[1], org: a[2], sections: sections, active: true, note: '' };
+  });
+}
+
+function visitRow_(r) {
+  var date = visitDate_(r.visitDate);
+  return {
+    id: String(r.id || '').trim(),
+    districtCode: String(r.districtCode || '').trim() || districtCode_(),
+    troop: String(r.troop == null ? '' : r.troop).trim(),
+    section: visitSection_(r.section),
+    visitDate: date,
+    year: date ? Number(date.slice(0, 4)) : 0,
+    quarter: visitQuarter_(date),
+    kind: visitKind_(r.kind),
+    visitorName: String(r.visitorName || '').trim(),
+    visitorEmail: String(r.visitorEmail || '').trim(),
+    note: String(r.note == null ? '' : r.note).trim(),
+    followUp: String(r.followUp == null ? '' : r.followUp).trim(),
+    createdAt: String(r.createdAt || ''),
+    updatedAt: String(r.updatedAt || r.createdAt || ''),
+  };
+}
+
+/**
+ * 一次過攞：旅團名單（連支部）＋ 探訪記錄。
+ * from / to = yyyy-MM-dd（留空 = 今年 1 月 1 日至 12 月 31 日）。
+ */
+function getVisitBoard_(token, from, to) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss.getSheetByName(SHEET.VISITS)) return err('尚未執行 setupSheets()（缺 Visits 表）');
+  var today = visitToday_();
+  var f = visitDate_(from) || (today.slice(0, 4) + '-01-01');
+  var tt = visitDate_(to) || (today.slice(0, 4) + '-12-31');
+  if (f > tt) { var tmp = f; f = tt; tt = tmp; }
+
+  var all = readSheet_(SHEET.VISITS).map(visitRow_).filter(function (v) { return !!v.troop && !!v.visitDate; });
+  var visits = all.filter(function (v) { return v.visitDate >= f && v.visitDate <= tt; });
+  visits.sort(function (a, b) { return a.visitDate < b.visitDate ? 1 : a.visitDate > b.visitDate ? -1 : 0; });
+
+  var years = {};
+  all.forEach(function (v) { if (v.year) years[v.year] = true; });
+  years[Number(today.slice(0, 4))] = true;
+
+  var role = String(t.role || '').trim();
+  return ok({
+    from: f, to: tt, today: today,
+    units: visitUnits_(),
+    visits: visits,
+    years: Object.keys(years).map(Number).sort(function (a, b) { return b - a; }),
+    sections: VISIT_SECTIONS.map(function (k) { return { key: k, label: VISIT_SECTION_LABEL[k] }; }),
+    me: {
+      email: t.email, role: role,
+      name: visitorName_(t.email),
+      defaultSection: VISIT_ROLE_SECTION[role] || '',
+    },
+  });
+}
+
+/** 登記一次探訪（visit.id 留空 = 新增）；只寫 payload 有帶嘅欄 */
+function saveVisit_(token, v) {
+  var t = requireCardEdit_(token, 'visit'); if (t.error) return err(t.error);
+  v = v || {};
+  var troop = String(v.troop == null ? '' : v.troop).trim();
+  if (!troop) return err('請揀旅團');
+  var date = visitDate_(v.visitDate) || visitToday_();
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VISITS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Visits 表）');
+
+  var id = String(v.id || '').trim();
+  var now = new Date().toISOString();
+  if (!id) {
+    id = genId_('vs');
+    appendRowObj_(sh, {
+      id: id, districtCode: districtCode_(),
+      visitorEmail: String(v.visitorEmail || '').trim() || t.email,
+      visitorName: String(v.visitorName || '').trim() || visitorName_(t.email),
+      createdAt: now,
+    });
+  }
+  var idx = rowIndexByCol_(sh, 'id', id);
+  if (idx < 0) return err('找不到該探訪記錄');
+  var has = function (k) { return Object.prototype.hasOwnProperty.call(v, k); };
+  setCellByHeader_(sh, idx, 'troop', troop);
+  setCellByHeader_(sh, idx, 'visitDate', date);
+  setCellByHeader_(sh, idx, 'quarter', visitQuarter_(date));
+  if (has('section')) setCellByHeader_(sh, idx, 'section', visitSection_(v.section));
+  if (has('kind')) setCellByHeader_(sh, idx, 'kind', visitKind_(v.kind));
+  if (has('note')) setCellByHeader_(sh, idx, 'note', String(v.note == null ? '' : v.note).trim());
+  if (has('followUp')) setCellByHeader_(sh, idx, 'followUp', String(v.followUp == null ? '' : v.followUp).trim());
+  if (has('visitorName') && String(v.visitorName || '').trim()) {
+    setCellByHeader_(sh, idx, 'visitorName', String(v.visitorName).trim());
+  }
+  setCellByHeader_(sh, idx, 'updatedAt', now);
+  return ok({ saved: true, id: id, troop: troop, section: visitSection_(v.section), visitDate: date });
+}
+
+function deleteVisit_(token, id) {
+  var t = requireCardEdit_(token, 'visit'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VISITS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Visits 表）');
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該探訪記錄');
+  sh.deleteRow(idx);
+  return ok({ deleted: true, id: String(id).trim() });
+}
+
+/** 更新全區旅團名單（整份覆寫 Units 表）；順手同步 Config TROOP_LIST */
+function saveUnits_(token, units) {
+  var t = requireCardEdit_(token, 'visit'); if (t.error) return err(t.error);
+  if (!units || !units.length) return err('旅團名單唔可以空');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.UNITS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Units 表）');
+
+  var seen = {}, out = [], troops = [];
+  for (var i = 0; i < units.length; i++) {
+    var u = units[i] || {};
+    var troop = String(u.troop == null ? '' : u.troop).trim();
+    if (!troop) continue;
+    if (seen[troop]) return err('旅號重複：' + troop);
+    seen[troop] = true;
+    var sec = u.sections || {};
+    var row = [
+      troop,
+      String(u.label || '').trim() || ('港島第' + troop + '旅'),
+      String(u.org || '').trim(),
+    ];
+    VISIT_SECTIONS.forEach(function (k) { row.push(String(sec[k] == null ? '' : sec[k]).trim()); });
+    row.push(u.active === false ? 'FALSE' : 'TRUE');
+    row.push(String(u.note || '').trim());
+    out.push(row);
+    troops.push(troop);
+  }
+  if (!out.length) return err('旅團名單唔可以空');
+
+  var header = ['troop', 'label', 'org'].concat(VISIT_SECTIONS).concat(['active', 'note']);
+  sh.clear();
+  sh.getRange(1, 1, 1, header.length).setValues([header]);
+  sh.getRange(1, 1, 1, header.length).setFontWeight('bold').setBackground('#bbf7d0');
+  sh.setFrozenRows(1);
+  sh.getRange(2, 1, out.length, header.length).setValues(out);
+  setConfigValue_('TROOP_LIST', troops.join(','));
+  return ok({ saved: true, count: out.length });
+}
+
 // ===================== 意外／應變：意外報告（v4.3.0） =====================
 // 欄位 = 香港童軍總會行政署「意外報告」(ACC-RPT 2019/07) 兩頁內容（camelCase），
 // 另加 id / districtCode / refCode / status / submittedAt / submittedBy / serious / createdAt。
@@ -3768,7 +4027,7 @@ function blueprint_() {
 
     { name: SHEET.CARDS, rows: [
       ['cardId', 'title', 'icon', 'type', 'url', 'description', 'order', 'enabled', 'embed', 'source', 'category'],
-      ['visit', '旅團探訪', '🏕', 'builtin', '/visit', '年度旅團探訪', 1, 'TRUE', 'FALSE', 'core', 'todo'],
+      ['visit', '旅團探訪', '🏕', 'builtin', '/visit', '一撳登記探訪 · 未探旅團紅燈 · 季度報告', 1, 'TRUE', 'FALSE', 'core', 'done'],
       ['contacts', '聯結簿', '📇', 'builtin', '/contacts', '旅團 · 港島地域 · 總會 聯絡資料', 2, 'TRUE', 'FALSE', 'core', 'done'],
       ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '獎勵名冊 · 自動計夠期可提名 · 年期自訂', 3, 'TRUE', 'FALSE', 'core', 'done'],
       ['budget', '區年度預算', '📑', 'builtin', '/budget', '直讀區方預算 Sheet · 按月／支部 · 資助合計', 5, 'TRUE', 'FALSE', 'core', 'done'],
@@ -3783,6 +4042,14 @@ function blueprint_() {
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
       ['rooms', '地域房間使用情況', '🏢', 'builtin', '/rooms', '17／18／19 樓逐間房睇用途時段 · 今日總覽', 15, 'TRUE', 'FALSE', 'core', 'done'],
       ['orgchart', '地域及總會架構', '🏛', 'builtin', '/orgchart', '港島地域總監架構 · 總會領導層，自動跟官網更新', 16, 'TRUE', 'FALSE', 'core', 'done'],
+    ] },
+
+    { name: SHEET.UNITS, headerColor: '#bbf7d0', rows: [
+      ['troop', 'label', 'org', 'gh', 'cub', 'scout', 'venture', 'rover', 'active', 'note'],
+    ].concat(unitSeed_().map(function (a) { return a.concat(['TRUE', '']); })) },
+
+    { name: SHEET.VISITS, rows: [
+      ['id', 'districtCode', 'troop', 'section', 'visitDate', 'quarter', 'kind', 'visitorName', 'visitorEmail', 'note', 'followUp', 'createdAt', 'updatedAt'],
     ] },
 
     { name: SHEET.PERMS, headerColor: '#ede9fe', frozenCols: 1, rows: permRows },

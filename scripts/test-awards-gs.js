@@ -302,9 +302,9 @@ check('getAwardsBoard 有回內建建議年期（畀「套用建議」用）', (
   assert.strictEqual(d.filter(t => t.code === 'BRL')[0].minYears, null);
 });
 
-check('健康檢查版本 4.7.3', () => {
+check('健康檢查版本 4.8.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.7.3');
+  assert.strictEqual(parsed.data.version, '4.8.0');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

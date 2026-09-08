@@ -400,3 +400,47 @@ export interface ActivityNotice {
   note?: string;
   districtCode?: string;
 }
+
+/**
+ * 🏕 旅團探訪（v4.8.0）— Units（旅團名單）＋ Visits（探訪記錄）。
+ * 幹部撳一下旅團格仔就登記；DC 揀日期範圍出報告，仲睇到邊個幹部探咗邊啲旅。
+ */
+export type VisitSection = 'gh' | 'cub' | 'scout' | 'venture' | 'rover';
+export type VisitKind = 'general' | 'inspection' | 'meeting' | 'section' | 'event' | 'other';
+
+export interface ScoutUnit {
+  troop: string;                              // 旅號，例如 "206"
+  label: string;                              // 港島第206旅
+  org?: string;                               // 主辦機構
+  sections: Record<VisitSection, string>;     // 各支部團數（"" = 冇該支部）
+  active?: boolean;
+  note?: string;
+}
+
+export interface Visit {
+  id: string;
+  districtCode?: string;
+  troop: string;
+  section?: VisitSection | '';
+  visitDate: string;        // yyyy-MM-dd
+  year?: number;
+  quarter?: number;         // 1..4
+  kind: VisitKind;
+  visitorName?: string;
+  visitorEmail?: string;
+  note?: string;
+  followUp?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface VisitBoard {
+  from: string;
+  to: string;
+  today: string;
+  units: ScoutUnit[];
+  visits: Visit[];
+  years: number[];
+  sections: { key: VisitSection; label: string }[];
+  me: { email: string; role: string; name: string; defaultSection: VisitSection | '' };
+}
