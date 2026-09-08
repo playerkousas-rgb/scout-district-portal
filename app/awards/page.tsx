@@ -23,7 +23,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'nominate', label: '🏅 提名建議' },
   { id: 'roster', label: '📋 獎勵名冊' },
   { id: 'rules', label: '⚙️ 年期設定' },
-  { id: 'import', label: '⬆️ 匯入名單' },
+  { id: 'import', label: '⬆️ 首次匯入' },
 ];
 
 const STATUS_OPTIONS = ['active', 'applying', 'noAppointment', 'notInDistrict', 'left'];
@@ -525,7 +525,7 @@ function RosterTab({ board, canEdit, busy, setBusy, year, setYear, token, reload
         <span className="aw-controls-hint">顯示 {list.length} / {board.total} 人</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="mini-btn" onClick={exportRoster}>⬇ 匯出</button>
-          {canEdit && <button className="btn-sm" onClick={() => setEditing(emptyMember())}>＋ 新增成員</button>}
+          {canEdit && <button className="btn-sm" onClick={() => setEditing(emptyMember())} title="新委任／新入區領袖，逐個加">＋ 新增成員</button>}
         </div>
       </div>
 
@@ -539,7 +539,7 @@ function RosterTab({ board, canEdit, busy, setBusy, year, setYear, token, reload
             </tr>
           </thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={7} className="empty">冇資料（可以去「⬆️ 匯入名單」貼上你份 Excel）</td></tr>}
+            {list.length === 0 && <tr><td colSpan={7} className="empty">冇資料 —— 撳右上角「＋ 新增成員」逐個入，或者去「⬆️ 首次匯入」一次過貼晒你份 Excel</td></tr>}
             {list.map(m => {
               const ready = readyMap[m.id];
               return (
@@ -827,10 +827,22 @@ function ImportTab({ board, canEdit, token, reload, flash, setError }: {
 
   return (
     <>
+      <div className="info-card aw-warn">
+        <b>ℹ️ 呢一頁淨係「開檔」用</b>
+        <p>
+          第一次將你份區會獎勵 Excel 過晒入嚟，用一次就夠。<br />
+          之後平時<b>每次得幾個人</b>：<br />
+          · 頒完獎 → 去「🏅 提名建議」<b>打勾</b> → 撳「✅ 登記獲獎」（最快）<br />
+          · 新委任／新入區領袖 → 去「📋 獎勵名冊」撳「<b>＋ 新增成員</b>」<br />
+          · 改錯字、補返舊獎年份 → 名冊嗰行撳「<b>編輯</b>」<br />
+          唔使再返嚟呢一頁。
+        </p>
+      </div>
+
       <div className="info-card">
         <div className="section-head">
           <div>
-            <h3>由 Excel 貼上</h3>
+            <h3>由 Excel 貼上（開檔一次過）</h3>
             <p>喺你份獎勵 Excel 揀晒啲資料（可連表頭）→ Ctrl+C → 貼落下面個框</p>
           </div>
         </div>
