@@ -8,6 +8,8 @@ import type { UserSession, CardDef } from '@/lib/types';
 import { canManageAccounts } from '@/lib/accountRoles';
 import { canDelegate, isSuper, levelLabel, levelOf } from '@/lib/levels';
 import { applyCardOrder, clearCardOrder, loadCardOrder, moveInList, saveCardOrder, type CardOrderMap } from '@/lib/cardOrder';
+import { enterDemoRole } from '@/lib/demo/session';
+import { DEMO_IDENTITIES } from '@/lib/demo/seed';
 import CardItem from '@/components/CardItem';
 import PendingTicker from '@/components/PendingTicker';
 import WeatherDecisionBanner from '@/components/WeatherDecisionBanner';
@@ -207,6 +209,11 @@ export default function HomePage() {
 
   function logout() { clearSession(); setSession(null); setCards([]); }
 
+  // 🎭 模擬示範版：一鍵以示範身份進入（本地沙盒，唔會掂正式後台）
+  function startDemo(roleKey: string) {
+    enterDemoRole(roleKey);
+    window.location.assign(withDistrict('/'));
+  }
   // 改自己密碼
   const [showPw, setShowPw] = useState(false);
   const [oldPw, setOldPw] = useState('');
@@ -297,6 +304,25 @@ export default function HomePage() {
             </form>
           )}
           <p className="hint">帳號與權限由該區自己的 Google Sheet 控制。</p>
+
+          {/* 🎭 v4.9.0 模擬示範版 — 未登入都可以試晒成個系統（本地沙盒） */}
+          <div className="demo-entry">
+            <div className="demo-entry-head">
+              <span className="demo-badge">🎭 模擬示範版</span>
+              <span className="demo-entry-title">未登入都可以試晒成個系統</span>
+            </div>
+            <p className="demo-entry-desc">
+              完整示範資料（獎勵名冊／旅團探訪／借場借物資／消息發佈…），改動<b>只存喺你嘅瀏覽器</b>，絕對唔會影響正式後台。
+              撳以下任何一個身份即刻進入，入面頂部隨時轉身份睇權限分別。
+            </p>
+            <div className="demo-entry-roles">
+              {DEMO_IDENTITIES.map(r => (
+                <button key={r.key} type="button" className="demo-chip demo-entry-chip" style={{ borderColor: r.color }} onClick={() => startDemo(r.key)} title={r.desc}>
+                  {r.icon} 以{r.label}示範
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     );

@@ -3,15 +3,17 @@
  * 區碼從 localStorage 讀取（同 DBS 3.0 模式）。
  */
 
-import { DISTRICT_STORAGE_KEY } from './district';
+import { DISTRICT_STORAGE_KEY } from './district.ts';
 import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
   CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
-} from './types';
-import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers';
-import type { IcsEvent } from './ics';
+} from './types.ts';
+import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers.ts';
+import type { IcsEvent } from './ics.ts';
+import { isDemoMode } from './demo/session.ts';
+import { demoCall, demoExternal } from './demo/engine.ts';
 
 function getDistrictCode(): string {
   if (typeof window === 'undefined') return '';
@@ -19,6 +21,8 @@ function getDistrictCode(): string {
 }
 
 async function callGet<T = any>(action: string, params: Record<string, string> = {}): Promise<ApiResult<T>> {
+  // 🎭 模擬示範版：全部行本地引擎，唔會打去後端
+  if (isDemoMode()) return demoCall(action, { ...params }, 'GET') as ApiResult<T>;
   const districtCode = getDistrictCode();
   const url = new URL('/api/proxy', window.location.origin);
   url.searchParams.set('districtCode', districtCode);
@@ -37,6 +41,8 @@ async function callGet<T = any>(action: string, params: Record<string, string> =
 
 /** v4.5.0：外部公開資料（港島地域／總會網頁、預算 Sheet、房間日曆）— 由 /api/external 伺服器端代抓，唔經 Apps Script */
 async function callExternal<T = any>(kind: string, params: Record<string, string> = {}): Promise<ApiResult<T>> {
+  // 🎭 模擬示範版：外部資料用內建示範資料
+  if (isDemoMode()) return demoExternal(kind, { ...params }) as ApiResult<T>;
   const url = new URL('/api/external', window.location.origin);
   url.searchParams.set('kind', kind);
   Object.entries(params).forEach(([k, v]) => { if (v !== '') url.searchParams.set(k, v); });
@@ -50,6 +56,8 @@ async function callExternal<T = any>(kind: string, params: Record<string, string
 }
 
 async function callPost<T = any>(action: string, body: Record<string, unknown> = {}): Promise<ApiResult<T>> {
+  // 🎭 模擬示範版：全部行本地引擎，唔會打去後端
+  if (isDemoMode()) return demoCall(action, { ...body }, 'POST') as ApiResult<T>;
   const districtCode = getDistrictCode();
   const postBody = { districtCode, action, ...body };
 

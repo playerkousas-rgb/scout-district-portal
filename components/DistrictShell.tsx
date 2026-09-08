@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import DistrictPicker from '@/components/DistrictPicker';
 import DistrictUnavailableNotice from '@/components/DistrictUnavailableNotice';
+import DemoBanner from '@/components/DemoBanner';
 import {
   DISTRICT_LIST, PLATFORM_COPYRIGHT, PLATFORM_NAME,
   clearStoredDistrictCode, getDistrictLockMessage, getDistrictStatusLabel,
@@ -54,6 +55,7 @@ export default function DistrictShell({ children }: { children: React.ReactNode 
 
   return (
     <>
+      <DemoBanner />
       <header className="shell-head">
         <div className="top">
           <div>
