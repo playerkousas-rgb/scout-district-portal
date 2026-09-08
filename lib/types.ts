@@ -45,6 +45,7 @@ export interface UserSession {
   levelLabel?: string;
   isSuper?: boolean;           // level 0：隱藏卡片仍然可見
   mustChangePassword?: boolean; // 首次登入（預設密碼）必須先改密碼
+  mockAdmin?: boolean;          // 🎭 模擬示範版：權限全開（僅本地沙盒，後台永遠唔會設）
 }
 
 export interface PortalUser {

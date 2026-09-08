@@ -61,17 +61,17 @@ function genId(prefix: string): string {
   return `${prefix}-${d.seq}`;
 }
 
-/** token → 示範身份；唔係示範 token 就 null */
+/** token → 示範身份（一律係 ADC·權限全開）；唔係示範 token 就 null */
 function userForToken(token: string): DemoUser | null {
   const t = String(token || '');
   if (t.indexOf('demo-') !== 0) return null;
-  const key = t.replace(/^demo-/, '') || 'dc';
-  return demoUserFor(key === 'session-token' ? 'dc' : key);
+  return demoUserFor();
 }
 
 function requireUser(token: string, minLevel = 99): DemoUser | ApiResultLike {
   const u = userForToken(token);
   if (!u) return fail('未登入或登入已過期（示範版）。');
+  if (u.mockAdmin) return u; // 🎭 示範版權限全開
   if (u.level > minLevel) {
     if (minLevel === 3) return fail('只有 ADC（助理區總監）或以上可以管理消息（示範版權限模擬）。');
     return fail(`權限不足：此功能只限第 ${minLevel} 級或以上（示範版權限模擬）。`);
@@ -90,12 +90,19 @@ function sessionPayload(u: DemoUser): AnyObj {
     email: u.email, displayName: u.displayName, role: u.role, roleLabel: u.roleLabel,
     isAdmin: u.isAdmin, isDC: u.isDC, canManageAccounts: u.canManageAccounts,
     scopes: u.scopes, level: u.level, levelLabel: u.levelLabel, isSuper: u.isSuper,
+    mockAdmin: u.mockAdmin,
     token: `demo-${u.email.replace('demo-', '').replace('@demo', '')}`,
   };
 }
 
 function visibleCards(u: DemoUser): AnyObj[] {
   const d = loadDb();
+  // 🎭 示範版權限全開：全部卡片（連隱藏咗嘅都照列，enabled=false 做標示）、一律 edit
+  if (u.mockAdmin) {
+    return d.cards
+      .map((c): AnyObj => ({ ...c, access: 'edit' as const }))
+      .sort((a, b) => a.order - b.order);
+  }
   return d.cards
     .filter(c => c.enabled || u.isSuper)
     .filter(c => {
@@ -120,13 +127,8 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
 
     // ── 帳戶 ──
     case 'login': {
-      const email = String(payload.email || '');
-      const matched = d.users.find(x => String(x.email).toLowerCase() === email.toLowerCase());
-      if (matched) {
-        const su = demoUserFor(matched.role.startsWith('DDC') ? 'ddc' : matched.role.startsWith('ADC') ? 'adc' : matched.role === 'STAFF' ? 'staff' : 'dc');
-        return ok(sessionPayload(su));
-      }
-      return ok(sessionPayload(demoUserFor(email))); // 示範版：任何電郵都入到對應角色
+      // 🎭 示範版：任何帳號密碼都入到同一個 ADC 示範身份（權限全開）
+      return ok(sessionPayload(demoUserFor()));
     }
     case 'verify': {
       if (!u) return fail('未登入或登入已過期（示範版）。');

@@ -62,6 +62,7 @@ export function enterDemoRole(key: string): UserSession {
     email: u.email, displayName: u.displayName, role: u.role, roleLabel: u.roleLabel,
     isAdmin: u.isAdmin, isDC: u.isDC, canManageAccounts: u.canManageAccounts,
     scopes: u.scopes, token: tokenFor(u), level: u.level, levelLabel: u.levelLabel, isSuper: u.isSuper,
+    mockAdmin: u.mockAdmin === true,
     mustChangePassword: false,
   };
   setDemoMode(true);

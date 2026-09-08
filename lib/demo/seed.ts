@@ -20,15 +20,18 @@ export interface DemoUser {
   level: number;
   levelLabel: string;
   isSuper: boolean;
+  /** 🎭 示範版權限全開（對照 event 系統 mock_admin）：所有管理功能任試 */
+  mockAdmin: boolean;
   password: string; // 示範版：任何密碼都入到，呢個只係提示用
 }
 
-/** 一鍵示範身份（對照 event 系統 demoLogin） */
+/**
+ * 一鍵示範身份 — 只得一個：助理區總監（ADC）。
+ * 管理系統大部分日常嘢都係 ADC 處理，示範版就以此身份權限全開（mock_admin，
+ * 對照 event 系統「MOCK 示範登入已開放全部管理權限」），唔搞多重權限。
+ */
 export const DEMO_IDENTITIES: { key: string; label: string; icon: string; desc: string; color: string }[] = [
-  { key: 'dc', label: '區總監', icon: '🎖', desc: '最高權限：全部卡片＋管理', color: '#7c3aed' },
-  { key: 'ddc', label: '副區總監（行政）', icon: '🛡', desc: 'DDC：獎勵提名＋帳戶管理', color: '#2563eb' },
-  { key: 'adc', label: '助理區總監（童軍）', icon: '🧑‍🏫', desc: 'ADC：消息發佈，但睇唔到獎勵', color: '#0d9488' },
-  { key: 'staff', label: '區職員', icon: '🧑‍💼', desc: 'STAFF：基本卡片，無消息／獎勵', color: '#d97706' },
+  { key: 'adc', label: '助理區總監（ADC）', icon: '🧑‍🏫', desc: '示範版權限全開：試晒所有管理功能', color: '#0d9488' },
 ];
 
 const SESSION_BASE = {
@@ -37,34 +40,15 @@ const SESSION_BASE = {
 };
 
 export const DEMO_USERS: Record<string, DemoUser> = {
-  dc: {
-    email: 'demo-dc@demo', displayName: '陳大文', role: 'DC', roleLabel: '區總監',
-    isAdmin: true, isDC: true, canManageAccounts: true, level: 1, levelLabel: '區總監',
-    ...SESSION_BASE, password: '任何密碼',
-  },
-  ddc: {
-    email: 'demo-ddc@demo', displayName: '李小明', role: 'DDC_ADMIN', roleLabel: '副區總監（行政）',
-    isAdmin: true, isDC: false, canManageAccounts: true, level: 2, levelLabel: '副區總監',
-    ...SESSION_BASE, password: '任何密碼',
-  },
   adc: {
     email: 'demo-adc@demo', displayName: '黃志強', role: 'ADC_SCOUT', roleLabel: '助理區總監（童軍）',
-    isAdmin: false, isDC: false, canManageAccounts: false, level: 3, levelLabel: '助理區總監',
-    ...SESSION_BASE, password: '任何密碼',
-  },
-  staff: {
-    email: 'demo-staff@demo', displayName: '區小花', role: 'STAFF', roleLabel: '區職員（受薪）',
-    isAdmin: false, isDC: false, canManageAccounts: false, level: 4, levelLabel: '區職員',
-    ...SESSION_BASE, password: '任何密碼',
+    isAdmin: true, isDC: false, canManageAccounts: true, level: 3, levelLabel: '助理區總監',
+    ...SESSION_BASE, mockAdmin: true, password: '任何密碼',
   },
 };
 
-export function demoUserFor(email: string): DemoUser {
-  const e = String(email || '').toLowerCase();
-  if (e.indexOf('ddc') >= 0) return DEMO_USERS.ddc;
-  if (e.indexOf('adc') >= 0) return DEMO_USERS.adc;
-  if (e.indexOf('staff') >= 0 || e.indexOf('職員') >= 0) return DEMO_USERS.staff;
-  return DEMO_USERS.dc;
+export function demoUserFor(_email?: string): DemoUser {
+  return DEMO_USERS.adc;
 }
 
 export const DEMO_TOKEN = 'demo-session-token';
@@ -282,6 +266,8 @@ export const DEMO_PORTAL_USERS: Record<string, any>[] = Object.values(DEMO_USERS
   email: u.email, displayName: u.displayName, role: u.role, scopes: '', cards: '', active: 'TRUE',
   level: u.level, levelLabel: u.levelLabel, mustChangePassword: false,
 })).concat([
+  { email: 'demo-dc@demo', displayName: '陳大文（區總監）', role: 'DC', scopes: '', cards: '', active: 'TRUE', level: 1, levelLabel: '區總監', mustChangePassword: false },
+  { email: 'demo-ddc@demo', displayName: '李小明（副區總監·行政）', role: 'DDC_ADMIN', scopes: '', cards: '', active: 'TRUE', level: 2, levelLabel: '副區總監', mustChangePassword: false },
   { email: 'demo-gsl-206@demo', displayName: '張國強（206團長）', role: 'AL', scopes: 'visit,activity,contacts', cards: '', active: 'TRUE', level: 5, levelLabel: '區長／領袖', mustChangePassword: true },
   { email: 'demo-gsl-17@demo', displayName: '林志傑（17團長）', role: 'AL', scopes: 'visit,activity,contacts', cards: '', active: 'TRUE', level: 5, levelLabel: '區長／領袖', mustChangePassword: true },
 ]);

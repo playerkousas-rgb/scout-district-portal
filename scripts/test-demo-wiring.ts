@@ -36,11 +36,12 @@ const { enterDemoRole, exitDemo, isDemoMode } = await import('../lib/demo/sessio
 const { loadSession, saveSession, clearSession } = await import('../lib/session.ts');
 const { api } = await import('../lib/api.ts');
 
-await check('enterDemoRole(ddc)：mode 開著 + loadSession 行示範 session（level 2）', async () => {
-  enterDemoRole('ddc');
+await check('enterDemoRole(adc)：mode 開著 + loadSession 行示範 session（ADC·權限全開）', async () => {
+  enterDemoRole('adc');
   assert.strictEqual(isDemoMode(), true);
   const s = loadSession();
-  assert.ok(s && s.level === 2 && String(s.email).indexOf('@demo') >= 0);
+  assert.ok(s && s.level === 3 && String(s.role) === 'ADC_SCOUT' && s.mockAdmin === true);
+  assert.ok(String(s.email).indexOf('@demo') >= 0);
 });
 
 await check('api.getCards：demo 模式下唔打網絡，直接回示範卡片（有 awards，冇 news）', async () => {

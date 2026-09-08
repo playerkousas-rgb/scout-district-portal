@@ -313,7 +313,7 @@ export default function HomePage() {
             </div>
             <p className="demo-entry-desc">
               完整示範資料（獎勵名冊／旅團探訪／借場借物資／消息發佈…），改動<b>只存喺你嘅瀏覽器</b>，絕對唔會影響正式後台。
-              撳以下任何一個身份即刻進入，入面頂部隨時轉身份睇權限分別。
+              以助理區總監（ADC）身份進入，<b>示範版權限全開</b>，咩功能都試到。
             </p>
             <div className="demo-entry-roles">
               {DEMO_IDENTITIES.map(r => (
