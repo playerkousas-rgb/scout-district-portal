@@ -302,6 +302,35 @@ export interface IncidentReport {
   createdAt?: string;
 }
 
+/**
+ * 消息發佈（v4.6.0）— News 表。
+ * 管理系統 /news 發佈 → 成員系統 member-portal 首頁頂部置頂顯示（純拉取，冇推送）。
+ * 呢邊刪咗／下架（active=false）／過咗 expiresAt → 成員系統下次載入即刻消失。
+ */
+export type NewsLevel = 'info' | 'warn' | 'urgent';
+
+export interface Announcement {
+  id: string;
+  districtCode?: string;
+  title: string;
+  body: string;
+  date?: string;          // yyyy-MM-dd：顯示日期；日期喺將來 = 未到發佈日，成員端未見到
+  pinned?: boolean;       // 置頂：成員系統首頁頂部一直顯示
+  level?: NewsLevel;      // info 一般 / warn 提提你 / urgent 緊急
+  link?: string;          // 選填「查看詳情」連結
+  linkLabel?: string;
+  notify?: boolean;       // 允許成員端彈系統通知（Notification API；純顯示可忽略）
+  active?: boolean;       // 發佈中；FALSE = 下架
+  expiresAt?: string;     // yyyy-MM-dd：自動落架日（留空 = 一直顯示）
+  publishedAt?: string;
+  publishedBy?: string;
+  updatedAt?: string;
+  // 只喺管理系統 getAnnouncements 回傳
+  expired?: boolean;
+  scheduled?: boolean;
+  live?: boolean;
+}
+
 export interface ActivityNotice {
   id: string;
   refCode?: string;

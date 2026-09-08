@@ -1,9 +1,80 @@
-# member-portal ↔ 統一後台（GS）對接合約 v4.3.0
+# member-portal ↔ 統一後台（GS）對接合約 v4.6.0
 
 兩邊共用同一份 `gs/Code.gs`、同一張 Sheet、同一個 `/exec` + API Key。
 
 > 2026-09-07 已直接讀過 `https://github.com/playerkousas-rgb/member-portal.git`（HEAD `149f910`，Next 16 / React 19）核對：
 > 借場、借物資、活動知會、訓練班報名嘅欄名同呢邊 GS 一致。member-portal 自己嘅合約文件係 `docs/integration-contract.md`。
+
+## 📢 消息發佈（v4.6.0 新增）— 管理系統發，成員系統首頁置頂顯示
+
+做法＝**方案 2「一直置頂」（pull on open + pinned display）**：冇推送、冇 Service Worker、冇 badge。
+member-portal 每次載入首頁 fetch 一次公開 action，有置頂消息就顯示，冇就隱藏。
+
+```
+管理系統 /news「＋ 發佈消息」→ saveAnnouncement（需 Perms 矩陣 news = edit）
+        │
+        ▼
+主 Sheet 新工作表 News（setupSheets() 自動補建，唔清空）
+        │
+        ▼
+GET listAnnouncements?pinnedOnly=1&limit=10   ← 公開、免登入、no-store
+        │
+        ▼
+member-portal 首頁 <NewsBanner /> 頂部置頂顯示
+        │
+管理系統刪除／下架／過咗自動落架日 → 呢邊下次載入即刻消失
+```
+
+### News 表欄位
+
+| 欄 | 說明 |
+|---|---|
+| `id` | `nw_xxx`，後台自動生成 |
+| `districtCode` | 自動填 |
+| `title` / `body` | 標題／內容（必填） |
+| `date` | `yyyy-MM-dd` 顯示日期；**填將來日期＝到嗰日先出現（排期）** |
+| `pinned` | `TRUE` = 成員系統首頁頂部一直顯示 |
+| `level` | `info`（藍）／`warn`（黃）／`urgent`（紅） |
+| `link` / `linkLabel` | 選填「查看詳情」連結（member proxy 只放行 http(s)） |
+| `notify` | 允許成員端彈系統通知（純顯示版可以唔理；升級做方案 1 先用） |
+| `active` | `FALSE` = 下架（記錄仍在，成員端即刻唔見） |
+| `expiresAt` | `yyyy-MM-dd` 自動落架日，過咗自動消失（留空 = 一直顯示） |
+| `publishedAt` / `publishedBy` / `updatedAt` / `createdAt` | 系統自動 |
+
+### Actions
+
+| action | 方式 | 權限 | 用途 |
+|---|---|---|---|
+| `listAnnouncements` | GET | **公開** | 成員系統讀；參數 `pinnedOnly=1`／`limit`（≤50）／`since=ISO`（只回之後更新過嘅，用嚟做「有新消息」判斷） |
+| `getAnnouncements` | GET `token` | 登入 | 管理系統列表：連已下架／已過期／排期中都回，另加 `expired` / `scheduled` / `live` |
+| `saveAnnouncement` | POST `{token, announcement}` | `news` = edit | `announcement.id` 留空 = 新增；`id`／`publishedAt`／`publishedBy` 鎖欄唔改得 |
+| `deleteAnnouncement` | POST `{token, id}` | `news` = edit | |
+| `setAnnouncementPinned` | POST `{token, id, pinned}` | `news` = edit | |
+| `setAnnouncementActive` | POST `{token, id, active}` | `news` = edit | 上架／下架 |
+
+`listAnnouncements` 公開回應**唔會**有 `active` / `publishedBy`；已下架、已過期、未到日期嘅一律唔會出現。
+未建 News 表（舊後台）→ 回空陣列，member-portal 唔會爆。
+
+### member-portal 要改嘅 6 個位
+
+| 檔案 | 改法 |
+|---|---|
+| `app/api/proxy/route.ts` | `GET_ACTIONS` 加 `listAnnouncements`；加 `GET_PARAMS`（只放行 `pinnedOnly` / `limit`）；加 `publicAnnouncement()` 欄位白名單；`sanitizeGet` 加分支 |
+| `lib/types.ts` | 加 `Announcement` |
+| `lib/api.ts` | 加 `mapAnnouncement` + `api.listAnnouncements(pinnedOnly)` |
+| `components/NewsBanner.tsx` | 新元件：載入時拉一次；冇消息／後台未升級就 `return null` |
+| `app/page.tsx` | hero 下面加 `<NewsBanner />` |
+| `app/globals.css` | `.news-pins` / `.news-pin`（info 藍 / warn 黃 / urgent 紅） |
+
+**現成 patch：** [`docs/member-portal-news-banner.patch`](member-portal-news-banner.patch)
+（已對 member-portal HEAD `149f910` 做過 `git am` + `tsc` + `next build` 驗證）：
+
+```bash
+git am path/to/member-portal-news-banner.patch   # 或 git apply
+```
+
+想升級做**方案 1（開 app 彈系統通知）**：唔使再改後台，`NewsBanner.tsx` 檔頭註釋已寫好嗰十行——
+比較 `items[0].updatedAt` 同 `localStorage.news_seen`，新過就 `Notification.requestPermission()`。
 
 ## 訓練班收費 FPS QR（v4.3.0 新增）
 
@@ -180,10 +251,10 @@ member-portal 填表
 健康檢查 `?action=getHealthCheck`（免 Key）會回：
 
 ```json
-{ "version": "4.3.0", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
+{ "version": "4.6.0", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
 ```
 
-`version` 要係 `4.3.0` 先代表呢版 GS 已貼上線。
+`version` 要係 `4.6.0` 先代表呢版 GS 已貼上線。
 
 ## 部署
 

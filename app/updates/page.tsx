@@ -5,6 +5,16 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.6.0 — 消息發佈（成員系統首頁置頂）</h3>
+        <ul>
+          <li>📢 新卡片 <b>消息發佈</b>（/news）：寫標題＋內容就發到<b>成員系統 member-portal 首頁頂部置頂顯示</b>；呢邊一刪／一下架，嗰邊下次載入即刻消失（純拉取顯示，冇推送）</li>
+          <li>🗓 可揀日期（填將來日期＝到嗰日先出現）、<b>自動落架日</b>（過咗自動消失）、類別（🔵 一般／🟡 請留意／🔴 緊急）、詳情連結</li>
+          <li>👀 主控台頂部同樣顯示置頂消息，同成員睇到嘅係同一份資料，發完即刻核對到</li>
+          <li>🔐 權限：卡片 <code>news</code> = ✏️ 先可以發佈／刪除（預設 DC／SYSADMIN／副區總監（行政・訓練）／區職員），其餘只可睇</li>
+          <li>後台 4.6.0：新增 <code>News</code> 工作表 + 公開 action <code>listAnnouncements</code>（成員系統用），另 <code>getAnnouncements</code>／<code>saveAnnouncement</code>／<code>deleteAnnouncement</code>／<code>setAnnouncementPinned</code>／<code>setAnnouncementActive</code>；貼新 <code>Code.gs</code> → 執行 <code>setupSheets()</code>（補建唔清空）即可</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.5.0 — 區年度預算 + 地域房間使用情況 + 聯結簿自動同步 + 地域及總會架構</h3>
         <ul>
           <li>📑 <b>區年度預算</b>完成：直接讀區方 Google Sheet「2025-26 Year Plan」（月份／支部／活動／原收費／人數／區資助／CC 申報／狀態），按月份／按支部／全部活動三種睇法，頂部有全年資助、已完成金額、按類別／支部小計；DC 照舊喺 Sheet 改，10 分鐘內自動同步。換另一張表：Config <code>BUDGET_SHEET_URL</code></li>

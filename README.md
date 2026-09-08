@@ -51,7 +51,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.5.0"` 即通。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.6.0"` 即通。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -64,7 +64,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.5.0"` 即代表用緊最新後台。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.6.0"` 即代表用緊最新後台。
 
 ---
 
@@ -82,6 +82,31 @@
 - 要令舊後台出現呢張新卡片：貼新 `gs/Code.gs` → 執行 `setupSheets()`（自動補建缺失卡片＋權限，唔會洗資料）。
 
 ---
+
+## 📢 消息發佈 → 成員系統首頁置頂（v4.6.0）
+
+管理系統「📢 消息發佈」（`/news`）發一則消息 → 成員系統 **member-portal 首頁頂部一直置頂顯示**；
+呢邊一刪／一下架，嗰邊下次載入即刻消失。**純粹「讀同顯示」：冇推送、冇 Service Worker、冇 badge。**
+
+```
+/news 發佈 → 主 Sheet「News」表 → GET listAnnouncements（公開免登入）→ member-portal 首頁 banner
+```
+
+| 功能 | 做法 |
+|---|---|
+| 置頂 | `pinned=TRUE`；成員首頁頂部一直顯示（可同時多則） |
+| 類別 | `info` 藍／`warn` 黃／`urgent` 紅 |
+| 排期出街 | `date` 填將來日期 → 到嗰日先出現 |
+| 自動落架 | `expiresAt` 到期自動消失，唔使記得返嚟刪 |
+| 暫時收起 | 「下架」（`active=FALSE`）→ 成員即刻唔見，記錄仍在，可重新上架 |
+| 詳情連結 | `link` / `linkLabel`（成員端 proxy 只放行 http(s)） |
+| 通知（選用） | `notify=TRUE` 俾成員端日後可以用 Notification API（方案 1），後台唔使再改 |
+
+- 權限：卡片 `news` 喺權限矩陣 = `edit` 先可以發佈／刪除（預設 DC／SYSADMIN／DDC_ADMIN／DDC_TRAINING／STAFF；其餘 `view`）；層級 0 超管永遠可。
+- 主控台頂部亦有同一條「置頂消息」橫額（同成員睇到嘅係同一份資料，方便核對）。
+- 後台 4.6.0：新增 `News` 工作表、公開 action `listAnnouncements`，另 `getAnnouncements` / `saveAnnouncement` / `deleteAnnouncement` / `setAnnouncementPinned` / `setAnnouncementActive`（需登入 + 卡片 edit 權）；Cards 補 `news` 卡片。貼新 `gs/Code.gs` → 執行 `setupSheets()`（補建唔清空）即可。
+- 成員系統嗰邊要改嘅 6 個位同**現成 patch**：[`docs/member-gs-handshake.md`](docs/member-gs-handshake.md)「📢 消息發佈」一節、[`docs/member-portal-news-banner.patch`](docs/member-portal-news-banner.patch)。
+- 後台邏輯測試（唔使開 Apps Script）：`node scripts/test-news-gs.js`（19 項）。
 
 ## 📑 區年度預算 / 🏢 地域房間 / 📇 聯結簿自動同步 / 🏛 架構（v4.5.0）
 
@@ -133,7 +158,8 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 | 文件 | 內容 |
 |---|---|
-| `docs/member-gs-handshake.md` | **member-portal ↔ GS 合約**（借物資打通；借場填表→Teamup→批核） |
+| `docs/member-gs-handshake.md` | **member-portal ↔ GS 合約**（消息發佈置頂；借物資打通；借場填表→Teamup→批核） |
+| `docs/member-portal-news-banner.patch` | 成員系統首頁「置頂消息」現成 patch（已對 member-portal HEAD 驗證） |
 | `docs/venue-booking-flow.md` | 借場流程（而家：填表+Teamup+批核；密碼稍後） |
 | `docs/booking-setup-merge-checklist.md` | 貼 Code.gs → setup → 填 Key → 驗證 → 測試 嘅逐步操作 |
 | `docs/keys-checklist.md` | **找回 + 驗證 Teamup / TTLock API Key**（你唔記得 Key 睇呢份） |
@@ -151,3 +177,5 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 | `app/api/proxy/route.ts` | 前端 → Apps Script 嘅代理（API Key 唔出前端） |
 | `lib/district.ts` | 區目錄（區碼 → apiBase 對照） |
 | `app/venue-regs/` | 場地借用審批頁 |
+| `app/news/` | 消息發佈（發去成員系統首頁置頂） |
+| `scripts/test-news-gs.js` | 消息發佈後台邏輯測試（node 直接跑） |

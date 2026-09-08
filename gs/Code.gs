@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.5.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.6.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -66,6 +66,18 @@
  * budget 卡片由 todo → done（patchCardRows_ 只改仍係舊預設值嘅行），
  * 以及刪除 annual（週年會議文件）卡片（setupSheets 會同步移除 Cards／Perms 舊行）。
  *
+ * ── 消息發佈 News（v4.6.0）──────────────────────────────────
+ * 管理系統 /news 發佈 → 成員系統 member-portal 首頁頂部「置頂消息」直接顯示。
+ * 純粹「讀同顯示」，冇推送：member-portal 每次載入 fetch 一次 listAnnouncements。
+ *   listAnnouncements（公開，免登入）  參數 pinnedOnly / limit / since
+ *   getAnnouncements（登入）           連未發佈／已過期／已下架都回，供管理系統列表
+ *   saveAnnouncement / deleteAnnouncement / setAnnouncementPinned / setAnnouncementActive
+ *     （需要 Perms 矩陣入面 news 卡片 = edit；層級 0 超管永遠可）
+ * 呢邊刪咗 / 下架 / 過期 → 成員系統下次載入即刻消失（唔使清 cache）。
+ * News 表欄位：title 標題、body 內容、date 日期、pinned 置頂、level 類別、
+ *   link/linkLabel 詳情連結、notify 是否廣播（member-portal 可選擇彈 Notification）、
+ *   active 發佈中、expiresAt 自動落架日、publishedAt/publishedBy/updatedAt。
+ *
  * ── 部署 ──────────────────────────────────────────────────
  * 擴充功能 → Apps Script → 貼上本檔 → 執行 setupSheets()
  * → 部署為網頁應用程式（執行身分：我自己；存取：任何人）
@@ -85,6 +97,7 @@ var SHEET = {
   VENUES: 'Venues', VENUE_REQ: 'VenueBookings',
   ITEMS: 'Items', STOCK_REQ: 'StockRequests',
   ACTIVITY_REQ: 'ActivityNotices',
+  NEWS: 'News',                  // 消息發佈（管理系統發 → 成員系統首頁置頂顯示）
   INCIDENT_REQ: 'IncidentReports', // 意外報告（HKSA ACC-RPT 2019/07 欄位）
   COURSE_LINKS: 'CourseLinks',   // 訓練班目錄（單一資料來源）
   COURSES: 'Courses',            // 舊版內建課程（保留相容）
@@ -225,7 +238,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.5.0',
+      version: '4.6.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -255,6 +268,7 @@ function doGet(e) {
       case 'listAllCourses':      return json(ok(listCourseLinks_()));
       case 'listCourseParams':    return json(ok(listCourseParams_()));
       case 'listActivityNotices': return json(ok(listActivityNotices_(p)));
+      case 'listAnnouncements':   return json(ok(listAnnouncements_(p)));
 
       // ---------- 管理系統（角色制） ----------
       case 'verify':              return json(verify_(p.token));
@@ -269,6 +283,7 @@ function doGet(e) {
       case 'getStockRequests':    return json(getStockRequests_(p.token));
       case 'getPendingInbox':     return json(getPendingInbox_(p.token));
       case 'getActivityNotices':  return json(getActivityNotices_(p.token));
+      case 'getAnnouncements':    return json(getAnnouncements_(p.token));
       case 'getAllRecords':       return json(getAllRecords_(p.token));
       case 'listIncidentReports': return json(listIncidentReports_(p.token));
 
@@ -332,6 +347,12 @@ function doPost(e) {
       case 'saveItem':             return json(saveItem_(b.token, b.item));
       case 'deleteItem':           return json(deleteItem_(b.token, b.itemId));
       case 'deleteActivityNotice': return json(deleteActivityNotice_(b.token, b.id));
+
+      // ---------- 消息發佈（管理系統發，成員系統首頁顯示） ----------
+      case 'saveAnnouncement':      return json(saveAnnouncement_(b.token, b.announcement || b.news || b));
+      case 'deleteAnnouncement':    return json(deleteAnnouncement_(b.token, b.id));
+      case 'setAnnouncementPinned': return json(setAnnouncementPinned_(b.token, b.id, b.pinned));
+      case 'setAnnouncementActive': return json(setAnnouncementActive_(b.token, b.id, b.active));
 
       // ---------- 意外／應變：意外報告（管理系統，需登入） ----------
       case 'submitIncidentReport': return json(submitIncidentReport_(b.token, b.report || b));
@@ -823,6 +844,18 @@ function requirePerm_(token, perm) {
   if (!t.valid) return { error: '登入已過期' };
   var p = staffPerms_(t.email, t.role);
   if (!p[perm]) return { error: '你沒有此功能嘅權限' };
+  return { ok: true, email: t.email, role: t.role };
+}
+/**
+ * 需要「某張卡片」嘅編輯權（v4.6.0）：直接跟 Perms 矩陣，唔使再加 canXxx 欄。
+ * 層級 0 超管永遠可以（同 getCards_ 一致）。
+ */
+function requireCardEdit_(token, cardId) {
+  var t = checkToken_(token);
+  if (!t.valid) return { error: '登入已過期' };
+  if (levelOfUser_(t.email, t.role) === LEVEL_SUPER) return { ok: true, email: t.email, role: t.role };
+  var access = (readPerms_()[String(cardId).trim()] || {})[t.role] || '';
+  if (access !== 'edit') return { error: '你沒有此功能嘅權限' };
   return { ok: true, email: t.email, role: t.role };
 }
 
@@ -1474,6 +1507,185 @@ function deleteActivityNotice_(token, id) {
   var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ACTIVITY_REQ), String(id).trim());
   return ok({ deleted: true });
+}
+
+// ===================== 消息發佈 News（v4.6.0） =====================
+// 管理系統 /news 發佈 → 成員系統 member-portal 首頁頂部置頂顯示。
+// 純拉取：member-portal 每次載入 fetch 一次 listAnnouncements，冇推送、冇 cache。
+// 呢邊刪咗 / 下架（active=FALSE）／過咗 expiresAt → 成員系統下次載入即刻消失。
+
+var NEWS_LEVELS = ['info', 'warn', 'urgent'];
+var NEWS_LOCKED_FIELDS = ['id', 'districtCode', 'publishedAt', 'publishedBy', 'createdAt'];
+
+function newsLevel_(v) {
+  var s = String(v || '').trim().toLowerCase();
+  return NEWS_LEVELS.indexOf(s) >= 0 ? s : 'info';
+}
+/** Sheet 嘅日期格可能係 Date 物件，一律轉 yyyy-MM-dd 字串 */
+function newsDate_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var s = String(v == null ? '' : v).trim();
+  return s;
+}
+function newsToday_() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+}
+/** 一行 News → 統一物件（內部用，連 active / publishedBy） */
+function newsRow_(r) {
+  return {
+    id: String(r.id || '').trim(),
+    districtCode: String(r.districtCode || '').trim() || districtCode_(),
+    title: String(r.title == null ? '' : r.title).trim(),
+    body: String(r.body == null ? '' : r.body),
+    date: newsDate_(r.date),
+    pinned: isTrue_(r.pinned),
+    level: newsLevel_(r.level),
+    link: String(r.link || '').trim(),
+    linkLabel: String(r.linkLabel || '').trim(),
+    notify: isTrue_(r.notify),
+    active: String(r.active).toUpperCase() !== 'FALSE',
+    expiresAt: newsDate_(r.expiresAt),
+    publishedAt: String(r.publishedAt || ''),
+    publishedBy: String(r.publishedBy || ''),
+    updatedAt: String(r.updatedAt || r.publishedAt || ''),
+  };
+}
+/** 公開版（成員系統）：唔回 active / publishedBy */
+function newsPublic_(n) {
+  return {
+    id: n.id, districtCode: n.districtCode,
+    title: n.title, body: n.body, date: n.date,
+    pinned: n.pinned, level: n.level,
+    link: n.link, linkLabel: n.linkLabel, notify: n.notify,
+    publishedAt: n.publishedAt, updatedAt: n.updatedAt,
+  };
+}
+function newsSort_(a, b) {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+  var ad = a.date || String(a.publishedAt || '').slice(0, 10);
+  var bd = b.date || String(b.publishedAt || '').slice(0, 10);
+  if (ad !== bd) return bd.localeCompare(ad);
+  return String(b.publishedAt || '').localeCompare(String(a.publishedAt || ''));
+}
+
+/**
+ * 公開讀消息（成員系統首頁）— 免登入。
+ * 參數：pinnedOnly=1 只要置頂／limit（預設 20，上限 50）／since=ISO（只回之後更新過嘅，供「有新消息」判斷）
+ * 舊 Sheet 未有 News 表 → 回空陣列（成員系統唔會爆）。
+ */
+function listAnnouncements_(p) {
+  p = p || {};
+  if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS)) return [];
+  var today = newsToday_();
+  var pinnedOnly = isTrue_(p.pinnedOnly || p.pinned || '');
+  var since = String(p.since || '').trim();
+  var limit = Math.max(1, Math.min(Number(p.limit) || 20, 50));
+  var list = readSheet_(SHEET.NEWS).map(newsRow_).filter(function (n) {
+    if (!n.id || (!n.title && !n.body)) return false;
+    if (!n.active) return false;
+    if (n.expiresAt && n.expiresAt < today) return false;
+    if (n.date && n.date > today) return false;                 // 預設日期喺將來 = 未到發佈日
+    if (pinnedOnly && !n.pinned) return false;
+    if (since && String(n.updatedAt || '') <= since) return false;
+    return true;
+  });
+  list.sort(newsSort_);
+  return list.slice(0, limit).map(newsPublic_);
+}
+
+/** 管理系統列表（需登入）：連已下架／已過期／未到期都回 */
+function getAnnouncements_(token) {
+  var t = requireLogin_(token); if (t.error) return err(t.error);
+  if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS)) {
+    return err('尚未執行 setupSheets()（缺 News 表）');
+  }
+  var today = newsToday_();
+  var list = readSheet_(SHEET.NEWS).map(newsRow_).filter(function (n) { return !!n.id; });
+  list.sort(newsSort_);
+  return ok(list.map(function (n) {
+    n.expired = !!(n.expiresAt && n.expiresAt < today);
+    n.scheduled = !!(n.date && n.date > today);
+    n.live = n.active && !n.expired && !n.scheduled;
+    return n;
+  }));
+}
+
+/** 新增／更新消息（news 卡片 edit 權限）；a.id 留空 = 新增 */
+function saveAnnouncement_(token, a) {
+  var t = requireCardEdit_(token, 'news'); if (t.error) return err(t.error);
+  a = a || {};
+  var title = String(a.title || '').trim();
+  var body = String(a.body || '').trim();
+  if (!title) return err('標題必填');
+  if (!body) return err('內容必填');
+
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 News 表）');
+
+  var now = new Date().toISOString();
+  var fields = {
+    title: title,
+    body: body,
+    date: newsDate_(a.date) || newsToday_(),
+    pinned: isTrue_(a.pinned) ? 'TRUE' : 'FALSE',
+    level: newsLevel_(a.level),
+    link: String(a.link || '').trim(),
+    linkLabel: String(a.linkLabel || '').trim(),
+    notify: isTrue_(a.notify) ? 'TRUE' : 'FALSE',
+    active: (a.active === undefined || a.active === '' || isTrue_(a.active)) ? 'TRUE' : 'FALSE',
+    expiresAt: newsDate_(a.expiresAt),
+    updatedAt: now,
+  };
+
+  var id = String(a.id || '').trim();
+  if (id) {
+    var idx = rowIndexByCol_(sh, 'id', id);
+    if (idx < 0) return err('找不到該消息');
+    Object.keys(fields).forEach(function (k) {
+      if (NEWS_LOCKED_FIELDS.indexOf(k) >= 0) return;
+      setCellByHeader_(sh, idx, k, fields[k]);
+    });
+    return ok({ saved: true, id: id, created: false });
+  }
+
+  id = genId_('nw');
+  var row = { id: id, districtCode: districtCode_(), publishedAt: now, publishedBy: t.email || '', createdAt: now };
+  Object.keys(fields).forEach(function (k) { row[k] = fields[k]; });
+  appendRowObj_(sh, row);
+  return ok({ saved: true, id: id, created: true });
+}
+
+/** 刪除消息（成員系統下次載入即刻唔見） */
+function deleteAnnouncement_(token, id) {
+  var t = requireCardEdit_(token, 'news'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 News 表）');
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該消息');
+  sh.deleteRow(idx);
+  return ok({ deleted: true, id: String(id).trim() });
+}
+
+/** 置頂／取消置頂 */
+function setAnnouncementPinned_(token, id, pinned) {
+  return updateAnnouncementFlag_(token, id, 'pinned', pinned);
+}
+/** 上架／下架（下架＝成員系統即刻唔見，但記錄仍在） */
+function setAnnouncementActive_(token, id, active) {
+  return updateAnnouncementFlag_(token, id, 'active', active);
+}
+function updateAnnouncementFlag_(token, id, field, value) {
+  var t = requireCardEdit_(token, 'news'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.NEWS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 News 表）');
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx < 0) return err('找不到該消息');
+  var on = (value === true || isTrue_(value));
+  setCellByHeader_(sh, idx, field, on ? 'TRUE' : 'FALSE');
+  setCellByHeader_(sh, idx, 'updatedAt', new Date().toISOString());
+  var out = { saved: true, id: String(id).trim() };
+  out[field] = on;
+  return ok(out);
 }
 
 // ===================== 意外／應變：意外報告（v4.3.0） =====================
@@ -2973,6 +3185,7 @@ function blueprint_() {
     P.push(row('venueReg', opsEdit()));
     P.push(row('stockReg', opsEdit()));
     P.push(row('activity', opsEdit()));
+    P.push(row('news', opsEdit()));
     P.push(row('incident', ALL_VIEW));
     P.push(row('training', trainingEdit()));
     P.push(row('fps', ALL_EDIT));
@@ -3063,6 +3276,7 @@ function blueprint_() {
       ['venueReg', '場地借用審批', '🏛', 'builtin', '/venue-regs', '借場申請批核 · 場地清單', 9, 'TRUE', 'FALSE', 'core', 'done'],
       ['stockReg', '物資借用審批', '📦', 'builtin', '/stock-regs', '借物資批核 · 庫存管理', 10, 'TRUE', 'FALSE', 'core', 'done'],
       ['activity', '活動知會', '🗓', 'builtin', '/activity-notices', '旅團活動知會記錄', 11, 'TRUE', 'FALSE', 'core', 'done'],
+      ['news', '消息發佈', '📢', 'builtin', '/news', '發佈消息到成員系統首頁置頂 · 一刪即消失', 4, 'TRUE', 'FALSE', 'core', 'done'],
       ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '天氣決策 · 即時應變 · 總會指引 · 意外報告', 12, 'TRUE', 'FALSE', 'core', 'done'],
       ['training', '訓練班管理', '🎓', 'builtin', '/training', '開班登記 · 區會目錄', 13, 'TRUE', 'FALSE', 'core', 'done'],
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
@@ -3105,6 +3319,11 @@ function blueprint_() {
         'troop', 'activityName', 'startDateTime', 'endDateTime', 'location',
         'membersCount', 'leadersCount', 'parentsCount',
         'leaderName', 'leaderPhone', 'leaderEmail', 'note', 'createdAt'],
+    ] },
+    // 消息發佈（v4.6.0）：管理系統發 → 成員系統 member-portal 首頁頂部置頂顯示
+    { name: SHEET.NEWS, headerColor: '#fef3c7', rows: [
+      ['id', 'districtCode', 'title', 'body', 'date', 'pinned', 'level', 'link', 'linkLabel',
+        'notify', 'active', 'expiresAt', 'publishedAt', 'publishedBy', 'updatedAt', 'createdAt'],
     ] },
     // 意外報告：欄位對應香港童軍總會行政署「意外報告」(ACC-RPT 2019/07) 兩頁內容
     { name: SHEET.INCIDENT_REQ, headerColor: '#fee2e2', rows: [

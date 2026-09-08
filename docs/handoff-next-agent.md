@@ -1,5 +1,14 @@
-# 下一手 Agent 交接備忘（v4.5.0）
+# 下一手 Agent 交接備忘（v4.6.0）
 
+> 2026-09-08（第四輪）v4.6.0：**消息發佈 News**——管理系統 `/news` 發 → 成員系統 member-portal 首頁置頂顯示（方案 2「一直置頂」，pull on open，冇推送）。
+> 後台 `gs/Code.gs` 4.6.0：新 `News` 表（`title/body/date/pinned/level/link/linkLabel/notify/active/expiresAt/publishedAt/publishedBy/updatedAt`）、
+> 公開 `listAnnouncements`（參數 `pinnedOnly`／`limit`≤50／`since`；已下架、`expiresAt` 過期、`date` 喺將來嘅一律唔回；公開版剝走 `active`／`publishedBy`）、
+> 登入 `getAnnouncements`（加 `expired`／`scheduled`／`live`）、`saveAnnouncement`／`deleteAnnouncement`／`setAnnouncementPinned`／`setAnnouncementActive`。
+> 權限用**新 helper `requireCardEdit_(token, cardId)`**（直接讀 Perms 矩陣，唔再加 `canXxx` 欄；level 0 超管永遠可）——之後新卡片照跟呢個做法。
+> 前端：卡片 `news`（order 4，opsEdit）、`app/news/page.tsx`（發佈／編輯／置頂／下架／刪除＋成員端預覽）、`components/NewsBanner.tsx`（主控台頂部，同成員睇到同一份資料）、`lib/types.ts` `Announcement`、`lib/api.ts` 6 個 wrapper、`app/globals.css` `.news-*`。
+> 測試：`node scripts/test-news-gs.js`（vm stub Apps Script，19 項，唔使開 GAS）。本機預覽：`/tmp/mockgs/server.js`（載入真 Code.gs + 記憶體 Sheet + seed 3 則消息）＋ `PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec npx next dev`，登入 `sheep` / `0728`（MASTER）。
+> member-portal 嗰邊：**唔使再研究**，現成 patch `docs/member-portal-news-banner.patch`（proxy allowlist + `GET_PARAMS` 只放行 `pinnedOnly`/`limit` + `publicAnnouncement()` 白名單 + `Announcement` 型別 + `NewsBanner` 元件 + 首頁 + CSS + 合約文件），已對 HEAD `149f910` 做過 `git am` + `tsc` + `next build`。
+>
 > 2026-09-07（第三輪）v4.5.0：**外部資料全部由 Vercel `app/api/external/route.ts` 代抓**（sandbox 對外連線被封，只能用 fixture 測；`PORTAL_DEV_EXTERNAL_BASE` 指向 mock `/upstream?u=`）。解析器 `lib/externalParsers.ts`（職員表／總監架構／諮議會／各署／預算 CSV，純函數）、`lib/ics.ts`（ICS + RRULE 展開，香港時間）、`lib/roomsDirectory.ts`（11 間房日曆 ID、打通關係 `combo`）、`lib/orgDirectory.ts`（架構靜態備援）、`lib/externalSources.ts`（來源網址）。頁面：`/budget`（`api.extBudget`，Config `BUDGET_SHEET_URL` 覆蓋 Sheet）、`/rooms`（逐間房逐日／今日總覽／原版 iframe）、`/orgchart`（地域＋總會）、`/contacts` 港島地域只剩 `staff` 組並即時同步，`rc/dc/hq/ahq` 組已刪（搬去 orgchart 備援）。後台 Code.gs 4.5.0：Cards +`rooms`／`orgchart`（ALL_VIEW）、`budget` done、Config `BUDGET_SHEET_URL`、`getConfig` 回 `budgetSheetUrl`；**刪 `annual` 週年會議文件卡**（`removeIds` 內，`app/annual-docs` 已刪；刪 route 後記得 `rm -rf .next/types/app/annual-docs` 先過 tsc）。mock：`/tmp/mockgs/gas-emu.js`（Apps Script 模擬器）+ `server.js`（GS `/exec` + 上游 fixture `/upstream`）+ `test45.js`（33 assertions，包括 v4.4.0→4.5.0 升級路徑）——sandbox 重置會冇咗，要用時照 README 描述重寫。
 > ⚠️ 真實網頁解析未經真機驗證（sandbox 出唔到網）：部署後請開 `/api/external?kind=regionStaff`／`regionOrg`／`hksaCouncil`／`hksaDepts`／`budget`／`rooms` 逐個睇 `ok:true`；scout.org.hk 對非瀏覽器 UA 可能 403（route 已帶 Chrome UA），如仍失敗前端會自動用內建備援並標「⚪ 官方網頁暫時讀唔到」。
 >

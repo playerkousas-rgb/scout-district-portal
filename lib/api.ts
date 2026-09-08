@@ -8,6 +8,7 @@ import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
   CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
+  Announcement,
 } from './types';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers';
 import type { IcsEvent } from './ics';
@@ -194,6 +195,27 @@ export const api = {
     callPost('submitActivityNotice', data),
   deleteActivityNotice: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteActivityNotice', { token, id }),
+
+  // 消息發佈（v4.6.0）：呢邊發 → 成員系統 member-portal 首頁頂部置頂顯示；呢邊刪／下架即刻消失
+  /** 公開讀（同成員系統睇到嘅完全一樣）：pinnedOnly 只要置頂 */
+  listAnnouncements: (params: { pinnedOnly?: boolean; limit?: number; since?: string } = {}): Promise<ApiResult<Announcement[]>> =>
+    callGet('listAnnouncements', {
+      ...(params.pinnedOnly ? { pinnedOnly: '1' } : {}),
+      ...(params.limit ? { limit: String(params.limit) } : {}),
+      ...(params.since ? { since: params.since } : {}),
+    }),
+  /** 管理系統列表：連未到期／已過期／已下架都回 */
+  getAnnouncements: (token: string): Promise<ApiResult<Announcement[]>> =>
+    callGet('getAnnouncements', { token }),
+  /** 新增（id 留空）或更新消息 */
+  saveAnnouncement: (token: string, announcement: Partial<Announcement>): Promise<ApiResult<{ saved: boolean; id: string; created: boolean }>> =>
+    callPost('saveAnnouncement', { token, announcement }),
+  deleteAnnouncement: (token: string, id: string): Promise<ApiResult<{ deleted: boolean; id: string }>> =>
+    callPost('deleteAnnouncement', { token, id }),
+  setAnnouncementPinned: (token: string, id: string, pinned: boolean): Promise<ApiResult<{ saved: boolean; id: string; pinned: boolean }>> =>
+    callPost('setAnnouncementPinned', { token, id, pinned }),
+  setAnnouncementActive: (token: string, id: string, active: boolean): Promise<ApiResult<{ saved: boolean; id: string; active: boolean }>> =>
+    callPost('setAnnouncementActive', { token, id, active }),
 
   // 意外／應變：意外報告（只喺按「確定提交」時先送後台；草稿留喺本機）
   submitIncidentReport: (token: string, report: IncidentReport): Promise<ApiResult<{ refCode: string; id: string }>> =>
