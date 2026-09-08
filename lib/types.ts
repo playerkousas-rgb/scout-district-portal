@@ -336,7 +336,7 @@ export interface Announcement {
 }
 
 /**
- * 🎖 獎勵提名（v4.7.0）— Awards / AwardTypes 表。
+ * 🎖 獎勵提名（v4.7.1）— Awards / AwardTypes 表。
  * 一人一行，每個獎項存獲獎年份（字串，可以係 "2015"、"2015?" 未確定、"無"）。
  * 年期規則（邊個獎跟邊個、要相隔幾多年、屬邊個提名期）全部喺 AwardTypes 表，可喺 /awards 改。
  */
@@ -363,6 +363,7 @@ export interface AwardMember {
   nameEn?: string;
   troop?: string;          // 旅團編號
   position?: string;       // 職位（GSL / ASL / LAY …）
+  serviceStart?: string;   // 服務開始（委任）年份；入門級獎項（GSA 7 年、LSM 15 年）由呢個年份起計
   status?: AwardMemberStatus;
   note?: string;
   awards: Record<string, string>;  // { GSA: '2015', LSM: '2020?' }
@@ -374,6 +375,8 @@ export interface AwardsBoard {
   members: AwardMember[];
   counts: Record<string, number>;
   total: number;
+  /** 後台內建建議年期（「↺ 套用建議」用，唔會自動覆蓋你改過嘅設定） */
+  defaults?: AwardType[];
 }
 
 export interface ActivityNotice {

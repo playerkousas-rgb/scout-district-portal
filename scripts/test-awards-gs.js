@@ -40,7 +40,7 @@ function makeSheet(name, rows) {
   };
 }
 
-const AWARD_HEAD = ['id', 'districtCode', 'name', 'nameEn', 'troop', 'position', 'status', 'note',
+const AWARD_HEAD = ['id', 'districtCode', 'name', 'nameEn', 'troop', 'position', 'serviceStart', 'status', 'note',
   'GSA', 'DSA', 'DSM', 'DSC', 'BRL', 'SVL', 'GDL', 'LSM', 'LSM1', 'LSM2', 'LSM3', 'LSM4',
   'CCM', 'CCH', 'HAB', 'FIVE', 'TEN', 'THANKS', 'updatedAt', 'createdAt'];
 
@@ -108,6 +108,29 @@ check('AwardTypes 空表時用內建預設（18 個獎項）', () => {
   assert.strictEqual(dsa.minYears, 5);
 });
 
+check('v4.7.1 預設年期：GSA 7（由服務年資計）、DSM→DSC 5、獅勳章冇年期、LSM 15', () => {
+  const by = {};
+  ctx.awardTypes_().forEach(t => { by[t.code] = t; });
+  assert.strictEqual(by.GSA.prevCode, '');
+  assert.strictEqual(by.GSA.minYears, 7);
+  assert.strictEqual(by.DSM.minYears, 7);
+  assert.strictEqual(by.DSC.minYears, 5);
+  assert.strictEqual(by.BRL.minYears, null);
+  assert.strictEqual(by.SVL.minYears, null);
+  assert.strictEqual(by.LSM.prevCode, '');
+  assert.strictEqual(by.LSM.minYears, 15);
+  assert.strictEqual(by.LSM1.minYears, 10);
+});
+
+check('服務開始年份：2004 / 2004-01-15 / 「86th since 2004/01/15」都讀到年份', () => {
+  assert.strictEqual(ctx.awardServiceStart_('2004'), '2004');
+  assert.strictEqual(ctx.awardServiceStart_('2004/01/15'), '2004');
+  assert.strictEqual(ctx.awardServiceStart_('86th since 2004/01/15'), '2004');
+  assert.strictEqual(ctx.awardServiceStart_(new Date('2011-06-01T00:00:00Z')), '2011');
+  assert.strictEqual(ctx.awardServiceStart_(''), '');
+  assert.strictEqual(ctx.awardServiceStart_('冇'), '');
+});
+
 check('冇 awards edit 權限唔可以改名冊', () => {
   const r = ctx.saveAwardMember_(alToken, { name: '測試' });
   assert.strictEqual(r.ok, false);
@@ -122,6 +145,7 @@ let id1 = '';
 check('新增成員 + 獎項年份', () => {
   const r = ctx.saveAwardMember_(dcToken, {
     name: '陳大文', troop: '206', position: 'GSL', status: 'active',
+    serviceStart: '2004/01/15',
     awards: { GSA: '2015', LSM: 2009 },
   });
   assert.strictEqual(r.ok, true);
@@ -134,6 +158,7 @@ check('新增成員 + 獎項年份', () => {
   assert.strictEqual(m.name, '陳大文');
   assert.strictEqual(m.awards.GSA, '2015');
   assert.strictEqual(m.awards.LSM, '2009');
+  assert.strictEqual(m.serviceStart, '2004');
 });
 
 check('年份格會清乾淨：2015? 保留問號、「無」保留、日期取年份', () => {
@@ -151,6 +176,7 @@ check('更新成員：只改有帶嘅欄，其餘唔郁', () => {
   const m = ctx.getAwardsBoard_(dcToken).data.members[0];
   assert.strictEqual(m.awards.DSA, '2021?');
   assert.strictEqual(m.awards.GSA, '2015');   // 原有嘅唔會冇咗
+  assert.strictEqual(m.serviceStart, '2004'); // 冇帶 serviceStart 就唔會被清走
 });
 
 check('狀態唔啱會變返 active', () => {
@@ -251,9 +277,16 @@ check('doGet / doPost 路由通', () => {
   assert.strictEqual(p.ok, true);
 });
 
-check('健康檢查版本 4.7.0', () => {
+check('getAwardsBoard 有回內建建議年期（畀「套用建議」用）', () => {
+  const d = ctx.getAwardsBoard_(dcToken).data.defaults;
+  assert.strictEqual(d.length, 18);
+  assert.strictEqual(d.filter(t => t.code === 'GSA')[0].minYears, 7);
+  assert.strictEqual(d.filter(t => t.code === 'BRL')[0].minYears, null);
+});
+
+check('健康檢查版本 4.7.1', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.7.0');
+  assert.strictEqual(parsed.data.version, '4.7.1');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

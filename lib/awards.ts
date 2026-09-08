@@ -1,5 +1,5 @@
 /**
- * 🎖 獎勵提名推算（v4.7.0）— 純函數，唔掂網絡，方便測試。
+ * 🎖 獎勵提名推算（v4.7.1）— 純函數，唔掂網絡，方便測試。
  *
  * 規則來源：AwardTypes 表（可喺 /awards「年期設定」改），每個獎項有
  *   prevCode  上一級獎（空 = 入門級）
@@ -63,38 +63,76 @@ export type Eligibility = {
   member: AwardMember;
   type: AwardType;
   prevType?: AwardType;
-  prevYear: number | null;      // 上一級獲獎年份
-  eligibleYear: number | null;  // 最快可提名年份（null = 冇上一級／冇設年期，要人手判斷）
+  prevYear: number | null;      // 上一級獲獎年份（入門級 = 服務開始年份）
+  eligibleYear: number | null;  // 最快可提名年份
   waited: number;               // 距合資格已經幾多年（正數 = 已超過）
   ready: boolean;               // targetYear 已夠期
   uncertain: boolean;           // 上一級年份標咗「?」
+  fromService: boolean;         // true = 入門級，由服務開始年份起計
+  noRule: boolean;              // true = 冇設年期規定（例如獅勳章），只要有上一級就列出
 };
+
+/** 服務開始（委任）年份 */
+export function serviceStartYear(member: AwardMember): number | null {
+  return awardYear(member.serviceStart);
+}
 
 /**
  * 計某一位成員喺 targetYear 有咩獎「夠期可提名」。
- * 規則：未有該獎 + 有上一級 + (上一級年份 + minYears) <= targetYear。
- * 入門級（冇 prevCode）唔會自動推算，交返畀人手決定。
+ *
+ * ① 有上一級（prevCode）→ 上一級獲獎年份 + minYears ≤ targetYear
+ *    minYears 留空 = 冇固定年期規定（例如獅勳章）：有上一級就列出，標示「冇年期規定」
+ * ② 入門級（冇 prevCode）但有 minYears → 由**服務開始年份** + minYears 計
+ *    （例如優良服務獎章 7 年、長期服務獎章 15 年）；未填服務開始年份就計唔到，會被略過
+ * ③ 入門級又冇 minYears（例如感謝狀）→ 唔自動推算
  */
 export function eligibilityFor(member: AwardMember, types: AwardType[], targetYear: number): Eligibility[] {
   const out: Eligibility[] = [];
+  const start = serviceStartYear(member);
   for (const type of types) {
     if (type.enabled === false) continue;
     if (hasAward(member, type.code)) continue;          // 已經有
-    if (!type.prevCode) continue;                        // 入門級：人手判斷
+    const min = type.minYears == null ? null : (Number(type.minYears) || 0);
+
+    if (!type.prevCode) {
+      if (min === null) continue;                        // 感謝狀之類：人手判斷
+      if (start === null) continue;                      // 冇服務開始年份，計唔到
+      const eligibleYear = start + min;
+      out.push({
+        member, type, prevType: undefined, prevYear: start, eligibleYear,
+        waited: targetYear - eligibleYear,
+        ready: eligibleYear <= targetYear,
+        uncertain: isUncertain(member.serviceStart),
+        fromService: true, noRule: false,
+      });
+      continue;
+    }
+
     const prevType = typeByCode(types, type.prevCode);
     const prevCell = member.awards?.[type.prevCode];
     const prevYear = awardYear(prevCell);
     if (prevYear === null) continue;                     // 未有上一級 = 未輪到
-    const min = type.minYears == null ? 0 : Number(type.minYears) || 0;
-    const eligibleYear = prevYear + min;
+    const eligibleYear = prevYear + (min ?? 0);
     out.push({
       member, type, prevType, prevYear, eligibleYear,
       waited: targetYear - eligibleYear,
       ready: eligibleYear <= targetYear,
       uncertain: isUncertain(prevCell),
+      fromService: false, noRule: min === null,
     });
   }
   return out;
+}
+
+/** 邊啲人未填服務開始年份 → 計唔到入門級獎項（優良服務獎章／長期服務獎章） */
+export function missingServiceStart(members: AwardMember[], types: AwardType[]): AwardMember[] {
+  const entryCodes = types.filter(t => t.enabled !== false && !t.prevCode && t.minYears != null).map(t => t.code);
+  if (!entryCodes.length) return [];
+  return members.filter(m => {
+    if (m.status && m.status !== 'active' && m.status !== 'applying') return false;
+    if (serviceStartYear(m) !== null) return false;
+    return entryCodes.some(code => !hasAward(m, code));   // 仲有入門級未攞
+  });
 }
 
 export type RoundBucket = {
@@ -183,6 +221,8 @@ export type ParsedImport = {
   skipped: number;
 };
 
+const SERVICE_HEADERS = ['服務開始', '服務開始年份', '服務年份', '委任年份', '入會年份', '加入年份', 'servicestart', 'since'];
+
 /**
  * 解析由 Excel／Google Sheet 複製出嚟嘅內容（Tab 分隔，冇 Tab 就試逗號）。
  * 支援兩種寫法：
@@ -202,8 +242,11 @@ export function parseAwardPaste(text: string, types: AwardType[]): ParsedImport 
   const first = table[0] || [];
   const firstHasYear = first.some(c => /\d{4}/.test(c));
   const firstCodes = first.map(c => (c ? normalizeToken(c.replace(/[（(].*$/, ''), types) : null));
-  if (!firstHasYear && firstCodes.some(Boolean)) {
+  let serviceCol = -1;
+  const headerLooksLikeHeader = !firstHasYear && (firstCodes.some(Boolean) || first.some(c => SERVICE_HEADERS.includes(c.trim().toLowerCase())));
+  if (headerLooksLikeHeader) {
     headerCodes = firstCodes;
+    serviceCol = first.findIndex(c => SERVICE_HEADERS.includes(c.trim().toLowerCase()));
     start = 1;
   }
 
@@ -215,9 +258,17 @@ export function parseAwardPaste(text: string, types: AwardType[]): ParsedImport 
     if (!name || /^(合計|總數|統計)/.test(name)) { skipped++; continue; }
     // 一行淨係得個名同註腳（例如顏色說明）就跳過
     const awards: Record<string, string> = {};
+    let serviceStart = '';
     for (let c = 1; c < cells.length; c++) {
       const cell = (cells[c] || '').trim();
       if (!cell) continue;
+      // 服務開始年份：靠表頭指定，或者「86th since 2004/01/15」呢類寫法
+      if (c === serviceCol) {
+        const sy = cell.match(/(19|20)\d{2}/);
+        if (sy) { serviceStart = sy[0]; continue; }
+      }
+      const since = cell.match(/since\s*((?:19|20)\d{2})/i);
+      if (since) { serviceStart = since[1]; continue; }
       const m = cell.match(/^([A-Za-z*\s]+?)\s*(\d{4})\s*(\?)?$/);
       if (m) {
         const code = normalizeToken(m[1], types);
@@ -234,6 +285,7 @@ export function parseAwardPaste(text: string, types: AwardType[]): ParsedImport 
       name,
       troop: (cells[1] || '').trim(),
       position: (cells[2] || '').trim(),
+      ...(serviceStart ? { serviceStart } : {}),
       awards,
     });
   }

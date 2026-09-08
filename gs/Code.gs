@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.7.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.7.1
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -93,9 +93,11 @@
  *      （舊資料 warn → warning、urgent → important 自動對應，Sheet 唔使改）。
  * 佢個 proxy 唔會轉發 link / linkLabel / notify / districtCode，呢啲欄位只有管理系統用。
  *
- * ── 獎勵提名 Awards（v4.7.0）───────────────────────────────
+ * ── 獎勵提名 Awards（v4.7.0／年期修訂 v4.7.1）──────────────
  * 管理系統 /awards：區會獎勵名冊（一人一行）＋「今年夠期可提名」自動推算。
  *   Awards 表      一人一行；每個獎項一欄，格入面填獲獎年份（可加「?」表示未確定）
+ *                  serviceStart = 服務開始年份（委任年份）；入門級獎項（優良服務獎章 7 年、
+ *                  長期服務獎章 15 年）由呢個年份起計，冇填就計唔到，會喺提名頁提示補資料
  *   AwardTypes 表  獎項清單同年期規則（label／上一級 prevCode／最少相隔 minYears／
  *                  提名期 round：founder 創辦人紀念日、rally 大會操（童軍獎勵）、other 自行申請）
  *                  ★ 全部可以喺 /awards「年期設定」頁面改，唔使改程式、唔使重新部署
@@ -265,7 +267,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.7.0',
+      version: '4.7.1',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -1875,7 +1877,7 @@ function updateAnnouncementFlag_(token, id, field, value) {
 //        + 「今年夠期可提名」由前端按規則即時推算（後台只負責存取）。
 // 加新獎項 → ensureAwardColumns_ 自動喺 Awards 表補一欄，唔會清走舊資料。
 
-var AWARD_FIXED_COLS = ['id', 'districtCode', 'name', 'nameEn', 'troop', 'position', 'status', 'note'];
+var AWARD_FIXED_COLS = ['id', 'districtCode', 'name', 'nameEn', 'troop', 'position', 'serviceStart', 'status', 'note'];
 var AWARD_TAIL_COLS = ['updatedAt', 'createdAt'];
 var AWARD_ROUNDS = ['founder', 'rally', 'other'];
 // 名冊狀態（同用戶原本 Excel 嘅顏色註腳對應）
@@ -1885,22 +1887,22 @@ var AWARD_STATUSES = ['active', 'noAppointment', 'notInDistrict', 'applying', 'l
 function awardTypeSeed_() {
   return [
     // code, label, short, category, prevCode, minYears, round, note, enabled
-    ['GSA',    '優良服務獎章',            'GSA',   '功績榮譽', '',      '',   'founder', 'Good Service Award；由區提名，經地域交總會', 'TRUE'],
+    ['GSA',    '優良服務獎章',            'GSA',   '功績榮譽', '',      7,    'founder', 'Good Service Award；由服務開始年份起計 7 年', 'TRUE'],
     ['DSA',    '優異服務獎章',            'DSA',   '功績榮譽', 'GSA',   5,    'founder', 'Dedicated Service Award', 'TRUE'],
     ['DSM',    '功績榮譽獎章',            'DSM',   '功績榮譽', 'DSA',   7,    'rally',   'Distinguished Service Medal；獎勵委員會批准', 'TRUE'],
-    ['DSC',    '功績榮譽十字章',          'DSC',   '功績榮譽', 'DSM',   7,    'rally',   'Distinguished Service Cross；成年成員最高功績獎勵', 'TRUE'],
-    ['BRL',    '銅獅勳章',                '銅獅',  '獅勳章',   'DSC',   5,    'rally',   'Bronze Lion', 'TRUE'],
-    ['SVL',    '銀獅勳章',                '銀獅',  '獅勳章',   'BRL',   5,    'rally',   'Silver Lion', 'TRUE'],
-    ['GDL',    '金獅勳章',                '金獅',  '獅勳章',   'SVL',   5,    'rally',   'Gold Lion；制服成年成員最高功績獎勵', 'TRUE'],
-    ['LSM',    '長期服務獎章',            'LSM',   '長期服務', '',      15,   'other',   '服務實職滿 15 年；可自行向總會申請', 'TRUE'],
+    ['DSC',    '功績榮譽十字章',          'DSC',   '功績榮譽', 'DSM',   5,    'rally',   'Distinguished Service Cross；成年成員最高功績獎勵', 'TRUE'],
+    ['BRL',    '銅獅勳章',                '銅獅',  '獅勳章',   'DSC',   '',   'rally',   'Bronze Lion；冇固定年期規定', 'TRUE'],
+    ['SVL',    '銀獅勳章',                '銀獅',  '獅勳章',   'BRL',   '',   'rally',   'Silver Lion；冇固定年期規定', 'TRUE'],
+    ['GDL',    '金獅勳章',                '金獅',  '獅勳章',   'SVL',   '',   'rally',   'Gold Lion；制服成年成員最高功績獎勵，冇固定年期規定', 'TRUE'],
+    ['LSM',    '長期服務獎章',            'LSM',   '長期服務', '',      15,   'other',   '服務實職滿 15 年（由服務開始年份起計）；可自行向總會申請', 'TRUE'],
     ['LSM1',   '長期服務一星獎章',        'LSM*',  '長期服務', 'LSM',   10,   'other',   '再服務滿 10 年（共 25 年）', 'TRUE'],
     ['LSM2',   '長期服務二星獎章',        'LSM**', '長期服務', 'LSM1',  10,   'other',   '共 35 年', 'TRUE'],
     ['LSM3',   '長期服務三星獎章',        'LSM***','長期服務', 'LSM2',  10,   'other',   '共 45 年', 'TRUE'],
     ['LSM4',   '長期服務四星獎章',        'LSM****','長期服務','LSM3',  10,   'other',   '共 55 年', 'TRUE'],
     ['CCM',    '香港總監嘉許',            '總監嘉許', '嘉許',  '',      '',   'other',   '黃色笛繩（榮譽笛子）；香港總監全權批准', 'TRUE'],
     ['CCH',    '香港總監高級嘉許',        '高級嘉許', '嘉許',  'CCM',   5,    'other',   '黃紫綠笛繩；獲總監嘉許後有超卓表現', 'TRUE'],
-    ['HAB',    '民政及青年事務局局長嘉許', '民青局',  '外部嘉許', '',    10,   'other',   '前稱民政事務局局長嘉許計劃；制服團隊義務領袖須服務滿 10 年', 'TRUE'],
-    ['FIVE',   '五年長期服務獎狀',        '五年',  '長期服務', '',      5,    'other',   '會務委員', 'TRUE'],
+    ['HAB',    '民政及青年事務局局長嘉許', '民青局',  '外部嘉許', '',    '',   'other',   '前稱民政事務局局長嘉許計劃；義務領袖須服務滿 10 年（限提名名額，預設唔自動推算；想自動列出就喺年期設定填 10）', 'TRUE'],
+    ['FIVE',   '五年長期服務獎狀',        '五年',  '長期服務', '',      '',   'other',   '會務委員專用（預設唔自動推算；想自動列出就喺年期設定填 5）', 'TRUE'],
     ['TEN',    '十年長期服務獎狀',        '十年',  '長期服務', 'FIVE',  5,    'other',   '會務委員', 'TRUE'],
     ['THANKS', '感謝狀',                  '感謝狀', '其他',   '',      '',   'founder', '表格 DA2；頒予配偶／家長／支持童軍運動人士', 'TRUE'],
   ];
@@ -1929,6 +1931,14 @@ function awardYearCell_(v) {
   var m = t.match(/(\d{4})/);
   if (!m) return t.slice(0, 20);
   return m[1] + (/\?/.test(t) ? '?' : '');
+}
+
+/** 服務開始年份：接受 2004、2004/01/15、"86th since 2004/01/15"、日期格 */
+function awardServiceStart_(v) {
+  if (v === null || v === undefined || v === '') return '';
+  if (v instanceof Date) return String(v.getFullYear());
+  var m = String(v).match(/(19|20)\d{2}/);
+  return m ? m[0] : '';
 }
 
 /** AwardTypes 表 → 陣列（未有表 / 空表 → 用預設種子，唔會炸） */
@@ -1993,6 +2003,7 @@ function awardMemberRow_(r, types) {
     nameEn: String(r.nameEn || '').trim(),
     troop: String(r.troop == null ? '' : r.troop).trim(),
     position: String(r.position || '').trim(),
+    serviceStart: awardServiceStart_(r.serviceStart),
     status: awardStatus_(r.status),
     note: String(r.note || '').trim(),
     awards: awards,
@@ -2012,7 +2023,14 @@ function getAwardsBoard_(token) {
   types.forEach(function (ty) {
     counts[ty.code] = members.filter(function (m) { return m.awards[ty.code] && m.awards[ty.code] !== '無'; }).length;
   });
-  return ok({ types: types, members: members, counts: counts, total: members.length });
+  var defaults = awardTypeSeed_().map(function (r) {
+    return {
+      code: awardCode_(r[0]), label: r[1], short: r[2], category: r[3],
+      prevCode: awardCode_(r[4]), minYears: r[5] === '' ? null : Number(r[5]),
+      round: awardRound_(r[6]), note: r[7], enabled: true,
+    };
+  });
+  return ok({ types: types, members: members, counts: counts, total: members.length, defaults: defaults });
 }
 
 function awardWriteFields_(sh, rowIdx, a, types) {
@@ -2020,6 +2038,9 @@ function awardWriteFields_(sh, rowIdx, a, types) {
   setCellByHeader_(sh, rowIdx, 'nameEn', String(a.nameEn || '').trim());
   setCellByHeader_(sh, rowIdx, 'troop', String(a.troop == null ? '' : a.troop).trim());
   setCellByHeader_(sh, rowIdx, 'position', String(a.position || '').trim());
+  if (Object.prototype.hasOwnProperty.call(a, 'serviceStart')) {
+    setCellByHeader_(sh, rowIdx, 'serviceStart', awardServiceStart_(a.serviceStart));
+  }
   setCellByHeader_(sh, rowIdx, 'status', awardStatus_(a.status));
   setCellByHeader_(sh, rowIdx, 'note', String(a.note || '').trim());
   var awards = a.awards || {};

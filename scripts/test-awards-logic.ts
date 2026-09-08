@@ -5,15 +5,18 @@
 import assert from 'node:assert';
 import {
   awardYear, isUncertain, eligibilityFor, nominationBoard, deadlines, parseAwardPaste, toCsv,
+  missingServiceStart,
 } from '../lib/awards.ts';
 import type { AwardMember, AwardType } from '../lib/types.ts';
 
 const types: AwardType[] = [
-  { code: 'GSA', label: '優良服務獎章', short: 'GSA', category: '功績榮譽', prevCode: '', minYears: null, round: 'founder' },
+  { code: 'GSA', label: '優良服務獎章', short: 'GSA', category: '功績榮譽', prevCode: '', minYears: 7, round: 'founder' },
   { code: 'DSA', label: '優異服務獎章', short: 'DSA', category: '功績榮譽', prevCode: 'GSA', minYears: 5, round: 'founder' },
   { code: 'DSM', label: '功績榮譽獎章', short: 'DSM', category: '功績榮譽', prevCode: 'DSA', minYears: 7, round: 'rally' },
   { code: 'DSC', label: '功績榮譽十字章', short: 'DSC', category: '功績榮譽', prevCode: 'DSM', minYears: 7, round: 'rally' },
   { code: 'LSM', label: '長期服務獎章', short: 'LSM', category: '長期服務', prevCode: '', minYears: 15, round: 'other' },
+  { code: 'BRL', label: '銅獅勳章', short: '銅獅', category: '獅勳章', prevCode: 'DSC', minYears: null, round: 'rally' },
+  { code: 'THANKS', label: '感謝狀', short: '感謝狀', category: '其他', prevCode: '', minYears: null, round: 'founder' },
   { code: 'LSM1', label: '長期服務一星獎章', short: 'LSM*', category: '長期服務', prevCode: 'LSM', minYears: 10, round: 'other' },
   { code: 'OFF', label: '停用咗嘅獎', short: 'OFF', category: '其他', prevCode: 'GSA', minYears: 1, round: 'other', enabled: false },
 ];
@@ -56,9 +59,54 @@ check('已經有嗰個獎就唔會再提', () => {
   assert.strictEqual(e.some(x => x.type.code === 'DSM'), true);   // 跳到下一級
 });
 
-check('未有上一級 → 唔會出現；入門級唔會自動推算', () => {
+check('未有上一級 → 唔會出現；冇服務年份嘅入門級都唔會推算', () => {
   const e = eligibilityFor(member('乙', {}), types, 2030);
   assert.strictEqual(e.length, 0);
+});
+
+check('入門級由服務開始年份計：2004 + 7 → 2011 年可提名優良服務獎章', () => {
+  const m = member('丙', {}, { serviceStart: '2004' });
+  const e2011 = eligibilityFor(m, types, 2011).find(x => x.type.code === 'GSA')!;
+  assert.strictEqual(e2011.fromService, true);
+  assert.strictEqual(e2011.prevYear, 2004);
+  assert.strictEqual(e2011.eligibleYear, 2011);
+  assert.strictEqual(e2011.ready, true);
+  const e2010 = eligibilityFor(m, types, 2010).find(x => x.type.code === 'GSA')!;
+  assert.strictEqual(e2010.ready, false);
+});
+
+check('長期服務獎章：服務 2004 + 15 → 2019 年；攞咗之後跳去一星（+10）', () => {
+  const m = member('丁', {}, { serviceStart: '2004' });
+  const lsm = eligibilityFor(m, types, 2019).find(x => x.type.code === 'LSM')!;
+  assert.strictEqual(lsm.eligibleYear, 2019);
+  assert.strictEqual(lsm.ready, true);
+  const got = member('丁', { LSM: '2019' }, { serviceStart: '2004' });
+  const star = eligibilityFor(got, types, 2029).find(x => x.type.code === 'LSM1')!;
+  assert.strictEqual(star.eligibleYear, 2029);
+  assert.strictEqual(star.fromService, false);
+});
+
+check('感謝狀（冇上一級又冇年期）唔會自動推算', () => {
+  const e = eligibilityFor(member('戊', {}, { serviceStart: '1990' }), types, 2030);
+  assert.strictEqual(e.some(x => x.type.code === 'THANKS'), false);
+});
+
+check('冇年期規定嘅獎（銅獅）：有上一級就列出，標 noRule', () => {
+  const brl = eligibilityFor(member('己', { DSC: '2020' }), types, 2020).find(x => x.type.code === 'BRL')!;
+  assert.strictEqual(brl.noRule, true);
+  assert.strictEqual(brl.ready, true);
+  assert.strictEqual(brl.eligibleYear, 2020);
+});
+
+check('未填服務開始年份 → missingServiceStart 提示（已攞晒入門級就唔算）', () => {
+  const list = missingServiceStart([
+    member('冇年份', {}),
+    member('有年份', {}, { serviceStart: '2004' }),
+    member('已攞晒', { GSA: '2010', LSM: '2018' }),
+    member('離任', {}, { status: 'left' }),
+  ], types);
+  assert.strictEqual(list.length, 1);
+  assert.strictEqual(list[0].name, '冇年份');
 });
 
 check('停用咗嘅獎項唔會計', () => {
@@ -109,6 +157,18 @@ check('提名截止日：創辦人前一年 10/31、大會操同年 4/30', () =>
 });
 
 console.log('\n匯入解析測試');
+
+check('匯入：「86th since 2004/01/15」會讀成服務開始年份', () => {
+  const r = parseAwardPaste('陳大文\t206\tGSL\tGSA2001\t86th since 2004/01/15', types);
+  assert.strictEqual(r.rows[0].serviceStart, '2004');
+  assert.strictEqual(r.rows[0].awards!.GSA, '2001');
+});
+
+check('匯入：表頭有「服務開始」欄都讀到', () => {
+  const r = parseAwardPaste('姓名\t旅團\t職位\t服務開始\tGSA\n陳大文\t206\tGSL\t2004\t2011', types);
+  assert.strictEqual(r.rows[0].serviceStart, '2004');
+  assert.strictEqual(r.rows[0].awards!.GSA, '2011');
+});
 
 check('Excel 貼上：格入面連代號（GSA1985 / LSM*2005 / CCM2025?）', () => {
   const text = [

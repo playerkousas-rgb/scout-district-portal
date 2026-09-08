@@ -640,3 +640,5 @@ a{color:inherit;text-decoration:none;}
 .aw-paste{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f8fafc;resize:vertical;}
 .aw-paste:focus{outline:3px solid rgba(21,101,192,.14);border-color:var(--p2);}
 @media(max-width:720px){.aw-form-grid{grid-template-columns:1fr 1fr;}}
+.aw-warn{border-left:4px solid #f59e0b;background:#fffbeb;}
+.aw-warn p{font-size:12.5px;color:#78350f;line-height:1.7;margin:6px 0 10px;}

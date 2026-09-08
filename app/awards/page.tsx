@@ -1,6 +1,6 @@
 'use client';
 /**
- * 🎖 獎勵提名（v4.7.0）
+ * 🎖 獎勵提名（v4.7.1）
  *
  * 一站式：名冊（Awards 表）＋ 年期規則（AwardTypes 表）＋ 每年「夠期可提名」自動推算。
  * 年期／獎項名稱全部可以喺「年期設定」頁改，唔使改程式、唔使重新部署。
@@ -13,6 +13,7 @@ import type { AwardMember, AwardType, AwardRound, AwardsBoard } from '@/lib/type
 import {
   ROUND_LABEL, ROUND_HINT, STATUS_LABEL, awardYear, isUncertain, hasAward,
   nominationBoard, deadlines, daysUntil, parseAwardPaste, toCsv, shortLabel,
+  missingServiceStart, serviceStartYear,
 } from '@/lib/awards';
 import BackLink, { BackBar } from '@/components/BackLink';
 
@@ -27,7 +28,7 @@ const TABS: { id: Tab; label: string }[] = [
 const STATUS_OPTIONS = ['active', 'applying', 'noAppointment', 'notInDistrict', 'left'];
 
 function emptyMember(): Partial<AwardMember> {
-  return { id: '', name: '', troop: '', position: '', status: 'active', note: '', awards: {} };
+  return { id: '', name: '', troop: '', position: '', serviceStart: '', status: 'active', note: '', awards: {} };
 }
 
 export default function AwardsPage() {
@@ -80,7 +81,7 @@ export default function AwardsPage() {
 
       {needUpgrade && (
         <div className="info-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <h3>⚠️ 後台未升級到 v4.7.0</h3>
+          <h3>⚠️ 後台未升級到 v4.7.1</h3>
           <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.7 }}>
             請去「📢 更新 / 下載」下載最新 <code>Code.gs</code> 貼上 Apps Script →
             執行 <code>setupSheets()</code>（會自動建立 <code>Awards</code> 同 <code>AwardTypes</code> 兩張表，
@@ -135,14 +136,18 @@ function NominateTab({ board }: { board: AwardsBoard }) {
     () => nominationBoard(board.members, board.types, year, { includeInactive }),
     [board, year, includeInactive],
   );
+  const missing = useMemo(() => missingServiceStart(board.members, board.types), [board]);
+  const entryLabels = board.types.filter(t => t.enabled !== false && !t.prevCode && t.minYears != null)
+    .map(t => `${t.label} ${t.minYears} 年`).join('、');
 
   function exportCsv(round: AwardRound) {
     const b = buckets.find(x => x.round === round);
     if (!b) return;
-    const rows: (string | number)[][] = [['姓名', '旅團', '職位', '建議提名獎勵', '上一級獎勵', '獲獎年份', '已夠期年數']];
+    const rows: (string | number)[][] = [['姓名', '旅團', '職位', '建議提名獎勵', '計算基準', '基準年份', '已夠期年數']];
     b.ready.forEach(e => rows.push([
       e.member.name, e.member.troop || '', e.member.position || '',
-      e.type.label, e.prevType?.label || '', e.prevYear ?? '', e.waited,
+      e.type.label, e.fromService ? '服務開始年份' : (e.prevType?.label || ''), e.prevYear ?? '',
+      e.noRule ? '冇年期規定' : e.waited,
     ]));
     const blob = new Blob(['\ufeff' + toCsv(rows)], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -171,6 +176,22 @@ function NominateTab({ board }: { board: AwardsBoard }) {
           名冊共 {board.total} 人 · 規則以「年期設定」為準
         </span>
       </div>
+
+      {missing.length > 0 && (
+        <div className="info-card aw-warn">
+          <b>⚠️ {missing.length} 人未填「服務開始年份」</b>
+          <p>
+            {entryLabels || '入門級獎項'} 係由服務開始（委任）年份起計，未填就計唔到。
+            去「📋 獎勵名冊」逐個補返個年份就會自動出現喺上面。
+          </p>
+          <div className="aw-chips">
+            {missing.slice(0, 20).map(m => (
+              <span key={m.id} className="aw-chip">{m.name}{m.troop ? `（${m.troop}）` : ''}</span>
+            ))}
+            {missing.length > 20 && <span className="aw-none">…另外 {missing.length - 20} 人</span>}
+          </div>
+        </div>
+      )}
 
       {buckets.map(b => {
         const dl = deadlines(b.round, year);
@@ -206,7 +227,7 @@ function NominateTab({ board }: { board: AwardsBoard }) {
                   <thead>
                     <tr>
                       <th>姓名</th><th>旅團</th><th>職位</th>
-                      <th>建議提名</th><th>上一級</th><th>已夠期</th>
+                      <th>建議提名</th><th>由邊度計起</th><th>已夠期</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -217,10 +238,15 @@ function NominateTab({ board }: { board: AwardsBoard }) {
                         <td>{e.member.position || '—'}</td>
                         <td><span className="aw-chip on">{e.type.label}</span></td>
                         <td>
-                          {e.prevType ? `${shortLabel(e.prevType)} ${e.prevYear}` : '—'}
+                          {e.fromService
+                            ? <>服務 {e.prevYear} 起<span className="aw-tag">年資 {year - (e.prevYear || year)} 年</span></>
+                            : e.prevType ? `${shortLabel(e.prevType)} ${e.prevYear}` : '—'}
                           {e.uncertain && <span className="aw-tag warn">年份未確定</span>}
                         </td>
-                        <td>{e.waited === 0 ? '啱啱夠' : `已過 ${e.waited} 年`}</td>
+                        <td>
+                          {e.noRule ? <span className="aw-tag">冇年期規定</span>
+                            : e.waited === 0 ? '啱啱夠' : `已過 ${e.waited} 年`}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -247,8 +273,11 @@ function NominateTab({ board }: { board: AwardsBoard }) {
       })}
 
       <div className="info-card aw-note">
-        <b>點計出嚟？</b> 未有嗰個獎 + 已有上一級 + （上一級年份 ＋ 設定年期）≤ 頒獎年份。
-        入門級獎項（例如優良服務獎章、感謝狀）冇「上一級」，唔會自動推算，要自己揀人提名。
+        <b>點計出嚟？</b><br />
+        ① 有上一級嘅獎：上一級獲獎年份 ＋ 設定年期 ≤ 頒獎年份（年期留空 = 冇規定，有上一級就列出）。<br />
+        ② 入門級（優良服務獎章、長期服務獎章）：<b>服務開始年份</b> ＋ 設定年期 ≤ 頒獎年份。<br />
+        ③ 感謝狀呢類冇年期規定又冇上一級嘅，唔會自動推算，要自己揀人。<br />
+        年期全部喺「⚙️ 年期設定」改，改完即刻重算。
       </div>
     </>
   );
@@ -286,11 +315,11 @@ function RosterTab({ board, canEdit, busy, setBusy, token, reload, flash, setErr
   }
 
   function exportRoster() {
-    const head = ['姓名', '旅團', '職位', '狀態', ...shownTypes.map(t => t.label), '備註'];
+    const head = ['姓名', '旅團', '職位', '狀態', '服務開始年份', ...shownTypes.map(t => t.label), '備註'];
     const rows: (string | number)[][] = [head];
     list.forEach(m => rows.push([
       m.name, m.troop || '', m.position || '', STATUS_LABEL[m.status || 'active'],
-      ...shownTypes.map(t => m.awards?.[t.code] || ''), m.note || '',
+      m.serviceStart || '', ...shownTypes.map(t => m.awards?.[t.code] || ''), m.note || '',
     ]));
     const blob = new Blob(['\ufeff' + toCsv(rows)], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -333,11 +362,11 @@ function RosterTab({ board, canEdit, busy, setBusy, token, reload, flash, setErr
           <thead>
             <tr>
               <th className="aw-sticky">姓名</th>
-              <th>旅團</th><th>職位</th><th>獎項</th>{canEdit && <th></th>}
+              <th>旅團</th><th>職位</th><th>服務開始</th><th>獎項</th>{canEdit && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={5} className="empty">冇資料（可以去「⬆️ 匯入名單」貼上你份 Excel）</td></tr>}
+            {list.length === 0 && <tr><td colSpan={6} className="empty">冇資料（可以去「⬆️ 匯入名單」貼上你份 Excel）</td></tr>}
             {list.map(m => (
               <tr key={m.id}>
                 <td className="aw-sticky">
@@ -347,6 +376,7 @@ function RosterTab({ board, canEdit, busy, setBusy, token, reload, flash, setErr
                 </td>
                 <td>{m.troop || '—'}</td>
                 <td>{m.position || '—'}</td>
+                <td>{m.serviceStart ? m.serviceStart : <span className="aw-tag warn">未填</span>}</td>
                 <td>
                   <div className="aw-chips">
                     {shownTypes.filter(t => m.awards?.[t.code]).map(t => (
@@ -419,6 +449,12 @@ function MemberModal({ draft, types, token, onClose, onSaved, setError }: {
           <label className="aw-field"><span>職位</span>
             <input value={d.position || ''} onChange={e => setD({ ...d, position: e.target.value })} placeholder="GSL / ASL / LAY" />
           </label>
+          <label className="aw-field"><span>服務開始年份</span>
+            <input
+              value={d.serviceStart || ''} placeholder="2004"
+              onChange={e => setD({ ...d, serviceStart: e.target.value })}
+            />
+          </label>
           <label className="aw-field"><span>狀態</span>
             <select value={d.status || 'active'} onChange={e => setD({ ...d, status: e.target.value as AwardMember['status'] })}>
               {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
@@ -429,7 +465,10 @@ function MemberModal({ draft, types, token, onClose, onSaved, setError }: {
           </label>
         </div>
 
-        <p className="aw-hint">獲獎年份直接填四位數字；未確定可以喺後面加「?」，冇獲過就留空。</p>
+        <p className="aw-hint">
+          獲獎年份直接填四位數字；未確定可以喺後面加「?」，冇獲過就留空。
+          <b>服務開始年份</b>＝ 首次委任嗰年，優良服務獎章（7 年）同長期服務獎章（15 年）靠佢計。
+        </p>
 
         {cats.map(cat => (
           <div key={cat} className="aw-cat">
@@ -492,7 +531,8 @@ function RulesTab({ board, canEdit, token, reload, flash, setError }: {
       <div className="info-card aw-note">
         <b>年期點用？</b>「上一級」＋「相隔年數」＝ 最快可提名年份。
         例如優異服務獎章上一級係優良服務獎章、相隔 5 年 → 2015 年攞咗優良，2020 年就夠期。
-        留空「上一級」＝ 入門級（唔會自動推算）。改完撳最底「儲存設定」即刻生效。
+        「上一級」留空 + 有年數 ＝ 由成員嘅<b>服務開始年份</b>起計（優良服務獎章 7 年、長期服務獎章 15 年就係咁）。
+        年數留空 ＝ 冇固定年期規定（例如獅勳章），只要有上一級就會列出嚟畀你考慮。改完撳最底「儲存設定」即刻生效。
       </div>
 
       <div className="mtx-scroll">
@@ -546,6 +586,13 @@ function RulesTab({ board, canEdit, token, reload, flash, setError }: {
           <button className="btn-sm" disabled={saving} onClick={save}>{saving ? '儲存中…' : '💾 儲存設定'}</button>
           <button className="lock-btn" onClick={addRow}>＋ 加一個獎項</button>
           <button className="lock-btn" onClick={() => setRows(board.types.map(t => ({ ...t })))}>還原</button>
+          {board.defaults && board.defaults.length > 0 && (
+            <button
+              className="lock-btn"
+              title="載入後台內建建議年期（未撳儲存之前唔會寫入）"
+              onClick={() => { if (confirm('用內建建議年期覆蓋而家表上嘅設定？（未撳「儲存設定」之前唔會寫入 Sheet）')) setRows(board.defaults!.map(t => ({ ...t }))); }}
+            >↺ 套用建議年期</button>
+          )}
         </div>
       )}
     </>
