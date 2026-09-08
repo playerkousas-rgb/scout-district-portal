@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.8.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.8.1
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -269,7 +269,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.8.0',
+      version: '4.8.1',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -390,7 +390,7 @@ function doPost(e) {
       case 'importAwardMembers':  return json(importAwardMembers_(b.token, b.rows, b.mode));
       case 'saveAwardTypes':      return json(saveAwardTypes_(b.token, b.types));
 
-      // ---------- 旅團探訪（v4.8.0） ----------
+      // ---------- 旅團探訪（v4.8.1） ----------
       case 'saveVisit':           return json(saveVisit_(b.token, b.visit || b));
       case 'deleteVisit':         return json(deleteVisit_(b.token, b.id));
       case 'saveUnits':           return json(saveUnits_(b.token, b.units));
@@ -2196,7 +2196,7 @@ function saveAwardTypes_(token, types) {
 }
 
 
-// ===================== 旅團探訪 Visits（v4.8.0） =====================
+// ===================== 旅團探訪 Visits（v4.8.1） =====================
 // 區幹部落旅團探訪，喺 /visit 撳一下嗰個旅團格仔就登記低「邊個、幾時、探邊一旅邊個支部」。
 // 幹部一入去預設只睇自己支部（跟角色：小童軍／幼童軍／童軍 ADC），要睇其他支部隨時切換。
 // DC 出報告：揀「幾月到幾月」即刻有探訪 list，仲有邊個幹部探咗幾多次、探過邊啲旅。
@@ -2373,12 +2373,27 @@ function saveVisit_(token, v) {
 
   var id = String(v.id || '').trim();
   var now = new Date().toISOString();
+  var who = String(v.visitorName == null ? '' : v.visitorName).trim() || visitorName_(t.email);
+  var mail = String(v.visitorEmail || '').trim() || t.email;
+
+  // 一日一個旅一次：同一日、同一個旅、同一位幹部，唔會有兩筆（改緊嗰筆唔計）
+  var dup = readSheet_(SHEET.VISITS).map(visitRow_).filter(function (o) {
+    if (!o || String(o.id) === id) return false;
+    if (String(o.troop).trim() !== troop || o.visitDate !== date) return false;
+    var sameMail = mail && o.visitorEmail && String(o.visitorEmail).trim().toLowerCase() === String(mail).toLowerCase();
+    var sameName = who && o.visitorName && String(o.visitorName).trim() === who;
+    return sameMail || sameName;
+  });
+  if (dup.length) {
+    return err(troop + ' 旅喺 ' + date + ' 已經登記咗（' + (dup[0].visitorName || who) + '）—— 同一日唔使登記兩次');
+  }
+
   if (!id) {
     id = genId_('vs');
     appendRowObj_(sh, {
       id: id, districtCode: districtCode_(),
-      visitorEmail: String(v.visitorEmail || '').trim() || t.email,
-      visitorName: String(v.visitorName || '').trim() || visitorName_(t.email),
+      visitorEmail: mail,
+      visitorName: who,
       createdAt: now,
     });
   }

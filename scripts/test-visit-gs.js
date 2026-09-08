@@ -163,6 +163,32 @@ check('登記探訪：預設今日、探訪幹部自動填登入者、季度自�
   assert.strictEqual(v.note, '集會人數 24');
 });
 
+check('一日一個旅一次：同一日同一位幹部再撳同一個旅（就算轉支部）都唔會多一筆', () => {
+  const before = ctx.getVisitBoard_(ghToken).data.visits.length;
+  const again = ctx.saveVisit_(ghToken, { troop: '206', section: 'gh', visitDate: `${thisYear}-03-08` });
+  assert.strictEqual(again.ok, false);
+  const other = ctx.saveVisit_(ghToken, { troop: '206', section: 'scout', visitDate: `${thisYear}-03-08` });
+  assert.strictEqual(other.ok, false);
+  assert.strictEqual(ctx.getVisitBoard_(ghToken).data.visits.length, before);
+});
+
+check('同一日探 X／Y／Z 幾個旅冇問題；第二日再探返同一個旅都得', () => {
+  const before = ctx.getVisitBoard_(ghToken).data.visits.length;
+  assert.strictEqual(ctx.saveVisit_(ghToken, { troop: '82', section: 'gh', visitDate: `${thisYear}-03-08` }).ok, true);
+  assert.strictEqual(ctx.saveVisit_(ghToken, { troop: '206', section: 'gh', visitDate: `${thisYear}-04-19` }).ok, true);
+  const after = ctx.getVisitBoard_(ghToken).data.visits;
+  assert.strictEqual(after.length, before + 2);
+  // 清返場，等後面嘅測試數目唔變
+  after.filter(v => v.visitDate === `${thisYear}-04-19` || v.troop === '82').forEach(v => ctx.deleteVisit_(dcToken, v.id));
+  assert.strictEqual(ctx.getVisitBoard_(ghToken).data.visits.length, before);
+});
+
+check('第二位幹部同一日探同一個旅 → 佢有佢自己嗰筆', () => {
+  const r = ctx.saveVisit_(dcToken, { troop: '206', section: 'scout', visitDate: `${thisYear}-03-08` });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(ctx.deleteVisit_(dcToken, r.data.id).ok, true);
+});
+
 check('揀日期範圍：由幾月到幾月，範圍以外唔會出', () => {
   ctx.saveVisit_(dcToken, { troop: '17', section: 'scout', visitDate: `${thisYear}-08-20` });
   ctx.saveVisit_(dcToken, { troop: '82', section: 'cub', visitDate: `${thisYear}-11-05` });
@@ -243,9 +269,9 @@ check('doGet / doPost 路由通', () => {
   assert.strictEqual(del.ok, true);
 });
 
-check('健康檢查版本 4.8.0', () => {
+check('健康檢查版本 4.8.1', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.8.0');
+  assert.strictEqual(parsed.data.version, '4.8.1');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

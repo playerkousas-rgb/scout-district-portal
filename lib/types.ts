@@ -402,7 +402,7 @@ export interface ActivityNotice {
 }
 
 /**
- * 🏕 旅團探訪（v4.8.0）— Units（旅團名單）＋ Visits（探訪記錄）。
+ * 🏕 旅團探訪（v4.8.1）— Units（旅團名單）＋ Visits（探訪記錄）。
  * 幹部撳一下旅團格仔就登記；DC 揀日期範圍出報告，仲睇到邊個幹部探咗邊啲旅。
  */
 export type VisitSection = 'gh' | 'cub' | 'scout' | 'venture' | 'rover';

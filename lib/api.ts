@@ -227,7 +227,7 @@ export const api = {
   importAwardMembers: (token: string, rows: Partial<AwardMember>[], mode: 'merge' | 'replace'): Promise<ApiResult<{ added: number; updated: number; skipped: number }>> =>
     callPost('importAwardMembers', { token, rows, mode }),
   /** 儲存獎項及年期設定（整張表覆寫） */
-  // ── 🏕 旅團探訪（v4.8.0）──────────────────────────────
+  // ── 🏕 旅團探訪（v4.8.1）──────────────────────────────
   getVisitBoard: (token: string, from?: string, to?: string): Promise<ApiResult<VisitBoard>> =>
     callGet('getVisitBoard', { token, ...(from ? { from } : {}), ...(to ? { to } : {}) }),
   saveVisit: (token: string, visit: Partial<Visit>): Promise<ApiResult<{ saved: boolean; id: string; troop: string; visitDate: string }>> =>

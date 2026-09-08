@@ -697,6 +697,11 @@ a{color:inherit;text-decoration:none;}
 .vs-tile.picked{border-color:#2563eb;background:#eff6ff;box-shadow:0 0 0 3px rgba(37,99,235,.18);}
 .vs-tile.picked::after{content:'✔';position:absolute;top:-9px;right:-7px;width:24px;height:24px;border-radius:50%;
   background:#2563eb;color:#fff;font-size:13px;display:flex;align-items:center;justify-content:center;font-weight:700;}
+.vs-tile.locked{border-color:#a7f3d0;background:#f0fdf4;cursor:not-allowed;opacity:.9;}
+.vs-tile.locked:hover{box-shadow:none;transform:none;}
+.vs-tile.locked::after{content:'🔒';position:absolute;top:-9px;right:-7px;width:24px;height:24px;border-radius:50%;
+  background:#16a34a;color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center;}
+.vs-tile-hint{font-size:11px;color:#0f766e;background:#ecfdf5;border-radius:6px;padding:1px 6px;align-self:flex-start;}
 .vs-tile-top{display:flex;justify-content:space-between;align-items:center;gap:8px;}
 .vs-tile-top b{font-size:14.5px;color:#0f172a;}
 .vs-tile-org{font-size:11.5px;color:#64748b;line-height:1.4;min-height:16px;}

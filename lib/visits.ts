@@ -1,5 +1,5 @@
 /**
- * 🏕 旅團探訪（v4.8.0）— 純函數，方便測試。
+ * 🏕 旅團探訪（v4.8.1）— 純函數，方便測試。
  *
  * · 幹部一入去預設只睇自己支部（跟角色），可以切換其他支部
  * · DC 出報告：揀「幾月到幾月」→ 探訪 list + 邊個幹部探咗幾多次／邊啲旅
@@ -131,14 +131,27 @@ export function visitorStats(visits: Visit[]): VisitorStat[] {
   return out.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
-/** 嗰日（同一支部）已經登記過未 —— 防止重複登記／畀方塊標「今日已登記」 */
-export function hasVisitOn(
-  visits: Visit[], troop: string, date: string, section: VisitSection | '' = '',
-): boolean {
-  return visits.some(v =>
-    String(v.troop).trim() === String(troop).trim() &&
+/**
+ * 嗰日對住嗰個旅嘅登記記錄。
+ * 一日一個旅一次 —— 同一日探同一個旅唔會登記兩次（唔分支部）。
+ * 傳 visitor 就淨係計嗰位幹部自己嘅記錄（第二個幹部同日去，可以有佢自己嗰筆）。
+ */
+export function visitsOn(
+  visits: Visit[], troop: string, date: string, visitor = '',
+): Visit[] {
+  const t = String(troop).trim();
+  const who = String(visitor).trim().toLowerCase();
+  return visits.filter(v =>
+    String(v.troop).trim() === t &&
     v.visitDate === date &&
-    (!section || !v.section || v.section === section));
+    (!who || String(v.visitorName || '').trim().toLowerCase() === who));
+}
+
+/** 嗰日已經登記過未（同一個旅；傳 visitor = 淨係睇自己嗰啲） */
+export function hasVisitOn(
+  visits: Visit[], troop: string, date: string, visitor = '',
+): boolean {
+  return visitsOn(visits, troop, date, visitor).length > 0;
 }
 
 /** 旅號排序：數字細到大 */

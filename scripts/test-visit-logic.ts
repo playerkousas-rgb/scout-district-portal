@@ -5,7 +5,7 @@
 import assert from 'node:assert';
 import {
   troopStats, coverage, visitorStats, unitsOfSection, sortUnits,
-  quarterOf, yearOf, rangePresets, parseUnitPaste, toCsv, SECTION_LABEL, KIND_LABEL, hasVisitOn,
+  quarterOf, yearOf, rangePresets, parseUnitPaste, toCsv, SECTION_LABEL, KIND_LABEL, hasVisitOn, visitsOn,
 } from '../lib/visits.ts';
 import type { ScoutUnit, Visit, VisitSection } from '../lib/types.ts';
 
@@ -93,12 +93,25 @@ check('冇填幹部名 → 歸「（未填）」，唔會靜靜咁跌咗', () =>
   assert.strictEqual(people[0].name, '（未填）');
 });
 
-check('防呆：同一日同一支部已登記過會認得出（第二日就唔算）', () => {
+check('一日一個旅一次：同一日同一個旅已登記就認得出（唔分支部）', () => {
   const visits = [visit('206', '2026-03-08', 'gh')];
-  assert.strictEqual(hasVisitOn(visits, '206', '2026-03-08', 'gh'), true);
-  assert.strictEqual(hasVisitOn(visits, '206', '2026-03-09', 'gh'), false);   // 第二日 = 新一日，清零
-  assert.strictEqual(hasVisitOn(visits, '206', '2026-03-08', 'scout'), false);
-  assert.strictEqual(hasVisitOn(visits, '82', '2026-03-08', 'gh'), false);
+  assert.strictEqual(hasVisitOn(visits, '206', '2026-03-08'), true);
+  assert.strictEqual(hasVisitOn(visits, '206', '2026-03-08', '陳ADC'), true);
+  assert.strictEqual(hasVisitOn(visits, '206', '2026-03-08', '李ADC'), false); // 第二位幹部有自己嗰筆
+  assert.strictEqual(hasVisitOn(visits, '206', '2026-03-09'), false);          // 第二日 = 新一日，清零
+  assert.strictEqual(hasVisitOn(visits, '82', '2026-03-08'), false);
+});
+
+check('一日一個旅一次：轉支部都當同一次（206 早上小童軍、下午童軍 = 同一日探咗 206）', () => {
+  const visits = [visit('206', '2026-03-08', 'gh')];
+  assert.strictEqual(hasVisitOn(visits, '206', '2026-03-08', '陳ADC'), true);
+  assert.strictEqual(visitsOn(visits, '206', '2026-03-08').length, 1);
+});
+
+check('同一日可以探 X／Y／Z 幾個旅', () => {
+  const visits = [visit('206', '2026-03-08'), visit('1222', '2026-03-08'), visit('1544', '2026-03-08')];
+  ['206', '1222', '1544'].forEach(t => assert.strictEqual(hasVisitOn(visits, t, '2026-03-08', '陳ADC'), true));
+  assert.strictEqual(visitorStats(visits)[0].count, 3);
 });
 
 check('同一旅一年可以探幾次（今月一次、下月再一次都記得晒）', () => {
@@ -106,7 +119,7 @@ check('同一旅一年可以探幾次（今月一次、下月再一次都記得�
   const st = troopStats(units, visits, 'gh').find(s => s.unit.troop === '206')!;
   assert.strictEqual(st.count, 2);
   assert.strictEqual(st.last, '2026-04-19');
-  assert.strictEqual(hasVisitOn(visits, '206', '2026-04-19', 'gh'), true);
+  assert.strictEqual(hasVisitOn(visits, '206', '2026-04-19', '陳ADC'), true);
 });
 
 check('季度／年份：由日期計', () => {

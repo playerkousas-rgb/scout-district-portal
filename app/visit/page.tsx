@@ -1,6 +1,6 @@
 'use client';
 /**
- * 🏕 旅團探訪（v4.8.0）
+ * 🏕 旅團探訪（v4.8.1）
  *
  * · 幹部一入去預設只睇自己支部（跟角色：小童軍／幼童軍／童軍 ADC），隨時切換
  * · 撳一下旅團格仔 → 填日期 → 儲存，就登記咗今次探訪
@@ -14,7 +14,7 @@ import type { ScoutUnit, Visit, VisitBoard, VisitKind, VisitSection } from '@/li
 import {
   SECTIONS, SECTION_LABEL, SECTION_EMOJI, KIND_LABEL, VISIT_KINDS,
   troopStats, coverage, visitorStats, sortUnits, rangePresets, quarterOf,
-  parseUnitPaste, toCsv, todayStr, hasVisitOn,
+  parseUnitPaste, toCsv, todayStr, hasVisitOn, visitsOn,
 } from '@/lib/visits';
 import BackLink, { BackBar } from '@/components/BackLink';
 
@@ -96,7 +96,7 @@ export default function VisitPage() {
 
       {needUpgrade && (
         <div className="info-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <h3>⚠️ 後台未升級到 v4.8.0</h3>
+          <h3>⚠️ 後台未升級到 v4.8.1</h3>
           <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.7 }}>
             請去「📢 更新 / 下載」下載最新 <code>Code.gs</code> 貼上 Apps Script →
             執行 <code>setupSheets()</code>（會建立 <code>Units</code>／<code>Visits</code> 兩張表，
@@ -201,10 +201,23 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
     return () => window.removeEventListener('beforeunload', warn);
   }, [picked.length]);
 
-  function toggle(troop: string, alreadyToday: boolean) {
+  function toggle(troop: string) {
     if (!canEdit) return;
     if (picked.includes(troop)) { setPicked(prev => prev.filter(t => t !== troop)); return; }
-    if (alreadyToday && !confirm(`${troop} 旅喺 ${date} 已經登記過一次，係咪要再加多一次？`)) return;
+
+    const label = board.units.find(u => u.troop === troop)?.label || troop;
+    // 一日一個旅一次：同一日已經登記過就唔畀再登記（要改就撳「✎ 詳細」／喺記錄度改）
+    const mine = visitsOn(board.visits, troop, date, board.me.name);
+    if (mine.length) {
+      setError(`${label} 喺 ${date} 你已經登記咗，同一日唔使登記兩次。（要改日期／加備註，撳方塊右下「✎ 詳細」）`);
+      return;
+    }
+    // 第二位幹部同一日都去咗 → 佢有佢嗰筆，你有你嗰筆，但要確認一次
+    const others = visitsOn(board.visits, troop, date);
+    if (others.length) {
+      const who = [...new Set(others.map(v => v.visitorName || '其他幹部'))].join('、');
+      if (!confirm(`${label} 喺 ${date} 已經由 ${who} 登記咗。\n你自己都有去？撳「確定」就會加你名下嗰筆。`)) return;
+    }
     setPicked(prev => [...prev, troop]);
   }
 
@@ -219,6 +232,8 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
     setSaving(true);
     const failed: string[] = [];
     for (const troop of picked) {
+      // 保險：儲存前再查一次，同一日同一個旅（同一個幹部）已經有就跳過
+      if (hasVisitOn(board.visits, troop, date, board.me.name)) continue;
       const r = await api.saveVisit(token, {
         troop, section: section || '', visitDate: date,
         kind: 'general', visitorName: board.me.name,
@@ -254,8 +269,9 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
         <div className="info-card vs-howto">
           <b>點登記</b>
           <p>
-            撳一下方塊 = <b>揀咗</b>（藍色），可以一次過揀幾個旅；撳多次可以取消。
+            撳一下方塊 = <b>揀咗</b>（藍色），同一日可以一次過揀 X、Y、Z 幾個旅；撳多次可以取消。
             揀好之後撳下面「<b>💾 儲存登記</b>」先會寫入後台 —— 未撳儲存，咩都唔會入數。
+            <b>一日一個旅淨係一次</b>：已經登記咗嗰日嘅方塊會鎖住（🔒），唔會不小心撳多次。
             日期預設今日，<b>儲存嗰日就係探訪日期</b>；聽日入返嚟就係新一日，方塊自動清零，同一個旅下個月再探再撳過就得。
           </p>
         </div>
@@ -269,27 +285,34 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
         )}
         {stats.map(st => {
           const isPicked = picked.includes(st.unit.troop);
-          const doneToday = hasVisitOn(board.visits, st.unit.troop, date, section);
+          const mineToday = hasVisitOn(board.visits, st.unit.troop, date, board.me.name);
+          const anyToday = hasVisitOn(board.visits, st.unit.troop, date);
+          const todayWho = anyToday && !mineToday
+            ? [...new Set(visitsOn(board.visits, st.unit.troop, date).map(v => v.visitorName || '其他幹部'))].join('、')
+            : '';
           return (
             <div
               key={st.unit.troop}
-              className={`vs-tile${st.visited ? ' done' : ''}${isPicked ? ' picked' : ''}${doneToday ? ' today' : ''}`}
+              className={`vs-tile${st.visited ? ' done' : ''}${isPicked ? ' picked' : ''}${anyToday ? ' today' : ''}${mineToday ? ' locked' : ''}`}
               role="button" tabIndex={0}
-              title={canEdit ? '撳一下揀／取消，最後撳「儲存登記」' : '你冇登記權限'}
-              onClick={() => toggle(st.unit.troop, doneToday)}
-              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(st.unit.troop, doneToday); } }}
+              title={!canEdit ? '你冇登記權限'
+                : mineToday ? `${date} 已經登記咗，同一日唔會登記兩次`
+                : '撳一下揀／取消，最後撳「儲存登記」'}
+              onClick={() => toggle(st.unit.troop)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(st.unit.troop); } }}
             >
               <div className="vs-tile-top">
                 <b>{st.unit.label || st.unit.troop}</b>
                 {isPicked
                   ? <span className="vs-badge pick">✔ 揀咗</span>
-                  : doneToday
-                    ? <span className="vs-badge ok">今日已登記</span>
+                  : mineToday
+                    ? <span className="vs-badge ok">🔒 呢日已登記</span>
                     : st.visited
                       ? <span className="vs-badge ok">✓ {st.count} 次</span>
                       : <span className="vs-badge no">未探</span>}
               </div>
               <div className="vs-tile-org">{st.unit.org || '—'}</div>
+              {todayWho && <div className="vs-tile-hint">呢日 {todayWho} 已探過</div>}
               <div className="vs-card-sections">
                 {SECTIONS.filter(k => String(st.unit.sections?.[k] || '').trim()).map(k => (
                   <span key={k} className={`vs-chip${section === k ? ' on' : ''}`}>
@@ -566,6 +589,14 @@ function VisitModal({ draft, board, token, onClose, onSaved, setError }: {
 
   async function save() {
     if (!d.troop) { setError('請揀旅團'); return; }
+    // 一日一個旅一次：同一日同一個幹部唔可以有兩筆（改緊舊記錄嗰筆唔計）
+    const date = d.visitDate || todayStr();
+    const who = d.visitorName || board.me.name;
+    const dup = visitsOn(board.visits, d.troop, date, who).filter(v => v.id !== d.id);
+    if (dup.length) {
+      setError(`${unit?.label || d.troop} 喺 ${date} 已經有一筆（${who}）—— 同一日唔使登記兩次，可以喺「最近登記」度改嗰筆。`);
+      return;
+    }
     setSaving(true);
     const r = await api.saveVisit(token, {
       id: d.id, troop: d.troop, section: d.section || '',
