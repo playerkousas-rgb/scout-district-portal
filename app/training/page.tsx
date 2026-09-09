@@ -35,6 +35,7 @@ export default function TrainingPage() {
   const [noticing, setNoticing] = useState(false);
   const [account, setAccount] = useState({ name: DEFAULT_FPS_ACCOUNT.name, id: DEFAULT_FPS_ACCOUNT.id, loaded: false });
   const [tab, setTab] = useState<'links' | 'setup'>('links');
+  const [showAuto, setShowAuto] = useState(false);   // 🔍 自動填好嘅資料（收埋，讀取／編輯先展開）
   const [cfg, setCfg] = useState({ districtName: '', memberPortalUrl: '', courseTemplateSet: false });
 
   async function load(s: UserSession) {
@@ -82,6 +83,7 @@ export default function TrainingPage() {
   function startEdit(l: CourseLink) {
     setEditingId(l.courseId);
     setDraft({ ...EMPTY, ...l });
+    setShowAuto(true);   // 編輯舊班：展開晒啲欄方便改
     setMsg('');
   }
   function reset() { setEditingId(''); setDraft(EMPTY); setMsg(''); }
@@ -116,6 +118,7 @@ export default function TrainingPage() {
       contact: link.contact || d.contact,
       eligibility: link.eligibility || d.eligibility,
     }));
+    setShowAuto(true);   // 讀完自動展開俾你檢查
     setMsg(`已由訓練班 Sheet 帶入「${p.courseName || ''}」資料 ✓（請檢查後儲存）`);
   }
 
@@ -154,15 +157,21 @@ export default function TrainingPage() {
     if (f.sessions.length) bits.push(`${f.sessions.length} 節`);
     let summary = `已由通告讀出${bits.join('・')} ✓（請檢查後儲存）`;
     if (f.warnings.length) summary += ` ⚠ ${f.warnings.join('；')}`;
+    setShowAuto(true);   // 讀完自動展開俾你檢查
     setMsg(summary);
   }
 
   async function save() {
     if (!session) return;
     setError(''); setMsg('');
-    if (!draft.courseId.trim() || !draft.title.trim()) { setError('課程代碼與名稱必填'); return; }
+    // 課程代碼唔使填：留空由後台自動編（gs genId_('cl')／示範版 genId('cl')）
+    if (!draft.title.trim()) {
+      setShowAuto(true);   // 名稱通常係讀取帶入；冇料就展開俾你自己填
+      setError('課程名稱必填——撳「📥 由訓練班 Sheet 讀取」／「📥 由通告網址讀取」自動帶入，或者喺「🔍 自動填好嘅資料」度自己填');
+      return;
+    }
     const r = await api.saveCourseLink(session.token, draft);
-    if (r.ok) { setMsg('已儲存 ✓'); reset(); await load(session); }
+    if (r.ok) { setMsg(`已儲存 ✓${r.data?.courseId ? `（課程代碼：${r.data.courseId}）` : ''}`); reset(); await load(session); }
     else setError(r.error || '儲存失敗');
   }
   async function remove(l: CourseLink) {
@@ -230,7 +239,7 @@ export default function TrainingPage() {
             再撳「📥 由通告網址讀取」—— 通告名／收費／名額／截止／對象／節次會由區網通告 PDF 自動讀出。
             兩邊讀完先撳儲存，唔使再人手重打。
           </li>
-          <li><b>📢 掛班上成員系統</b>：確認「啟用」✔ → 撳「＋ 開班登記」儲存。
+          <li><b>📢 掛班上成員系統</b>：確認「啟用」✔ → 撳「＋ 開班登記」儲存（課程代碼、課程名稱等都<b>唔使填</b>——代碼吉住自動編，名稱讀取自動帶入；想檢查就撳「🔍 自動填好嘅資料」展開）。
             儲存後，<b>成員系統會即時顯示呢個班，成員即可用內置報名表報名</b>；截止日一過會自動收埋。
             之後去「📜 區通告」開通告記錄（掛接呢個班 → 「⬇ 從訓練班帶入資料」連通告內文都預填埋，補編號就得）。
             通告 PDF 上載區網後，將連結貼入「通告連結 noticeUrl」並儲存，成員即可跳轉睇真通告。</li>
@@ -238,31 +247,15 @@ export default function TrainingPage() {
       </section>
 
 
-      {/* 開班 / 編輯表單 */}
+      {/* 開班 / 編輯表單 — 精簡版：常駐淨三樣（① 收表 Script ② Drive 資料夾 ③ 通告連結）＋兩個讀取掣＋儲存；
+          自動填好嘅欄收埋喺「🔍 自動填好嘅資料」，讀取／編輯自動展開檢查；課程代碼留空＝後台自動編 */}
       <section className="info-card">
         <div className="section-head">
           <div><h3>{editingId ? `編輯：${draft.title}` : '＋ 開新訓練班'}</h3></div>
           {editingId && <button className="mini-btn" onClick={reset}>取消編輯</button>}
         </div>
         <div className="account-form" style={{ flexWrap: 'wrap', display: 'flex', gap: 8 }}>
-          <input placeholder="課程代碼 courseId *" value={draft.courseId} onChange={e => set('courseId', e.target.value)} disabled={!!editingId} style={{ width: 150 }} />
-          <input placeholder="課程名稱 *" value={draft.title} onChange={e => set('title', e.target.value)} style={{ width: 220 }} />
-          <input placeholder="徽章名稱 badgeName" value={draft.badgeName || ''} onChange={e => set('badgeName', e.target.value)} style={{ width: 150 }} />
-          <input placeholder="支部 section（童軍/幼童軍…）" value={draft.section || ''} onChange={e => set('section', e.target.value)} style={{ width: 170 }} />
-          <input placeholder="課程編號 courseNo" value={draft.courseNo || ''} onChange={e => set('courseNo', e.target.value)} style={{ width: 130 }} />
-          <input placeholder="費用 fee" value={draft.fee || ''} onChange={e => set('fee', e.target.value)} style={{ width: 100 }} />
-          <input placeholder="原價 originalFee" value={draft.originalFee || ''} onChange={e => set('originalFee', e.target.value)} style={{ width: 100 }} />
-          <input placeholder="截止 deadline" value={draft.deadline || ''} onChange={e => set('deadline', e.target.value)} style={{ width: 150 }} />
-          <input placeholder="名額 quota" value={draft.quota || ''} onChange={e => set('quota', e.target.value)} style={{ width: 100 }} />
-          <input placeholder="場地 venue" value={draft.venue || ''} onChange={e => set('venue', e.target.value)} style={{ width: 150 }} />
-          <input placeholder="通告連結 noticeUrl" value={draft.noticeUrl || ''} onChange={e => set('noticeUrl', e.target.value)} style={{ width: 300 }} />
-          <input placeholder="聯絡 contact" value={draft.contact || ''} onChange={e => set('contact', e.target.value)} style={{ width: 200 }} />
-          <input placeholder="節數 sessionsText（自動帶入，可改）" value={draft.sessionsText || ''} onChange={e => set('sessionsText', e.target.value)} style={{ width: 340 }} />
-          <input placeholder="參加資格 eligibility" value={draft.eligibility || ''} onChange={e => set('eligibility', e.target.value)} style={{ width: 220 }} />
-          <input placeholder="資助說明 subsidyNote" value={draft.subsidyNote || ''} onChange={e => set('subsidyNote', e.target.value)} style={{ width: 220 }} />
-        </div>
-        <div className="account-form" style={{ flexWrap: 'wrap', display: 'flex', gap: 8, marginTop: 8 }}>
-          <input placeholder="收表 Script /exec 網址 *（CL 交嚟兩行一次過貼都得）" value={draft.scriptExecUrl || ''} onChange={e => {
+          <input placeholder="① 收表 Script /exec 網址 *（CL 交嚟兩行一次過貼都得）" value={draft.scriptExecUrl || ''} onChange={e => {
             const v = e.target.value;
             if (/[\n\t]/.test(v) || v.trim().split(/\s+/).length > 1) {
               const q = parseQuickPaste(v);
@@ -273,19 +266,48 @@ export default function TrainingPage() {
             }
             set('scriptExecUrl', v);
           }} style={{ width: 360 }} />
-          <input placeholder="該班 API Key（開班時顯示一次）" value={draft.scriptApiKey || ''} onChange={e => set('scriptApiKey', e.target.value)} style={{ width: 220 }} />
-          <input placeholder="入數紙 Drive 資料夾 ID" value={draft.driveFolderId || ''} onChange={e => set('driveFolderId', e.target.value)} style={{ width: 220 }} />
+          <input placeholder="該班 API Key（兩行貼埋會自動帶）" value={draft.scriptApiKey || ''} onChange={e => set('scriptApiKey', e.target.value)} style={{ width: 200 }} />
+          <input placeholder="② 入數紙 Drive 資料夾 ID" value={draft.driveFolderId || ''} onChange={e => set('driveFolderId', e.target.value)} style={{ width: 200 }} />
+          <input placeholder="③ 通告連結 noticeUrl（區網 PDF）" value={draft.noticeUrl || ''} onChange={e => set('noticeUrl', e.target.value)} style={{ width: 280 }} />
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" checked={String(draft.active).toUpperCase() !== 'FALSE'} onChange={e => set('active', e.target.checked ? 'TRUE' : 'FALSE')} />
             啟用
           </label>
         </div>
-        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn-sm" onClick={save}>{editingId ? '💾 儲存變更' : '＋ 開班登記'}</button>
           <button className="mini-btn" onClick={pullFromSheet} disabled={pulling || (!draft.scriptExecUrl?.trim() && !editingId)}>
             {pulling ? '讀取中…' : '📥 由訓練班 Sheet 讀取'}
           </button>
+          <button className="mini-btn" onClick={readFromNotice} disabled={noticing}>
+            {noticing ? '讀取中…' : '📥 由通告網址讀取'}
+          </button>
+          <button className="mini-btn" onClick={() => setShowAuto(v => !v)} title="名稱／收費／名額／截止等由讀取自動帶入，想檢查或手改就展開">
+            {showAuto ? '▾' : '▸'} 🔍 自動填好嘅資料
+          </button>
         </div>
+        {showAuto && (
+          <div className="account-form" style={{ flexWrap: 'wrap', display: 'flex', gap: 8, marginTop: 10, paddingTop: 10, borderTop: '1px dashed #ddd' }}>
+            <input placeholder="課程名稱 *" value={draft.title} onChange={e => set('title', e.target.value)} style={{ width: 220 }} />
+            <input placeholder="課程代碼 courseId（留空＝自動編）" value={draft.courseId} onChange={e => set('courseId', e.target.value)} disabled={!!editingId} style={{ width: 190 }} />
+            <input placeholder="徽章名稱 badgeName" value={draft.badgeName || ''} onChange={e => set('badgeName', e.target.value)} style={{ width: 150 }} />
+            <input placeholder="支部 section（童軍/幼童軍…）" value={draft.section || ''} onChange={e => set('section', e.target.value)} style={{ width: 170 }} />
+            <input placeholder="課程編號 courseNo" value={draft.courseNo || ''} onChange={e => set('courseNo', e.target.value)} style={{ width: 130 }} />
+            <input placeholder="費用 fee" value={draft.fee || ''} onChange={e => set('fee', e.target.value)} style={{ width: 100 }} />
+            <input placeholder="原價 originalFee" value={draft.originalFee || ''} onChange={e => set('originalFee', e.target.value)} style={{ width: 100 }} />
+            <input placeholder="截止 deadline" value={draft.deadline || ''} onChange={e => set('deadline', e.target.value)} style={{ width: 150 }} />
+            <input placeholder="名額 quota" value={draft.quota || ''} onChange={e => set('quota', e.target.value)} style={{ width: 100 }} />
+            <input placeholder="場地 venue" value={draft.venue || ''} onChange={e => set('venue', e.target.value)} style={{ width: 150 }} />
+            <input placeholder="聯絡 contact" value={draft.contact || ''} onChange={e => set('contact', e.target.value)} style={{ width: 200 }} />
+            <input placeholder="節數 sessionsText（自動帶入，可改）" value={draft.sessionsText || ''} onChange={e => set('sessionsText', e.target.value)} style={{ width: 340 }} />
+            <input placeholder="參加資格 eligibility" value={draft.eligibility || ''} onChange={e => set('eligibility', e.target.value)} style={{ width: 220 }} />
+            <input placeholder="資助說明 subsidyNote" value={draft.subsidyNote || ''} onChange={e => set('subsidyNote', e.target.value)} style={{ width: 220 }} />
+          </div>
+        )}
+        <p style={{ margin: '10px 0 0', fontSize: 12.5, color: '#666' }}>
+          貼上面三樣 → 兩個讀取掣各撳一次 →「🔍 自動填好嘅資料」自動展開俾你檢查 → 儲存。
+          課程代碼唔使填（吉住由後台自動編 <code>cl_…</code>）。
+        </p>
       </section>
 
       {/* 課程列表 */}
