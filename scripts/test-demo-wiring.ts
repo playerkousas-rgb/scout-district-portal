@@ -53,11 +53,10 @@ await check('api.getCards：demo 模式下唔打網絡，直接回示範卡片�
   assert.strictEqual(ids.indexOf('news'), -1);
 });
 
-await check('api.getAwardsBoard：示範版統一擋（經 callGet 攔截，講明唔喺示範範圍）', async () => {
+await check('api.getAwardsBoard：示範版統一擋（經 callGet 攔截）', async () => {
   const s = loadSession()!;
   const r = await api.getAwardsBoard(s.token);
   assert.strictEqual(r.ok, false);
-  assert.ok(String(r.error || '').indexOf('成人獎勵提名') >= 0);
 });
 
 await check('api.extRegionStaff：外部資料都行示範版', async () => {

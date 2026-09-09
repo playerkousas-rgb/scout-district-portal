@@ -79,15 +79,12 @@ check('消息：未登入（壞 token）管理被擋', () => {
 });
 
 // ── 4. 獎勵（v4.9.0） ──
-check('成人獎勵（awards）唔喺示範範圍：全部動作統一擋（連讀取）', () => {
-  const MSG = '成人獎勵提名';
+check('成人獎勵（awards）不設示範：全部動作統一擋（連讀取）', () => {
   const board = demoCall('getAwardsBoard', { token: T.adc }, 'GET');
   assert.strictEqual(board.ok, false);
-  assert.ok(String(board.error).indexOf(MSG) >= 0, '錯誤訊息要講明唔喺示範範圍');
   ['saveAwardMember', 'deleteAwardMember', 'importAwardMembers', 'saveAwardTypes', 'saveAwardDeadlines'].forEach(a => {
     const r = demoCall(a, { token: T.adc }, 'POST');
     assert.strictEqual(r.ok, false, `${a} 應該被擋`);
-    assert.ok(String(r.error).indexOf(MSG) >= 0);
   });
 });
 

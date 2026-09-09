@@ -25,7 +25,7 @@ export default function DistrictsPage() {
           <span className="demo-badge">🎭 模擬示範版</span>
           <span className="demo-entry-title">想睇下系統係咩樣？入嚟試下（唔使帳戶）</span>
         </div>
-        <p className="demo-entry-desc">完整示範資料、全部功能任試，改動只存喺你嘅瀏覽器，唔會影響任何正式後台。以助理區總監（ADC）身份進入，示範版權限全開（成人獎勵提名唔喺示範範圍）。</p>
+        <p className="demo-entry-desc">完整示範資料、全部功能任試，改動只存喺你嘅瀏覽器，唔會影響任何正式後台。以助理區總監（ADC）身份進入，示範版權限全開。</p>
         <div className="demo-entry-roles">
           {DEMO_IDENTITIES.map(r => (
             <button

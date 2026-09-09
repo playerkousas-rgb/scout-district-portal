@@ -119,11 +119,11 @@ function visibleCards(u: DemoUser): AnyObj[] {
 }
 
 /**
- * 🎭 示範版範圍：成人獎勵提名（awards）唔喺示範範圍 — 全部動作統一咁回應。
- * （正式系統先有；呢度連讀取都擋，等 /awards 頁直接顯示訊息。）
+ * 🎭 示範版：成人獎勵提名（awards）不設示範 — 全部動作擋。
+ * （正常情況下 /awards 已被卡片門禁 redirect 返主控台，呢個訊息只係後備。）
  */
 function awardsNotInDemo(): ApiResultLike {
-  return fail('🎭 示範版未包含「成人獎勵提名」功能 — 此功能只喺正式系統提供。');
+  return fail('此功能不設示範。');
 }
 
 // ───────────────────────── 主入口 ─────────────────────────

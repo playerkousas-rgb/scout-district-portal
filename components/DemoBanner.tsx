@@ -67,7 +67,7 @@ export default function DemoBanner() {
       <div className="demo-banner-inner">
         <span className="demo-badge">🎭 模擬示範版</span>
         <span className="demo-who">示範身份：{who}</span>
-        <span className="demo-note">全部資料屬<b>虛構示範</b>，改動只存喺你嘅瀏覽器，唔會影響任何正式系統（示範版<b>權限全開</b>；成人獎勵提名唔喺示範範圍）</span>
+        <span className="demo-note">全部資料屬<b>虛構示範</b>，改動只存喺你嘅瀏覽器，唔會影響任何正式系統（示範版<b>權限全開</b>）</span>
         <span className="demo-actions">
           <button type="button" className="demo-chip" onClick={resetData} title="還原出廠示範資料">↺ 重設示範資料</button>
           <button type="button" className="demo-chip demo-exit" onClick={leave}>✕ 離開示範版</button>
