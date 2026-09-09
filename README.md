@@ -230,6 +230,24 @@
 `/training` 每班一個「💳 收費 QR」掣：用區會 FPS 戶口 + 學費 + 課程編號即時生成 → 「儲存 QR 到此班」寫入 `CourseLinks`（`fpsQrPayload` 等 6 欄）→ 成員系統 `listCourseLinks` 就攞到，未交費嘅申請人可以直接掃。
 member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handshake.md`](docs/member-gs-handshake.md)。
 
+## 🎓 訓練班開班：收表 Script 模版下載 + 教學（v4.11.0）
+
+開一個訓練班 = 1 張專屬 Google Sheet + 1 份收表 Script（`gs/Code.gs.course.js`）+ 1 個 Drive 入數紙資料夾。
+全部步驟喺「🎓 訓練班管理」頁（`/training`）頂部有教學 + 一鍵下載掣（`public/downloads/Code.gs.course.js.txt`）。
+
+| 步驟 | 做咩 |
+|---|---|
+| 1. 下載模版 | `/training` 撳「📥 下載收表 Script 模版」 |
+| 2. 開空白 Sheet | 喺 Google Drive 開一張全新 Google Sheet（該班專用） |
+| 3. 貼上模版 | 擴充功能 → Apps Script → 整份覆蓋貼上 → 儲存 |
+| 4. RUN SETUP | 執行 `setupCourseSheet()` → 自動建齊分頁、產生該班 API Key（只顯示一次）、自動建立「入數紙」Drive 資料夾（彈窗顯示網址＋ID） |
+| 5. 部署 | 部署 → 網頁應用程式（執行身分：我自己；存取：任何人）→ 攞 `/exec` 網址 |
+| 6. 開班登記 | 返 `/training` 填課程資料 + 貼上 `/exec` 網址、API Key、Drive 資料夾 ID |
+
+**儲存（啟用）即完成 SET UP**，同時該班通告會**自動掛上成員系統**：`CourseLinks.active=TRUE` + 未過截止日 → 成員系統 `listCourseLinks` 即刻顯示該班（連 `noticeUrl` 通告連結），成員即可報名；截止日一過自動收埋。報名 → 主系統 `submitCourseReg_` 轉發去該班 `addReg_`，寫入「表格回應」+ 入數紙存入該班 Drive 資料夾；區職員喺 `/training` 批核（轉發 `listRegs_` / `setRegStatus_`）。
+
+> 改動咗模版 `gs/Code.gs.course.js` 之後，記得 `cp gs/Code.gs.course.js public/downloads/Code.gs.course.js.txt` 同步下載檔。
+
 ## 📚 文件索引
 
 | 文件 | 內容 |

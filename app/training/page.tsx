@@ -103,6 +103,42 @@ export default function TrainingPage() {
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}
 
+      {/* 開班前：下載收表 Script 模版 + 教學 */}
+      <section className="info-card" style={{ borderLeft: '4px solid #7c3aed' }}>
+        <div className="section-head">
+          <div><h3>🚀 開班前：下載收表 Script 模版 + 教學</h3></div>
+        </div>
+        <p style={{ margin: '4px 0 12px', fontSize: 13.5 }}>
+          每個訓練班要 1 份<b>獨立</b>嘅收表 Script（貼喺該班自己嗰張 Google Sheet 嘅 Apps Script 度）。
+          下載模版 → 開空白 Sheet → 執行 SETUP → 部署 → 返嚟呢度貼上 URL 同資料夾位置，就完成 SET UP；
+          儲存（啟用）後，<b>該班通告會即時掛上成員系統</b>俾成員報名。
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 14 }}>
+          <a className="btn-sm" href="/downloads/Code.gs.course.js.txt" download="Code.gs.course.js" style={{ textDecoration: 'none', display: 'inline-block' }}>
+            📥 下載收表 Script 模版（Code.gs.course.js）
+          </a>
+          <a className="mini-btn" href="/downloads/Code.gs.course.js.txt" target="_blank" rel="noreferrer" style={{ textDecoration: 'none', display: 'inline-block' }}>👀 預覽模版內容</a>
+        </div>
+        <ol style={{ margin: 0, paddingLeft: 22, fontSize: 13.5, lineHeight: 1.9 }}>
+          <li><b>📥 下載模版</b>：撳上面「下載收表 Script 模版」。</li>
+          <li><b>📄 開空白 Sheet</b>：喺 Google Drive 開一張全新嘅 Google Sheet（該班專用）。</li>
+          <li><b>🧩 貼上模版</b>：擴充功能 → Apps Script → 將模版<b>整份覆蓋貼上</b> → 儲存。</li>
+          <li><b>⚙️ RUN SETUP</b>：執行 <code>setupCourseSheet()</code>（首次授權：Review permissions → Advanced → Allow）。
+            會自動建立齊所有分頁、產生該班 <b>API Key</b>（只顯示一次，即刻複製）、並喺 Drive 建立「入數紙」資料夾（彈窗會顯示<b>網址 + ID</b>）。</li>
+          <li><b>🚀 部署</b>：部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：任何人）→ 複製 <code>/exec</code> 網址。</li>
+          <li><b>📝 返嚟開班登記</b>：喺下面表單填課程資料，再貼上：
+            <ul style={{ margin: '4px 0', paddingLeft: 22 }}>
+              <li><b>收表 Script /exec 網址</b> → 「收表 Script /exec 網址」欄</li>
+              <li><b>該班 API Key</b> → 「該班 API Key」欄</li>
+              <li><b>入數紙 Drive 資料夾 ID</b> → 「入數紙 Drive 資料夾 ID」欄</li>
+            </ul>
+          </li>
+          <li><b>📢 掛通告上成員系統</b>：填「通告連結 noticeUrl」＋確認「啟用」✔ → 撳「＋ 開班登記」儲存。
+            儲存後，<b>成員系統會即時顯示呢個班（連通告連結），成員即可報名</b>；截止日一過會自動收埋。</li>
+        </ol>
+      </section>
+
+
       {/* 開班 / 編輯表單 */}
       <section className="info-card">
         <div className="section-head">

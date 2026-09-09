@@ -5,6 +5,15 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.11.0 — 🎓 訓練班開班教學 + 收表 Script 模版下載</h3>
+        <ul>
+          <li>📥 <b>「🎓 訓練班管理」頁頂新增「開班前：下載收表 Script 模版 + 教學」</b>：一撳下載該班專用收表 Script（<code>Code.gs.course.js</code>），照住 7 步做 — 下載 → 開空白 Sheet → 貼上 → RUN SETUP（<code>setupCourseSheet()</code>）→ 部署 → 返嚟貼上 <code>/exec</code> 網址 + API Key + Drive 資料夾 ID → 儲存即完成</li>
+          <li>📢 <b>儲存（啟用）即自動掛通告上成員系統</b>：<code>active=TRUE</code> 且未過截止日，成員系統 <code>listCourseLinks</code> 即刻顯示該班（連通告連結），成員即可報名；截止日一過自動收埋</li>
+          <li>📁 <b>收表 Script 模版加強</b>：<code>setupCourseSheet()</code> 彈窗而家除咗顯示入數紙資料夾網址，仲會一併顯示<b>資料夾 ID</b>，方便直接貼落「入數紙 Drive 資料夾 ID」欄</li>
+          <li>ℹ️ 純前端 + 模版更新，<b>唔使換主後台 Code.gs</b>（後台 health check 版本維持不變）；改咗模版後用 <code>cp gs/Code.gs.course.js public/downloads/Code.gs.course.js.txt</code> 同步下載檔</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.10.0 — 🏢 旅團探訪報告改做總會格式（一鍵出 Excel 交總會）</h3>
         <ul>
           <li>🏢 <b>「📊 探訪報告」頂頂新增「總會季度匯報」</b>：跟香港童軍總會官方「<b>區職員探訪區內旅團匯報</b>」表格 — 標題、期間（例如 2026年1月-3月）、區會、旅團總數 + 八欄（旅號／支部／與旅領袖會面／探訪日期／探訪方式／區職員探訪人數／區已經提供之支援之項目／地域-總會需要跟進之項目），<b>一鍵匯出 .xlsx 就可以直接交總會</b>，唔使再逐格抄</li>
