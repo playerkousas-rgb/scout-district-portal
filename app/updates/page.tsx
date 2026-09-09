@@ -5,6 +5,15 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>📥 舊制開班：通告網址自動讀料（唔使換後台）</h3>
+        <ul>
+          <li>📥 <b>「🎓 訓練班管理」加「由通告網址讀取」</b>：貼上區網通告 PDF 連結一撳，通告名／收費（連原價）／名額／截止／參加資格／節次／場地／查詢聯絡自動填好——職員唔使再對住通告逐格打字</li>
+          <li>🔗 <b>開班登記淨貼三樣</b>：收表 <code>/exec</code>＋Key（CL 交嚟兩行一次過貼都識自動分開）＋入數紙資料夾＋通告連結 → Sheet 讀取＋通告讀取各撳一次 → 檢查 → 儲存即掛上成員系統</li>
+          <li>🧾 帖文頁連結都得（會自動跟入面條 PDF）；掃瞄圖 PDF／讀唔到嘅欄會逐項警告，唔會死填。通告編號讀唔到會由檔名（例如 <code>2607.pdf</code>）估</li>
+          <li>ℹ️ 純前端＋新 <code>/api/notice</code>（伺服器抓 PDF 解析，唔使再部署 Apps Script，health check 版本不變）。member-portal <b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.15.0 — 🛡 寫入防呆：rev 樂觀鎖＋一次過儲存</h3>
         <ul>
           <li>🛡 <b>十個職員同時改都唔撞爛</b>：班 Sheet 加隱藏 <code>_Sync</code> 版本號；讀全文帶 <code>rev</code>，儲存帶返 <code>baseRev</code>——有人快咗一步就唔寫，直接話你邊個幾時改過，叫你重讀再存</li>
