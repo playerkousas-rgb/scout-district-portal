@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.13.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.14.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -129,6 +129,8 @@
  *   saveCircular／deleteCircular／setCircularStatus（circulars 卡 edit 權限）
  *   pullCourseProfile（canCourse）  由訓練班 Script 讀 getCourseProfile，開班自動填表
  * courseId 掛接 CourseLinks：附帶該班名額／已報／截止 snapshot。
+ * v4.14.0 新制直入：區系統填設定 → createCourseSheet 自動複製班 Sheet＋寫入 →
+ * pushCourseSetup 雙向同步 → pullCourseSheetRaw 讀全文 → 12 張網頁列印。
  * 區網 PDF 連結回填 CourseLinks.noticeUrl（成員系統訓練班自動跳轉睇真通告）。
  * Config：MEMBER_PORTAL_URL（通告「報名辦法」成員系統報名連結）。
  *
@@ -298,7 +300,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.13.0',
+      version: '4.14.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -444,6 +446,10 @@ function doPost(e) {
       case 'saveCourse':           return json(saveCourse_(b.token, b.course));
       case 'deleteCourse':         return json(deleteCourse_(b.token, b.courseId));
       case 'pullCourseProfile':    return json(pullCourseProfile_(b.token, b));
+      case 'createCourseSheet':    return json(createCourseSheet_(b.token, b));
+      case 'pushCourseSetup':      return json(pushCourseSetup_(b.token, b));
+      case 'pullCourseSheetRaw':   return json(pullCourseSheetRaw_(b.token, b));
+      case 'getCourseSetup':       return json(getCourseSetup_(b.token, b.courseId));
 
       // ---------- 區通告 ----------
       case 'saveCircular':         return json(saveCircular_(b.token, b.circular || {}));
@@ -629,6 +635,8 @@ function getConfig_() {
     budgetSheetUrl: getConfigValue_('BUDGET_SHEET_URL') || '',
     // v4.12.0 區通告：成員系統網址（通告「報名辦法」報名連結用）
     memberPortalUrl: getConfigValue_('MEMBER_PORTAL_URL') || '',
+    // v4.14.0 新制直入：訓練班總模版有冇設定（CourseLinks.sheetId 班先有後端直讀）
+    courseTemplateSet: !!String(getConfigValue_('COURSE_TEMPLATE_ID') || '').trim(),
   };
 }
 
@@ -3177,6 +3185,8 @@ function getCourseLinks_(token) {
     o.scriptExecUrl = courseExecUrl_(r);
     o.scriptApiKey  = courseApiKey_(r);
     o.driveFolderId = r.driveFolderId || '';
+    o.sheetId = r.sheetId || '';                       // v4.14.0 新制直入：後端班 Sheet ID
+    o.hasSetup = !!String(r.setupJson || '').trim();   // 有冇儲存過直入設定（JSON 本體用 getCourseSetup 攞）
     o.apiBase = o.scriptExecUrl;  // 相容舊前端
     o.apiKey  = o.scriptApiKey;
     o.active = String(r.active).toUpperCase() !== 'FALSE';
@@ -3217,6 +3227,10 @@ function saveCourseLink_(token, link) {
 
   // 每班收費 FPS QR（v4.3.0）：前端只會喺「儲存 QR」時帶 fpsQrPayload；
   // 舊前端／未帶欄位時唔掂已儲存嘅 QR（undefined = 保留），帶空字串 = 移除。
+  // v4.14.0 新制直入：後端 Sheet ID＋設定 JSON（undefined = 保留；空字串 = 清除）
+  if (link.sheetId !== undefined) row.sheetId = String(link.sheetId || '').trim();
+  if (link.setupJson !== undefined) row.setupJson = String(link.setupJson || '');
+
   if (link.fpsQrPayload !== undefined) {
     var payload = String(link.fpsQrPayload || '').trim();
     row.fpsQrPayload = payload;
@@ -3273,7 +3287,177 @@ function pullCourseProfile_(token, b) {
   } catch (e) { return err('讀取訓練班資料失敗：' + e); }
 }
 
-// ===================== 訓練班：公開報名（轉發去該班 Script） =====================
+// ===================== 新制直入：自動建班 Sheet＋雙向同步（v4.14.0） =====================
+// ADC 喺區系統填成份開班設定 → 區後台由總模版複製班 Sheet＋寫入 → 之後雙向同步＋網頁列印。
+// 總模版：開一張空白 Sheet 跑一次訓練班模版 setupCourseSheet()，將試算表 ID 填入 Config
+// COURSE_TEMPLATE_ID（新班放邊個 Drive 資料夾：COURSE_FOLDER_ID，留空 = 根目錄）。
+// 複製出嚟嘅表自帶收表 Script 碼（同帳戶），要收報名嗰陣部署一次就得；ADC 呢邊讀寫
+// 唔經 /exec，直接 openById（快＋唔使部署）。人手舊班（冇 sheetId）只讀唔寫。
+
+/** 搵 CourseLink（by courseId） */
+function courseLinkById_(courseId) {
+  return readSheet_(SHEET.COURSE_LINKS).filter(function (x) {
+    return String(x.courseId || '').trim() === String(courseId || '').trim();
+  })[0] || null;
+}
+
+/** 將 SetupCell[] 寫入指定試算表（tab／row／col 逐格寫；冇嗰頁就 skip） */
+function applySetupCells_(ss, cells) {
+  var applied = 0, skipped = [];
+  (cells || []).forEach(function (c) {
+    if (!c || !c.tab || !c.row || !c.col) return;
+    var sh = ss.getSheetByName(String(c.tab));
+    if (!sh) { if (skipped.indexOf(c.tab) < 0) skipped.push(c.tab); return; }
+    sh.getRange(Number(c.row), Number(c.col)).setValue(c.value === undefined ? '' : c.value);
+    applied++;
+  });
+  return { applied: applied, skippedTabs: skipped };
+}
+
+/**
+ * 自動建班 Sheet：由總模版複製 → 寫入設定 →（選填）分享畀 CL → 開班登記。
+ * b: { link, setup, cells, clEmail }（link = CourseLink 摘要，前端由設定計好）
+ */
+function createCourseSheet_(token, b) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  b = b || {};
+  var setup = b.setup || {};
+  var title = String(setup.courseName || (b.link || {}).title || '').trim();
+  if (!title) return err('課程名稱（courseName）必填');
+  var templateId = String(getConfigValue_('COURSE_TEMPLATE_ID') || '').trim();
+  if (!templateId) return err('未設定訓練班總模版：請開一張空白 Google Sheet 跑一次訓練班模版 setupCourseSheet()，再將試算表 ID 填入 Config COURSE_TEMPLATE_ID');
+  var folder = null;
+  var folderId = String(getConfigValue_('COURSE_FOLDER_ID') || '').trim();
+  try {
+    if (folderId) folder = DriveApp.getFolderById(folderId);
+  } catch (e) { folder = null; }
+  var copy;
+  try {
+    copy = folder
+      ? DriveApp.getFileById(templateId).makeCopy('【訓練班】' + title, folder)
+      : DriveApp.getFileById(templateId).makeCopy('【訓練班】' + title);
+  } catch (e) { return err('複製總模版失敗：' + e + '（請檢查 COURSE_TEMPLATE_ID／COURSE_FOLDER_ID）'); }
+  var sheetId = copy.getId();
+  var applied = { applied: 0, skippedTabs: [] };
+  try {
+    applied = applySetupCells_(SpreadsheetApp.openById(sheetId), b.cells || []);
+  } catch (e) { return err('寫入班 Sheet 失敗：' + e); }
+  // 分享畀班領導人（失敗唔阻住開班，只係回 warning）
+  var shareWarning = '';
+  var clEmail = String(b.clEmail || setup.clEmail || '').trim();
+  if (clEmail) {
+    try { copy.addEditor(clEmail); }
+    catch (e) { shareWarning = '自動分享畀 ' + clEmail + ' 失敗（請人手分享）：' + e; }
+  }
+  // 開班登記（沿用 saveCourseLink_，加 sheetId＋setupJson）
+  var link = b.link || {};
+  link.title = link.title || title;
+  link.courseId = String(link.courseId || setup.courseId || '').trim();
+  link.sheetId = sheetId;
+  link.setupJson = JSON.stringify(setup);
+  var saved = saveCourseLink_(token, link);
+  if (!saved.ok) return err('班 Sheet 已建立（' + sheetId + '），但開班登記失敗：' + saved.error + '（請人手喺訓練班管理補登記＋貼上 Sheet ID）');
+  return ok({
+    created: true, courseId: (saved.data && saved.data.courseId) || link.courseId, sheetId: sheetId,
+    sheetUrl: 'https://docs.google.com/spreadsheets/d/' + sheetId,
+    cellsApplied: applied.applied, skippedTabs: applied.skippedTabs,
+    sharedTo: shareWarning ? '' : clEmail, shareWarning: shareWarning,
+  });
+}
+
+/**
+ * 推送設定：將區系統嘅設定寫返入班 Sheet（direct openById，唔經 /exec）。
+ * b: { courseId, setup, cells }。只限自動建嘅班（有 sheetId）。
+ */
+function pushCourseSetup_(token, b) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  b = b || {};
+  var link = courseLinkById_(b.courseId);
+  if (!link) return err('找不到此訓練班（courseId）');
+  var sheetId = String(link.sheetId || '').trim();
+  if (!sheetId) return err('呢班係人手建表，冇後端 Sheet ID（新制推送只限區系統自動建嘅班）');
+  var applied;
+  try {
+    applied = applySetupCells_(SpreadsheetApp.openById(sheetId), b.cells || []);
+  } catch (e) { return err('寫入班 Sheet 失敗：' + e); }
+  if (b.setup) {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSE_LINKS);
+    var idx = rowIndexByCol_(sh, 'courseId', String(b.courseId).trim());
+    if (idx > 0) setCellByHeader_(sh, idx, 'setupJson', JSON.stringify(b.setup));
+  }
+  return ok({ pushed: true, courseId: String(b.courseId).trim(), sheetId: sheetId, cellsApplied: applied.applied, skippedTabs: applied.skippedTabs });
+}
+
+/** 由試算表 ID 直接 dump 成份 raw（同訓練班 Script getCourseSheetRaw 同一形狀） */
+function dumpCourseSheetRaw_(ss) {
+  var dump = function (name) {
+    var sh = ss.getSheetByName(name);
+    return sh ? sh.getDataRange().getValues() : [];
+  };
+  var pw = [];
+  var ps = ss.getSheetByName('參數');
+  if (ps) { try { pw = ps.getRange('W1:X5').getValues(); } catch (e) { pw = []; } }
+  return {
+    input01: dump('Input01 訓練班預算'), input02: dump('Input02 訓練班資料'),
+    input03: dump('Input03 時間表'), input04: dump('Input04_Print支出表'),
+    resp: dump('表格回應'), paramsWX: pw,
+    notice: dump('Print_通告'), accept: dump('Print_接納通知書'),
+    finance: dump('Print_財政預算'), completion: dump('Print_訓練班完成報告'),
+    cert: dump('Print_領取證書紀錄'), subsidy: dump('Print_總會資助計劃'),
+    pulledAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * 讀返班 Sheet 全文：有 /exec 就經訓練班 Script，冇就 direct openById。
+ * b: { courseId } 或直接 { scriptExecUrl, scriptApiKey }。
+ */
+function pullCourseSheetRaw_(token, b) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  b = b || {};
+  var execUrl = String(b.scriptExecUrl || b.apiBase || '').trim();
+  var apiKey = String(b.scriptApiKey || b.apiKey || '').trim();
+  var sheetId = '';
+  if ((!execUrl || !apiKey) && b.courseId) {
+    var link = courseLinkById_(b.courseId);
+    if (link) {
+      if (!execUrl) execUrl = courseExecUrl_(link);
+      if (!apiKey) apiKey = courseApiKey_(link);
+      sheetId = String(link.sheetId || '').trim();
+    }
+  }
+  if (execUrl) {
+    try {
+      var resp = UrlFetchApp.fetch(execUrl, {
+        method: 'post', contentType: 'application/json',
+        payload: JSON.stringify({ action: 'getCourseSheetRaw', apiKey: apiKey }),
+        muteHttpExceptions: true,
+      });
+      var r = {};
+      try { r = JSON.parse(resp.getContentText()); } catch (e) { r = {}; }
+      if (!r.ok) return err((r && r.error) || '讀取班 Sheet 失敗（HTTP ' + resp.getResponseCode() + '）');
+      return ok(r.data || {});
+    } catch (e) { return err('讀取班 Sheet 失敗：' + e); }
+  }
+  if (sheetId) {
+    try {
+      return ok(dumpCourseSheetRaw_(SpreadsheetApp.openById(sheetId)));
+    } catch (e) { return err('直接讀取班 Sheet 失敗：' + e); }
+  }
+  return err('呢班未設定收表 Script 網址，亦冇後端 Sheet ID（請先貼上 /exec 或用新制自動建表）');
+}
+
+/** 攞返上次儲存嘅開班設定（setupJson） */
+function getCourseSetup_(token, courseId) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  var link = courseLinkById_(courseId);
+  if (!link) return err('找不到此訓練班（courseId）');
+  var setup = null;
+  try { setup = link.setupJson ? JSON.parse(link.setupJson) : null; } catch (e) { setup = null; }
+  return ok({ courseId: String(courseId).trim(), sheetId: String(link.sheetId || ''), setup: setup });
+}
+
+// ===================== 訓練班：公開報名（轉發去該班 Script） ======================
 
 function submitCourseReg_(b) {
   if (!isFeature_('course')) return err('服務暫未開放');
@@ -4584,6 +4768,8 @@ function blueprint_() {
       ['ACTIVITY_SCRIPT_URL', '', '【活動知會】外部收表 Script（留空=寫入本表）'],
       ['ACTIVITY_SCRIPT_APIKEY', '', ''],
       ['MEMBER_PORTAL_URL', '', '成員系統網址（通告「報名辦法」＋訓練班報名連結用；例 https://xxx.vercel.app）'],
+      ['COURSE_TEMPLATE_ID', '', '【新制直入】訓練班總模版試算表 ID（空白 Sheet 跑一次訓練班模版 setupCourseSheet，貼 ID 入嚟；自動建班 Sheet 用）'],
+      ['COURSE_FOLDER_ID', '', '【新制直入】新班 Sheet 放邊個 Drive 資料夾 ID（留空 = 根目錄）'],
     ] },
 
     { name: SHEET.SYSTEM, rows: [
@@ -4701,7 +4887,8 @@ function blueprint_() {
         'scriptExecUrl', 'scriptApiKey', 'driveFolderId',
         'apiBase', 'apiKey',
         'active', 'createdAt',
-        'fpsQrPayload', 'fpsAmount', 'fpsReference', 'fpsAccountName', 'fpsAccountNumber', 'fpsUpdatedAt'],
+        'fpsQrPayload', 'fpsAmount', 'fpsReference', 'fpsAccountName', 'fpsAccountNumber', 'fpsUpdatedAt',
+        'sheetId', 'setupJson'],
     ] },
 
     { name: SHEET.CIRCULARS, rows: [

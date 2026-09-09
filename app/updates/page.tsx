@@ -5,6 +5,15 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.14.0 — 🆕 新制直入試驗：區系統填設定＋自動建班 Sheet＋12 張網頁列印</h3>
+        <ul>
+          <li>🆕 <b>訓練班管理加「新制直入」分頁</b>（同舊制並存）：成份開班設定（Input01／02／03＋通告人手格）喺區系統填，撳掣即由<b>總模版自動複製</b>班 Sheet＋寫入＋開班登記，仲可以自動分享畀班領導人——<b>連建表都慳返</b></li>
+          <li>🔄 <b>雙向同步</b>：呢邊改 → 推送返入班 Sheet；職員喺 Sheet 改（名單／實支／證書）→ 呢邊「由班 Sheet 重讀」即時睇返。舊制人手班睇得＋印得（只讀）</li>
+          <li>🖨 <b>12 張列印全部網頁版</b>：通告（複用傳統版式＋FPS QR）／取錄／合格／學員／出席／接納通知書／班職員／收支／財政預算／總會資助／完成報告／領取證書——直接列印 PDF，唔使開 Sheet</li>
+          <li>⚠️ 要換新 <code>Code.gs</code>（v4.14.0）→ <code>setupSheets()</code>（自動補 CourseLinks 兩欄＋總模版 Config）→ 重新部署；另開一張空白 Sheet 跑訓練班模版 <code>setupCourseSheet()</code> 做<b>總模版</b>，ID 填入 Config <code>COURSE_TEMPLATE_ID</code>。member-portal <b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.13.0 — 📘 訓練班工作簿跟足開班文件格式＋ CL 填一次</h3>
         <ul>
           <li>📘 <b>收表 Script 模版重寫做足全本工作簿</b>：Input01 預算（8 大開支分類＋公式）、Input02 資料（黃格自動帶入＋✓上通告剔格＋20 個預設職位）、Input03 時間表、Input04 支出表、12 張 Print（通告／取錄／合格／學員／出席／接納／收支／班職員／資助／完成報告／財政預算／領取證書，全部自動由 Input／報名數據帶入）、表格回應 36 欄、參數 22 欄（110 項專章＋區會＋地域＋職位等）—— 分頁名／欄位／行位跟足實物，日後其他系統接入都認得</li>
@@ -225,7 +234,7 @@ export default function UpdatesPage() {
       </div>
       <div className="info-card">
         <h3>後台程式碼</h3>
-        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.13.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
+        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.14.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
       </div>
     </>
   );

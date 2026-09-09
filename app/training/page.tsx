@@ -6,6 +6,7 @@ import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { CourseLink, CourseProfile, UserSession } from '@/lib/types';
 import CourseFpsBlock, { type CourseFpsResult } from '@/components/CourseFpsBlock';
+import CourseSetupTab from '@/components/CourseSetupTab';
 import { DEFAULT_FPS_ACCOUNT, normalizeFpsId } from '@/lib/fps';
 import BackLink, { BackBar } from '@/components/BackLink';
 
@@ -31,6 +32,8 @@ export default function TrainingPage() {
   const [fpsSaving, setFpsSaving] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [account, setAccount] = useState({ name: DEFAULT_FPS_ACCOUNT.name, id: DEFAULT_FPS_ACCOUNT.id, loaded: false });
+  const [tab, setTab] = useState<'links' | 'setup'>('links');
+  const [cfg, setCfg] = useState({ districtName: '', memberPortalUrl: '', courseTemplateSet: false });
 
   async function load(s: UserSession) {
     setLoading(true); setError('');
@@ -52,6 +55,11 @@ export default function TrainingPage() {
         const name = String(r.data?.fpsAccountName ?? '').trim();
         const id = normalizeFpsId(r.data?.fpsAccountNumber);
         setAccount({ name: name || DEFAULT_FPS_ACCOUNT.name, id: id || DEFAULT_FPS_ACCOUNT.id, loaded: true });
+        setCfg({
+          districtName: String(r.data?.districtName ?? ''),
+          memberPortalUrl: String(r.data?.memberPortalUrl ?? ''),
+          courseTemplateSet: !!r.data?.courseTemplateSet,
+        });
       } catch {
         if (!cancelled) setAccount(a => ({ ...a, loaded: true }));
       }
@@ -137,6 +145,15 @@ export default function TrainingPage() {
       <BackLink />
       <h1 className="page-title">🎓 訓練班管理</h1>
       <p className="page-sub">開班登記：ADC 下載模版交班領導人（CL）開工作簿填資料＋做通告 → 區總監批 → 你喺呢度一鍵讀取開班（唔使重打）。每班 1 張專屬 Sheet + 1 份 Script + 1 個 Drive 資料夾。</p>
+      <div className="no-print" style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <button className={tab === 'links' ? 'btn-sm' : 'mini-btn'} onClick={() => setTab('links')}>📋 開班登記（舊制 Sheet 先行）</button>
+        <button className={tab === 'setup' ? 'btn-sm' : 'mini-btn'} onClick={() => setTab('setup')}>🆕 新制直入＋網頁列印（試驗）</button>
+      </div>
+      {tab === 'setup' ? (
+        <CourseSetupTab session={session} links={links} reloadLinks={() => load(session)}
+          districtName={cfg.districtName || '童軍區'} fpsAccount={account}
+          memberPortalUrl={cfg.memberPortalUrl} courseTemplateSet={cfg.courseTemplateSet} />
+      ) : (<>
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}
 
@@ -273,6 +290,7 @@ export default function TrainingPage() {
           </table>
         )}
       </section>
+      </>)}
       <BackBar />
     </>
   );

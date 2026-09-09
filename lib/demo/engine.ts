@@ -11,6 +11,7 @@
 
 import {
   freshDemoDb, demoUserFor, demoRoomEvents, demoBudget, demoCourseProfile,
+  demoCourseSetup, demoCourseSheetRaw,
   DEMO_ORG_GROUPS, DEMO_STAFF_ROWS, DEMO_HKSA_COUNCIL, DEMO_HKSA_DEPTS,
   DEMO_TOKEN, type DemoDb, type DemoUser,
 } from './seed.ts';
@@ -630,6 +631,56 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const execUrl = String(payload.scriptExecUrl || payload.apiBase || '').trim();
       if (!execUrl && !payload.courseId) return fail('缺少訓練班 Script 網址（scriptExecUrl）');
       return ok(demoCourseProfile());
+    }
+    // ── 新制直入（v4.14.0） ──
+    case 'createCourseSheet': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const setup = (payload.setup || {}) as AnyObj;
+      const link = (payload.link || {}) as AnyObj;
+      const title = String(setup.courseName || link.title || '').trim();
+      if (!title) return fail('課程名稱（courseName）必填');
+      const id = String(link.courseId || setup.courseId || '').trim() || genId('cl');
+      const sheetId = 'demo-sheet-' + id;
+      const row: AnyObj = {
+        ...link, courseId: id, title: link.title || title, sheetId,
+        setupJson: JSON.stringify(setup), active: 'TRUE', createdAt: nowIso(),
+      };
+      const ix = d.courseLinks.findIndex(x => x.courseId === id);
+      if (ix >= 0) d.courseLinks[ix] = { ...d.courseLinks[ix], ...row };
+      else d.courseLinks.unshift(row);
+      persistDb();
+      return ok({
+        created: true, courseId: id, sheetId,
+        sheetUrl: 'https://docs.google.com/spreadsheets/d/' + sheetId,
+        cellsApplied: Array.isArray(payload.cells) ? payload.cells.length : 0,
+        skippedTabs: [], sharedTo: String(payload.clEmail || setup.clEmail || ''), shareWarning: '',
+      });
+    }
+    case 'pushCourseSetup': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const row = d.courseLinks.find(x => x.courseId === payload.courseId);
+      if (!row) return fail('找不到此訓練班（courseId）');
+      if (!row.sheetId) return fail('呢班係人手建表，冇後端 Sheet ID（新制推送只限區系統自動建嘅班）');
+      if (payload.setup) row.setupJson = JSON.stringify(payload.setup);
+      persistDb();
+      return ok({
+        pushed: true, courseId: row.courseId, sheetId: row.sheetId,
+        cellsApplied: Array.isArray(payload.cells) ? payload.cells.length : 0, skippedTabs: [],
+      });
+    }
+    case 'pullCourseSheetRaw': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const execUrl = String(payload.scriptExecUrl || payload.apiBase || '').trim();
+      if (!execUrl && !payload.courseId) return fail('缺少訓練班 Script 網址（scriptExecUrl）');
+      return ok(demoCourseSheetRaw());
+    }
+    case 'getCourseSetup': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const row = d.courseLinks.find(x => x.courseId === payload.courseId);
+      if (!row) return fail('找不到此訓練班（courseId）');
+      let setup: AnyObj | null = null;
+      try { setup = row.setupJson ? JSON.parse(row.setupJson) : null; } catch { setup = null; }
+      return ok({ courseId: row.courseId, sheetId: row.sheetId || '', setup });
     }
 
     // ── 區通告 ──

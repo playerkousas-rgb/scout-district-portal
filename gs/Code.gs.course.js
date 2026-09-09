@@ -1319,6 +1319,7 @@ function doPost(e) {
     case 'listRegs':      return json(listRegs_(body));
     case 'setRegStatus':  return json(setRegStatus_(body));
     case 'getCourseProfile': return json(getCourseProfile_(body));
+    case 'getCourseSheetRaw': return json(getCourseSheetRaw_(body));
     default:              return json(err('未知的 action: ' + action));
   }
 }
@@ -1328,6 +1329,31 @@ function doGet(e) {
   if (!authKey_(p.apiKey)) return json(err('Unauthorized: invalid or missing apiKey'));
   if ((p.action || '') === 'stats') return json(ok({ count: countRegs_() }));
   return json(err('未知的 action'));
+}
+
+// ===================== Sheet Raw（新制直入＋網頁列印：成份 raw 數據） =====================
+// 區管理平台「新制直入」讀返班 Sheet 資料＋12 張列印用（經區後台 pullCourseSheetRaw）。
+// 唔喺度 parse：等訓練班 Script 同區後台 direct-read 回傳同一形狀，前端統一 parse。
+function getCourseSheetRaw_(b) {
+  if (!authKey_(b.apiKey)) return err('Unauthorized: invalid or missing apiKey');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var dump = function (name) {
+    var sh = ss.getSheetByName(name);
+    return sh ? sh.getDataRange().getValues() : [];
+  };
+  var pw = [];
+  var ps = ss.getSheetByName(PARAM_SHEET);
+  if (ps) {
+    try { pw = ps.getRange('W1:X5').getValues(); } catch (e) { pw = []; }
+  }
+  return ok({
+    input01: dump(IN1), input02: dump(IN2), input03: dump(IN3), input04: dump(IN4),
+    resp: dump(RESP_SHEET), paramsWX: pw,
+    notice: dump('Print_通告'), accept: dump('Print_接納通知書'),
+    finance: dump('Print_財政預算'), completion: dump('Print_訓練班完成報告'),
+    cert: dump('Print_領取證書紀錄'), subsidy: dump('Print_總會資助計劃'),
+    pulledAt: new Date().toISOString(),
+  });
 }
 
 // ===================== Course Profile（開班自動填表＋通告預填） =====================

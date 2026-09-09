@@ -337,4 +337,5 @@ member-portal 填表
   報名用現有內置表（`submitCourseReg`）；通告「報名辦法」印成員系統 `/training` 網址。
 - 通告圖書館由區網／總會網站自動收錄，唔經本系統。詳見 `docs/course-sheet-pull.md`。
 - v4.13.0（工作簿格式＋通告內文 pull）係管理系統＋訓練班 Script 單邊改動，member-portal **唔使改**。
+- v4.14.0（新制直入＋網頁列印）同樣係管理系統＋訓練班 Script 單邊改動，member-portal **唔使改**（收表照舊經每班 /exec；試驗期收表唔變）。
 - ✅ 2026-09-09 已核對 live 站全站（`/`／`/training`／`/venue`／`/stock`／`/activity`／`/contact`）：內置報名表完整（入數紙必填；註明「按課程通告提供嘅付款資料」繳費——即係我哋通告 PDF 印嘅 FPS 資料）；首頁通告入口指去圖書館，同 PDF-only 設計一致；其餘四頁唔掂訓練班，零影響。

@@ -1,8 +1,26 @@
-# 訓練班工作簿 → 開班登記 → 區通告 PDF（v4.13.0）
+# 訓練班工作簿 → 開班登記 → 區通告 PDF（v4.13.0 舊制＋v4.14.0 新制）
 
-> CL 喺工作簿填一次（資料＋通告）→ 區總監審批 → PDF 上載區網（圖書館自動收錄）
+> 舊制：CL 喺工作簿填一次（資料＋通告）→ 區總監審批 → PDF 上載區網
 > ＋ ADC 喺管理系統開班＋通告記錄（全部自動讀取，唔使重打）。
+> 新制（試驗）：ADC 喺區系統填晒成份設定 → 自動建班 Sheet → 12 張列印喺網頁出。
 > **PDF only：冇公開通告頁、冇 feed。** member-portal 唔使改。
+
+## 🆕 新制直入（v4.14.0 試驗；同舊制並存）
+
+| 步驟 | 邊度做 | 做咩 |
+|---|---|---|
+| 0. 設總模版（一次過） | 區 Sheet＋Config | 開空白 Sheet 跑訓練班模版 `setupCourseSheet()` → 試算表 ID 填 `COURSE_TEMPLATE_ID`（新班資料夾選填 `COURSE_FOLDER_ID`） |
+| 1. 填設定 | 管理系統 `/training`「新制直入」 | 成份表：基本＋8 項預算（即時小計）＋班資料（8 節次＋20 職員）＋時間表＋通告內文＋接納＋財政 |
+| 2. 建表＋開班 | 同上 | 撳「🏗 建立班 Sheet＋開班登記」→ 區後台複製總模版＋寫入設定＋開班登記＋分享畀 CL 電郵 |
+| 3. 雙向同步 | 兩邊 | 區系統改 →「⬆ 推送」寫返 Sheet；職員喺 Sheet 改 →「⬇ 重讀」即時睇返（列印數據一併更新） |
+| 4. 列印 | 同上「列印預覽」 | 12 張：通告／取錄／合格／學員／出席／接納／班職員／收支／財政預算／資助／完成報告／領取證書，直接印 PDF |
+| 5. 舊班 | 同上 | 人手建嘅班睇得＋印得（經 /exec 讀），推送唔用得；可「只儲存草稿」 |
+
+API（全部需 `canCourse`）：`createCourseSheet {link, setup, cells, clEmail}`／
+`pushCourseSetup {courseId, setup, cells}`／`pullCourseSheetRaw {courseId}｜{scriptExecUrl, scriptApiKey}`
+（有 /exec 行訓練班 Script `getCourseSheetRaw`，冇就行 direct `openById`，同一形狀）／
+`getCourseSetup {courseId}`（攞 setupJson）。寫入座標跟 v4.13.0 模版，見 `lib/course-setup.ts`。
+收表試驗期唔變（照舊經每班 /exec；自動建嘅表自帶 Script 碼，部署一次就收得）。
 
 ## 流程總覽（CL 填一次）
 
@@ -157,20 +175,24 @@ v4.13.0 新增 `feeNote`／`signupNote` 欄，舊表自動補）／
 
 ## 部署
 
-1. 主後台：`gs/Code.gs`（v4.13.0）全部覆蓋 → 跑 `setupSheets()`（自動補 `Circulars`
-   表＋`circulars` 卡＋權限＋`MEMBER_PORTAL_URL` Config＋通告兩新欄）→ 重新部署。
-   驗證：`?action=getHealthCheck` 見 `version: "4.13.0"`。
-2. Config 填 `MEMBER_PORTAL_URL`（成員系統網址，通告「報名辦法」用）。
-3. 訓練班 Script 模版：`gs/Code.gs.course.js`（v4.13.0 重寫）。**新開班**用新模版一鍵建表；
+1. 主後台：`gs/Code.gs`（v4.14.0）全部覆蓋 → 跑 `setupSheets()`（自動補 `CourseLinks`
+   `sheetId`／`setupJson` 兩欄＋`COURSE_TEMPLATE_ID`／`COURSE_FOLDER_ID` Config）→ 重新部署。
+   驗證：`?action=getHealthCheck` 見 `version: "4.14.0"`。
+2. 新制總模版：開空白 Sheet → 貼訓練班模版 → 跑 `setupCourseSheet()` → 試算表 ID
+   填 Config `COURSE_TEMPLATE_ID`（`/training` 新分頁會顯示設好未）。
+3. Config 填 `MEMBER_PORTAL_URL`（成員系統網址，通告「報名辦法」用）。
+4. 訓練班 Script 模版：`gs/Code.gs.course.js`（v4.14.0 加 `getCourseSheetRaw`）。**新開班**用新模版一鍵建表；
    **舊班要將新模版覆蓋貼上**（千祈唔好重跑 setup，會清空！），pull 通告全文先用到。
    改完模版記得 `cp gs/Code.gs.course.js public/downloads/Code.gs.course.js.txt`。
-4. member-portal：**唔使改**（`noticeUrl` 照舊指向區網 PDF；報名用現有內置表）。
+5. member-portal：**唔使改**（`noticeUrl` 照舊指向區網 PDF；報名用現有內置表）。
 
 ## 測試
 
 | 指令 | 覆蓋 |
 |---|---|
 | `node scripts/test-circulars-gs.js` | 主後台：通告 CRUD＋`feeNote`/`signupNote`＋權限＋上限＋snapshot／isOpen＋pull＋router（23 項） |
-| `node scripts/test-course-profile-gs.js` | 訓練班 Script：實填版＋template 版＋auth＋日期變體＋通告全文（15 項） |
-| `node --experimental-strip-types scripts/test-demo-engine.ts` | 示範引擎：14 卡＋通告（新欄 round-trip）＋pull mock（含 circular）（19 項） |
+| `node scripts/test-course-profile-gs.js` | 訓練班 Script：實填版＋template 版＋auth＋日期變體＋通告全文＋getCourseSheetRaw（18 項） |
+| `node scripts/test-course-setup-gs.js` | 主後台：新制 create／push／pull-raw／getSetup＋欄位保留（16 項） |
+| `node --experimental-strip-types scripts/test-course-setup-parse.ts` | 解析：parse／cells 座標／預算公式／列印數據（12 項） |
+| `node --experimental-strip-types scripts/test-demo-engine.ts` | 示範引擎：14 卡＋通告＋pull mock＋新制 4 action（22 項） |
 | `./node_modules/.bin/tsc --noEmit` | 前端 type-check |

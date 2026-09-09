@@ -87,6 +87,7 @@ export interface DistrictConfig {
   fpsAccountNumber?: string | number; // Apps Script 會把純數字 Sheet 儲存格回傳為 number
   budgetSheetUrl?: string;            // v4.5.0：區年度預算 Google Sheet 網址（Config BUDGET_SHEET_URL；留空用內建）
   memberPortalUrl?: string;           // v4.12.0：成員系統網址（通告「報名辦法」報名連結用）
+  courseTemplateSet?: boolean;        // v4.14.0：訓練班總模版有冇設定（新制直入用）
 }
 
 export interface SystemState {
@@ -150,6 +151,10 @@ export interface CourseLink {
   fpsAccountName?: string;    // 生成當刻嘅收款戶口名（供公開端顯示）
   fpsAccountNumber?: string;  // 生成當刻嘅 FPS ID（供公開端顯示）
   fpsUpdatedAt?: string;      // QR 最後更新時間（ISO）
+  // ── 新制直入（v4.14.0）：區系統建嘅班，後端 Sheet ID＋設定 JSON ──
+  sheetId?: string;           // 區後台自動複製嘅班 Sheet ID（人手建表嘅班冇）
+  setupJson?: string;         // CourseSetup JSON（list 唔回，要用 getCourseSetup 攞）
+  hasSetup?: boolean;         // 有冇儲存過直入設定
 }
 
 // ===================== 訓練班 Sheet profile（pullCourseProfile） =====================
@@ -607,4 +612,127 @@ export interface Circular {
 export interface CircularsBoard {
   items: Circular[];
   suggestedNo: string;
+}
+
+// ===================== 新制：區系統直入＋網頁列印（v4.14.0） =====================
+// ADC 喺區系統填晒成份開班設定 → 區後台自動複製班 Sheet＋寫入 → 12 張列印喺網頁出。
+// 寫入座標跟足 v4.13.0 工作簿模版（人手舊班唔保證啱位，只讀唔寫）。
+
+/** Input01 預算日期（B16:B24 共 9 行：B 日期／C 時間／E 場地） */
+export interface SetupBudgetDate { date: string; time: string; venue: string; }
+
+/** Input01 膳食行 32–39：B 日期／C 時間／E–I 早午晚茶水／J 職員學員 */
+export interface SetupMealLine {
+  date: string; time: string;
+  breakfast: string; lunch: string; dinner: string; snack: string; water: string;
+  who: string;  // '' | '職員' | '學員'
+}
+/** Input01 租金：場租行 47–49／露營行 54–56／住宿行 62–64（B 地點／C 時段營期／F 數量／G 人數房數／H 單價） */
+export interface SetupRentLine { place: string; period: string; qty: string; qty2: string; price: string; }
+/** Input01 交通行 69–74：C 日期路線車種／H 預算 */
+export interface SetupTransportLine { route: string; budget: string; }
+/** Input01 講義 79–81／節目 85–87／行政 91–93／紀念品 97–98：B 項目／G 數量／H 單價 */
+export interface SetupQtyPriceLine { item: string; qty: string; price: string; }
+/** Input01 其他行 102–104：B 註明／E 金額 */
+export interface SetupMiscLine { item: string; amount: string; }
+
+export interface SetupExpenses {
+  meals: SetupMealLine[];       // 8 行
+  venue: SetupRentLine[];       // 3 行（第 2 行預設「其他收費」）
+  camp: SetupRentLine[];        // 3 行
+  lodging: SetupRentLine[];     // 3 行
+  transport: SetupTransportLine[];  // 6 行（3.1／3.2／3.3 各 2 行）
+  handouts: SetupQtyPriceLine[];    // 3 行（影印／光碟／快勞）
+  program: SetupQtyPriceLine[];     // 3 行
+  admin: SetupQtyPriceLine[];       // 3 行（攝影／印刷郵費／文具）
+  souvenir: SetupQtyPriceLine[];    // 2 行（紀念品／獎品）
+  misc: SetupMiscLine[];            // 3 行
+}
+
+/** Input02 節次行 9–16：B 日期／C 跨日／D 時間／E 場地／H ✓上通告／I–K 通告顯示 */
+export interface SetupSession {
+  date: string; spanNext: boolean; time: string; venue: string;
+  displayDate: string; displayTime: string; displayVenue: string; show: boolean;
+}
+
+/** Input03 節目流程（每組 5 行：C 需時／D 項目／E 負責人；B 時間自動計） */
+export interface SetupFlow { mins: string; item: string; owner: string; }
+/** Input03 每節一組（E 服裝＋5 行流程） */
+export interface SetupTimetable { clothing: string; flows: SetupFlow[]; }
+
+/** 成份開班設定（新制直入表單＋setupJson＋列印數據來源） */
+export interface CourseSetup {
+  courseId: string;
+  // ── Input01 頭段 ──
+  courseName: string; edition: string; section: string; badge: string;
+  customName: string; form1: string; form2: string;
+  expectedIntake: string; expectedFee: string; expectedStaff: string;
+  budgetDates: SetupBudgetDate[];
+  expenses: SetupExpenses;
+  // ── Input02 ──
+  quota: string; fee: string; staffCount: string;
+  sessions: SetupSession[];
+  deadline: string; publishDate: string;
+  staff: CourseProfileStaff[];   // 20 行（職位預設）
+  residentStaff: string;
+  // ── Input03 ──
+  timetable: SetupTimetable[];   // 3 組
+  // ── Print_通告人手格 ──
+  eligibility: string; feeNote: string; uniform: string; remarks: string[];
+  fileNo: string; issueDate: string; signer: string; deputy: string;
+  // ── Print_接納通知書人手格 ──
+  acceptCheckin: string; acceptItems: string; acceptOthers: string; acceptNote: string;
+  // ── Print_財政預算＋資助人手格 ──
+  financeApproved: string; financeHqSubsidy: string; subsidyOrigFee: string;
+  // ── 交收 ──
+  clEmail: string;               // 班領導人電郵（自動分享班 Sheet 用）
+  sheetId?: string; sheetUrl?: string; updatedAt?: string;
+}
+
+/** 寫入班 Sheet 嘅格（後台照單寫入，唔使識座標） */
+export interface SetupCell { tab: string; row: number; col: number; value: string | boolean; }
+
+/** 班 Sheet 原始數據（pullCourseSheetRaw 回傳，前端 parse） */
+export type SheetMatrix = unknown[][];
+export interface CourseSheetRaw {
+  input01: SheetMatrix; input02: SheetMatrix; input03: SheetMatrix; input04: SheetMatrix;
+  resp: SheetMatrix;         // 表格回應全文
+  paramsWX: SheetMatrix;     // 參數 W1:X5（成員網址／FPS／區網）
+  notice: SheetMatrix;       // Print_通告
+  accept: SheetMatrix;       // Print_接納通知書
+  finance: SheetMatrix;      // Print_財政預算
+  completion: SheetMatrix;   // Print_訓練班完成報告
+  cert: SheetMatrix;         // Print_領取證書紀錄
+  subsidy: SheetMatrix;      // Print_總會資助計劃
+  pulledAt: string;
+}
+
+/** 名單列（approved 順序） */
+export interface PrintRosterRow {
+  seq: number; group: string; code: string; name: string; nameEn: string; gender: string;
+  troop: string; district: string; phone: string; parentPhone: string; email: string;
+  scoutId: string; position: string; troopNo: string;
+}
+/** 完成報告學員列（D–F 人手） */
+export interface PrintCompletionRow { code: string; name: string; troopNo: string; certNo: string; pass: string; failReason: string; }
+/** 領取證書列（E–G 人手） */
+export interface PrintCertRow { code: string; name: string; troopNo: string; certNo: string; pickupDate: string; signed: string; }
+
+/** 12 張網頁列印嘅總數據（setup＋班 Sheet 活數據合併） */
+export interface CoursePrintData {
+  setup: CourseSetup;
+  roster: PrintRosterRow[];
+  counts: {
+    appliedHome: number; appliedOther: number;
+    admittedHome: number; admittedOther: number; admittedTotal: number;
+    completed: number; passed: number;
+  };
+  actuals: number[];       // Input04 小計 B43:J43（9 項）
+  actualTotal: number;
+  revised: Record<string, string>;  // 財政預算修訂欄（key = 行號字串）
+  completion: PrintCompletionRow[];
+  certRows: PrintCertRow[];
+  subsidyRows: SheetMatrix;         // 資助學員列原文（22–51 行）
+  portalUrl: string; fpsId: string; fpsName: string; webUrl: string;
+  pulledAt: string;
 }

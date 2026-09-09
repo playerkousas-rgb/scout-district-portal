@@ -248,6 +248,12 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 > 改動咗模版 `gs/Code.gs.course.js` 之後，記得 `cp gs/Code.gs.course.js public/downloads/Code.gs.course.js.txt` 同步下載檔。
 
+## 🆕 新制直入試驗（v4.14.0）
+
+- **`/training` 新分頁**：成份設定喺區系統填 → `createCourseSheet` 由總模版自動複製班 Sheet＋寫入（476 格）＋開班登記＋分享畀 CL；`pushCourseSetup` 雙向同步；`pullCourseSheetRaw` 讀全文。
+- **12 張網頁列印**：通告／取錄／合格／學員／出席／接納／班職員／收支／財政預算／資助／完成報告／領取證書，直接印 PDF。
+- 舊制（CL 填 Sheet）原封不動並存；舊班喺新頁只讀＋列印。部署：`Code.gs` → `setupSheets()` → 設 `COURSE_TEMPLATE_ID`。詳見 [`docs/course-sheet-pull.md`](docs/course-sheet-pull.md) 新制一節。
+
 ## 📘 工作簿跟足開班文件＋CL 填一次（v4.13.0）
 
 - **模版重寫**：`gs/Code.gs.course.js` 一鍵起出同實物一樣的全本工作簿（Input01 預算 8 分類／Input02 黃格＋✓上通告／Input03／Input04／12 張 Print 自動帶入／表格回應 36 欄／參數 22 欄 110 專章）。公式係等效寫法，`#N/A` 一律收起；參數 W/X 新增區會常數（成員系統網址／FPS／區網）。
@@ -265,7 +271,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 | 文件 | 內容 |
 |---|---|
 | `docs/member-gs-handshake.md` | **member-portal ↔ GS 合約**（消息發佈置頂；借物資打通；借場填表→Teamup→批核） |
-| `docs/course-sheet-pull.md` | **訓練班工作簿 → 開班登記 → 區通告 PDF**（v4.13.0：pull 流程＋欄位對應＋部署） |
+| `docs/course-sheet-pull.md` | **訓練班工作簿 → 開班登記 → 區通告 PDF**（v4.14.0：舊制 pull＋新制直入＋欄位對應＋部署） |
 | `docs/venue-booking-flow.md` | 借場流程（而家：填表+Teamup+批核；密碼稍後） |
 | `docs/booking-setup-merge-checklist.md` | 貼 Code.gs → setup → 填 Key → 驗證 → 測試 嘅逐步操作 |
 | `docs/keys-checklist.md` | **找回 + 驗證 Teamup / TTLock API Key**（你唔記得 Key 睇呢份） |

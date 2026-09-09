@@ -311,9 +311,9 @@ check('doGet 公開路由 listAnnouncements 通', () => {
   assert.ok(parsed.data.length >= 0);
 });
 
-check('健康檢查版本 4.13.0', () => {
+check('健康檢查版本 4.14.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.13.0');
+  assert.strictEqual(parsed.data.version, '4.14.0');
 });
 
 // ───────────────────────────────────────────────────────────

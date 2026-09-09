@@ -274,9 +274,9 @@ export default function CircularsPage() {
         <div className="info-card" style={{ borderColor: '#fbbf24', background: '#fffbeb' }}>
           <h3>⚠️ 後台未更新</h3>
           <p style={{ fontSize: 13, lineHeight: 1.8 }}>
-            區 Google Sheet 嘅 Apps Script 仲係舊版。請將本 repo <code>gs/Code.gs</code>（v4.13.0）全部覆蓋貼上 →
+            區 Google Sheet 嘅 Apps Script 仲係舊版。請將本 repo <code>gs/Code.gs</code>（v4.14.0）全部覆蓋貼上 →
             執行 <code>setupSheets()</code>（補建唔清空）→ 重新部署 Web App。
-            驗證：<code>?action=getHealthCheck</code> 見到 <code>version: &quot;4.13.0&quot;</code>。
+            驗證：<code>?action=getHealthCheck</code> 見到 <code>version: &quot;4.14.0&quot;</code>。
           </p>
         </div>
       )}

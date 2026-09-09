@@ -322,5 +322,36 @@ check('✓上通告剔格 FALSE → 該節唔上通告（就算有通告顯示�
   sheets['Input02 訓練班資料'] = keep;
 });
 
+check('getCourseSheetRaw 錯 key → Unauthorized（經 doPost router）', () => {
+  const bad = JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action: 'getCourseSheetRaw', apiKey: 'wrong' }) } }));
+  assert.strictEqual(bad.ok, false);
+  assert.ok(String(bad.error).indexOf('Unauthorized') >= 0);
+});
+
+check('getCourseSheetRaw：12 tabs＋paramsWX＋pulledAt（經 doPost router）', () => {
+  // 加一頁參數（淨 W1:X5 範圍讀取）
+  sheets['參數'] = {
+    getRange: (a1) => {
+      assert.strictEqual(a1, 'W1:X5');
+      return { getValues: () => [['項目', '內容'], ['w', 'https://m.example/training'], ['f', '102866183'], ['n', 'SKW'], ['w', 'www.skwscout.org.hk']] };
+    },
+  };
+  const r = JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action: 'getCourseSheetRaw', apiKey: KEY }) } }));
+  assert.ok(r.ok, JSON.stringify(r));
+  const d = r.data;
+  ['input01', 'input02', 'input03', 'input04', 'resp', 'paramsWX', 'notice', 'accept',
+    'finance', 'completion', 'cert', 'subsidy', 'pulledAt'].forEach(k => assert.ok(k in d, '缺 ' + k));
+  assert.strictEqual(d.input02[0][1], '第1屆工作坊');
+  assert.strictEqual(d.notice[14][0], '第1屆工作坊');
+  assert.deepStrictEqual(d.paramsWX[1], ['w', 'https://m.example/training']);
+  assert.ok(d.pulledAt);
+});
+
+check('getCourseSheetRaw 缺頁 → 該 key 係 []（唔報錯）', () => {
+  const r = ctx.getCourseSheetRaw_({ apiKey: KEY }).data;
+  assert.deepStrictEqual(plain(r.input03), []);
+  assert.deepStrictEqual(plain(r.accept), []);
+});
+
 console.log(pass ? `\n全部通過（${pass} 項）✓` : '\n冇跑到任何測試');
 if (!pass) process.exitCode = 1;

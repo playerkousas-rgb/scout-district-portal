@@ -9,7 +9,7 @@ import type {
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
   CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
-  Circular, CircularsBoard, CircularStatus, CourseProfile,
+  Circular, CircularsBoard, CircularStatus, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell,
 } from './types.ts';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers.ts';
 import type { IcsEvent } from './ics.ts';
@@ -156,6 +156,15 @@ export const api = {
     callPost('deleteCourseLink', { token, courseId }),
   pullCourseProfile: (token: string, req: { courseId?: string; scriptExecUrl?: string; scriptApiKey?: string }): Promise<ApiResult<CourseProfile>> =>
     callPost('pullCourseProfile', { token, ...req }),
+  // ── 新制直入（v4.14.0）：自動建班 Sheet＋雙向同步＋全文讀取 ──
+  createCourseSheet: (token: string, req: { link: Partial<CourseLink>; setup: CourseSetup; cells: SetupCell[]; clEmail?: string }): Promise<ApiResult<{ created: boolean; courseId: string; sheetId: string; sheetUrl: string; cellsApplied: number; skippedTabs: string[]; sharedTo: string; shareWarning: string }>> =>
+    callPost('createCourseSheet', { token, ...req }),
+  pushCourseSetup: (token: string, req: { courseId: string; setup: CourseSetup; cells: SetupCell[] }): Promise<ApiResult<{ pushed: boolean; courseId: string; sheetId: string; cellsApplied: number; skippedTabs: string[] }>> =>
+    callPost('pushCourseSetup', { token, ...req }),
+  pullCourseSheetRaw: (token: string, req: { courseId?: string; scriptExecUrl?: string; scriptApiKey?: string }): Promise<ApiResult<CourseSheetRaw>> =>
+    callPost('pullCourseSheetRaw', { token, ...req }),
+  getCourseSetup: (token: string, courseId: string): Promise<ApiResult<{ courseId: string; sheetId: string; setup: CourseSetup | null }>> =>
+    callPost('getCourseSetup', { token, courseId }),
 
   // 區通告（職員專用；輸出傳統格式 PDF 上載區網）
   getCirculars: (token: string): Promise<ApiResult<CircularsBoard>> =>
