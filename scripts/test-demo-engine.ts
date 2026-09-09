@@ -1,7 +1,7 @@
 /**
  * 🎭 模擬示範版引擎測試（v4.9.0）
  * 行法：node --experimental-strip-types scripts/test-demo-engine.ts
- * 示範身份統一：助理區總監（ADC）· 權限全開（mockAdmin）— 驗證
+ * 示範身份統一：助理區總監（ADC）· 權限全開（mockAdmin；成人獎勵除外）— 驗證
  * demoCall／demoExternal 同真後台語義一致（軟刪除、一日一旅一次、死線儲存…）。
  */
 import assert from 'node:assert';
@@ -31,13 +31,13 @@ check('login：任何電郵密碼都入到同一個 ADC 示範身份（權限全
 });
 
 // ── 2. 卡片 ──
-check('getCards：權限全開 — 14 張卡全部 edit；有 awards；冇 news；壞 token 被擋', () => {
+check('getCards：權限全開 — 13 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
   const r = demoCall('getCards', { token: T.adc }, 'GET');
   assert.ok(r.ok);
   const ids = r.data.map((c: any) => c.cardId);
-  assert.strictEqual(ids.length, 14);
+  assert.strictEqual(ids.length, 13);
   assert.ok(r.data.every((c: any) => c.access === 'edit'));
-  assert.ok(ids.indexOf('awards') >= 0);
+  assert.strictEqual(ids.indexOf('awards'), -1, '成人獎勵提名唔喺示範範圍');
   assert.strictEqual(ids.indexOf('news'), -1, 'news 卡已移除（消息喺主控台頂）');
   const bad = demoCall('getCards', { token: T.bad }, 'GET');
   assert.strictEqual(bad.ok, false);
@@ -79,43 +79,16 @@ check('消息：未登入（壞 token）管理被擋', () => {
 });
 
 // ── 4. 獎勵（v4.9.0） ──
-check('getAwardsBoard：18 類型＋deadlineCfg 預設＋counts 正確（ADC 權限全開攞到）', () => {
-  const r = demoCall('getAwardsBoard', { token: T.adc }, 'GET');
-  assert.ok(r.ok);
-  assert.strictEqual(r.data.types.length, 18);
-  assert.deepStrictEqual(r.data.deadlineCfg, { habDistrict: '01-15', habHq: '02-03' });
-  assert.strictEqual(r.data.total, 16);
-  assert.strictEqual(r.data.counts.LSM, 3, 'LSM 應該有 3 人（am-01/04/07）');
-});
-check('saveAwardDeadlines：收 YYYY-MM-DD 同 MM-DD；垃圾值保留原設定', () => {
-  const r1 = demoCall('saveAwardDeadlines', { token: T.adc, habDistrict: '2026-01-20', habHq: '02-05' }, 'POST');
-  assert.deepStrictEqual(r1.data.deadlineCfg, { habDistrict: '01-20', habHq: '02-05' });
-  const r2 = demoCall('saveAwardDeadlines', { token: T.adc, habDistrict: 'garbage', habHq: '' }, 'POST');
-  assert.deepStrictEqual(r2.data.deadlineCfg, { habDistrict: '01-20', habHq: '02-05' }, '垃圾值唔應該改');
-  demoCall('saveAwardDeadlines', { token: T.adc, habDistrict: '01-15', habHq: '02-03' }, 'POST');
-});
-check('saveAwardMember：新增＋更新；LAY 階梯示範成員在冊', () => {
-  const c = demoCall('saveAwardMember', { token: T.adc, member: { name: '測試新成員', troop: '999', position: 'SL', serviceStart: '2010', status: 'active', awards: {} } }, 'POST');
-  assert.ok(c.ok && c.data.created);
-  const u = demoCall('saveAwardMember', { token: T.adc, member: { id: c.data.id, awards: { FIVE: '2015' } } }, 'POST');
-  assert.ok(u.ok && !u.data.created);
+check('成人獎勵（awards）唔喺示範範圍：全部動作統一擋（連讀取）', () => {
+  const MSG = '成人獎勵提名';
   const board = demoCall('getAwardsBoard', { token: T.adc }, 'GET');
-  const m = board.data.members.find((x: any) => x.id === c.data.id);
-  assert.strictEqual(m.awards.FIVE, '2015');
-  assert.strictEqual(m.name, '測試新成員', '更新 awards 唔應該清走名字');
-  const lay = board.data.members.find((x: any) => x.id === 'am-07');
-  assert.deepStrictEqual([lay.awards.FIVE, lay.awards.TEN, lay.awards.LSM, lay.awards.LSM1], ['2003', '2008', '2013', '2023']);
-  const del = demoCall('deleteAwardMember', { token: T.adc, id: c.data.id }, 'POST');
-  assert.ok(del.ok);
-});
-check('saveAwardTypes：整表覆寫（用戶自訂年期喺示範版即改即生效）', () => {
-  const board = demoCall('getAwardsBoard', { token: T.adc }, 'GET');
-  const types = board.data.types.map((t: any) => t.code === 'GSA' ? { ...t, minYears: 9 } : t);
-  const r = demoCall('saveAwardTypes', { token: T.adc, types }, 'POST');
-  assert.ok(r.ok);
-  const board2 = demoCall('getAwardsBoard', { token: T.adc }, 'GET');
-  assert.strictEqual(board2.data.types.find((t: any) => t.code === 'GSA').minYears, 9);
-  assert.strictEqual(board2.data.defaults.find((t: any) => t.code === 'GSA').minYears, 7, 'defaults 應該保留內建建議');
+  assert.strictEqual(board.ok, false);
+  assert.ok(String(board.error).indexOf(MSG) >= 0, '錯誤訊息要講明唔喺示範範圍');
+  ['saveAwardMember', 'deleteAwardMember', 'importAwardMembers', 'saveAwardTypes', 'saveAwardDeadlines'].forEach(a => {
+    const r = demoCall(a, { token: T.adc }, 'POST');
+    assert.strictEqual(r.ok, false, `${a} 應該被擋`);
+    assert.ok(String(r.error).indexOf(MSG) >= 0);
+  });
 });
 
 // ── 5. 旅團探訪 ──
@@ -198,11 +171,11 @@ check('extBudget：rows＋summary', () => {
 });
 
 // ── 9. 重設 ──
-check('resetDemoData：加完成員重設返 16 人', () => {
-  demoCall('saveAwardMember', { token: T.adc, member: { name: '臨時成員', awards: {} } }, 'POST');
+check('resetDemoData：加完消息重設返 4 條示範消息', () => {
+  demoCall('saveAnnouncement', { token: T.adc, announcement: { title: '臨時消息', body: '' } }, 'POST');
   resetDemoData();
-  const board = demoCall('getAwardsBoard', { token: T.adc }, 'GET');
-  assert.strictEqual(board.data.total, 16);
+  const list = demoCall('getAnnouncements', { token: T.adc }, 'GET');
+  assert.strictEqual(list.data.length, 4);
 });
 
 console.log(process.exitCode ? '\n部分測試失敗 ✗' : `\n全部通過（${pass} 項）✓`);

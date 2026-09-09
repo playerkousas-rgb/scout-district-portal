@@ -97,9 +97,11 @@ function sessionPayload(u: DemoUser): AnyObj {
 
 function visibleCards(u: DemoUser): AnyObj[] {
   const d = loadDb();
-  // 🎭 示範版權限全開：全部卡片（連隱藏咗嘅都照列，enabled=false 做標示）、一律 edit
+  // 🎭 示範版權限全開：全部卡片（連隱藏咗嘅都照列，enabled=false 做標示）、一律 edit。
+  // 唯一例外：成人獎勵提名（awards）唔喺示範範圍 — 正式系統先用到。
   if (u.mockAdmin) {
     return d.cards
+      .filter(c => c.cardId !== 'awards')
       .map((c): AnyObj => ({ ...c, access: 'edit' as const }))
       .sort((a, b) => a.order - b.order);
   }
@@ -114,6 +116,14 @@ function visibleCards(u: DemoUser): AnyObj[] {
       return { ...c, access: u.level <= 1 ? (access || 'view') : access };
     })
     .sort((a, b) => a.order - b.order);
+}
+
+/**
+ * 🎭 示範版範圍：成人獎勵提名（awards）唔喺示範範圍 — 全部動作統一咁回應。
+ * （正式系統先有；呢度連讀取都擋，等 /awards 頁直接顯示訊息。）
+ */
+function awardsNotInDemo(): ApiResultLike {
+  return fail('🎭 示範版未包含「成人獎勵提名」功能 — 此功能只喺正式系統提供。');
 }
 
 // ───────────────────────── 主入口 ─────────────────────────
@@ -345,93 +355,13 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       persistDb(); return ok({ saved: true, id: payload.id, active: row.active });
     }
 
-    // ── 獎勵（v4.9.0） ──
-    case 'getAwardsBoard': {
-      const r0 = requireUser(token, 2); if (isErr(r0)) return r0;
-      const counts: AnyObj = {};
-      d.awardTypes.forEach(t => {
-        counts[t.code] = d.awardMembers.filter(m => {
-          const v = m.awards[t.code];
-          return v !== undefined && v !== '' && v !== '無';
-        }).length;
-      });
-      return ok({
-        types: d.awardTypes, members: d.awardMembers, counts, total: d.awardMembers.length,
-        defaults: freshDemoTypesForDefaults(), deadlineCfg: { ...d.deadlineCfg },
-      });
-    }
-    case 'saveAwardMember': {
-      const rW = requireUser(token, 2); if (isErr(rW)) return rW;
-      const m = (payload.member || {}) as AnyObj;
-      let row = m.id ? d.awardMembers.find(x => x.id === m.id) : undefined;
-      let created = false;
-      if (row) {
-        if (m.name !== undefined) row.name = m.name;
-        if (m.troop !== undefined) row.troop = m.troop;
-        if (m.position !== undefined) row.position = m.position;
-        if (m.serviceStart !== undefined) row.serviceStart = m.serviceStart;
-        if (m.status !== undefined) row.status = m.status;
-        if (m.note !== undefined) row.note = m.note;
-        if (m.awards !== undefined) row.awards = { ...row.awards, ...m.awards };
-        row.updatedAt = nowIso();
-      } else {
-        created = true;
-        row = {
-          id: genId('am'), name: m.name || '新成員', troop: m.troop || '', position: m.position || '',
-          serviceStart: m.serviceStart || '', status: m.status || 'active', note: m.note || '',
-          awards: { ...(m.awards || {}) }, updatedAt: nowIso(),
-        };
-        d.awardMembers.push(row);
-      }
-      persistDb(); return ok({ saved: true, id: row.id, created });
-    }
-    case 'deleteAwardMember': {
-      const rW = requireUser(token, 2); if (isErr(rW)) return rW;
-      d.awardMembers = d.awardMembers.filter(x => x.id !== payload.id);
-      persistDb(); return ok({ deleted: true, id: payload.id });
-    }
-    case 'importAwardMembers': {
-      const rW = requireUser(token, 2); if (isErr(rW)) return rW;
-      const rows = (payload.rows || []) as AnyObj[];
-      const mode = String(payload.mode || 'merge');
-      let added = 0, updated = 0, skipped = 0;
-      if (mode === 'replace') d.awardMembers = [];
-      rows.forEach(row => {
-        const name = String(row.name || '').trim();
-        if (!name) { skipped++; return; }
-        const found = d.awardMembers.find(x => x.name === name);
-        if (found) {
-          ['troop', 'position', 'serviceStart', 'status', 'note'].forEach(k => { if (row[k] !== undefined && row[k] !== '') (found as AnyObj)[k] = row[k]; });
-          if (row.awards) found.awards = { ...found.awards, ...row.awards };
-          updated++;
-        } else {
-          d.awardMembers.push({ id: genId('am'), name, troop: row.troop || '', position: row.position || '', serviceStart: row.serviceStart || '', status: row.status || 'active', note: row.note || '', awards: { ...(row.awards || {}) }, updatedAt: nowIso() });
-          added++;
-        }
-      });
-      persistDb(); return ok({ added, updated, skipped });
-    }
-    case 'saveAwardTypes': {
-      const rW = requireUser(token, 2); if (isErr(rW)) return rW;
-      d.awardTypes = ((payload.types || []) as AnyObj[]).map(t => ({ ...t }));
-      persistDb(); return ok({ saved: true, types: d.awardTypes });
-    }
-    case 'saveAwardDeadlines': {
-      const rW = requireUser(token, 2); if (isErr(rW)) return rW;
-      const mm = (v: any, def: string) => {
-        const s = String(v || '').trim();
-        const full = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-        const short = s.match(/^(\d{1,2})-(\d{1,2})$/);
-        if (full) return `${String(Math.min(12, Math.max(1, Number(full[2])))).padStart(2, '0')}-${String(Math.min(31, Math.max(1, Number(full[3])))).padStart(2, '0')}`;
-        if (short) return `${String(Math.min(12, Math.max(1, Number(short[1])))).padStart(2, '0')}-${String(Math.min(31, Math.max(1, Number(short[2])))).padStart(2, '0')}`;
-        return def;
-      };
-      d.deadlineCfg = {
-        habDistrict: mm(payload.habDistrict, d.deadlineCfg.habDistrict),
-        habHq: mm(payload.habHq, d.deadlineCfg.habHq),
-      };
-      persistDb(); return ok({ saved: true, deadlineCfg: { ...d.deadlineCfg } });
-    }
+    // ── 獎勵（v4.9.0）— 🎭 唔喺示範範圍 ──
+    case 'getAwardsBoard': return awardsNotInDemo();
+    case 'saveAwardMember': return awardsNotInDemo();
+    case 'deleteAwardMember': return awardsNotInDemo();
+    case 'importAwardMembers': return awardsNotInDemo();
+    case 'saveAwardTypes': return awardsNotInDemo();
+    case 'saveAwardDeadlines': return awardsNotInDemo();
 
     // ── 旅團探訪 ──
     case 'getVisitBoard': {

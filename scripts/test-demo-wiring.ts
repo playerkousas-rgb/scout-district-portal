@@ -44,21 +44,20 @@ await check('enterDemoRole(adc)：mode 開著 + loadSession 行示範 session（
   assert.ok(String(s.email).indexOf('@demo') >= 0);
 });
 
-await check('api.getCards：demo 模式下唔打網絡，直接回示範卡片（有 awards，冇 news）', async () => {
+await check('api.getCards：demo 模式下唔打網絡，直接回示範卡片（冇 news；成人獎勵都收起）', async () => {
   const s = loadSession()!;
   const r = await api.getCards(s.token);
   assert.ok(r.ok);
   const ids = (r.data || []).map(c => c.cardId);
-  assert.ok(ids.indexOf('awards') >= 0);
+  assert.strictEqual(ids.indexOf('awards'), -1, '成人獎勵提名唔喺示範範圍');
   assert.strictEqual(ids.indexOf('news'), -1);
 });
 
-await check('api.getAwardsBoard：18 類型＋deadlineCfg（經 callGet 攔截）', async () => {
+await check('api.getAwardsBoard：示範版統一擋（經 callGet 攔截，講明唔喺示範範圍）', async () => {
   const s = loadSession()!;
   const r = await api.getAwardsBoard(s.token);
-  assert.ok(r.ok);
-  assert.strictEqual((r.data as any).types.length, 18);
-  assert.deepStrictEqual((r.data as any).deadlineCfg, { habDistrict: '01-15', habHq: '02-03' });
+  assert.strictEqual(r.ok, false);
+  assert.ok(String(r.error || '').indexOf('成人獎勵提名') >= 0);
 });
 
 await check('api.extRegionStaff：外部資料都行示範版', async () => {

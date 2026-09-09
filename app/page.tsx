@@ -312,8 +312,9 @@ export default function HomePage() {
               <span className="demo-entry-title">未登入都可以試晒成個系統</span>
             </div>
             <p className="demo-entry-desc">
-              完整示範資料（獎勵名冊／旅團探訪／借場借物資／消息發佈…），改動<b>只存喺你嘅瀏覽器</b>，絕對唔會影響正式後台。
-              以助理區總監（ADC）身份進入，<b>示範版權限全開</b>，咩功能都試到。
+              完整示範資料（旅團探訪／借場借物資／消息發佈／訓練班…），改動<b>只存喺你嘅瀏覽器</b>，絕對唔會影響正式後台。
+              以助理區總監（ADC）身份進入，<b>示範版權限全開</b>，咩功能都試到
+              （除咗<b>成人獎勵提名</b> — 呢個功能唔喺示範範圍）。
             </p>
             <div className="demo-entry-roles">
               {DEMO_IDENTITIES.map(r => (
