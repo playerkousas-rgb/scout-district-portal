@@ -437,6 +437,11 @@ export interface Visit {
   visitorEmail?: string;
   note?: string;
   followUp?: string;
+  // ── 總會匯報欄位（v4.10.0：「區職員探訪區內旅團匯報」八欄格式） ──
+  leaderMet?: string;       // 與旅領袖會面（旅長／支部團長／副團長…）
+  method?: string;          // 探訪方式（面談／電話／WhatsApp／Email／其他）
+  officerCount?: number;    // 區職員探訪人數（冇填當 1）
+  support?: string;         // 區已經提供之支援之項目
   createdAt?: string;
   updatedAt?: string;
 }
@@ -445,6 +450,7 @@ export interface VisitBoard {
   from: string;
   to: string;
   today: string;
+  districtName?: string;    // 區會名（Config districtName，總會匯報表頭用）
   units: ScoutUnit[];
   visits: Visit[];
   years: number[];

@@ -175,4 +175,85 @@ check('CSV 會處理逗號同引號', () => {
   assert.strictEqual(toCsv([['旅團', '備註'], ['206', '人數 24, 好']]), '旅團,備註\n206,"人數 24, 好"');
 });
 
+// ───────────────────────── 🏢 總會季度匯報（v4.10.0） ─────────────────────────
+
+import {
+  officialReport, hqDate, hqPeriodLabel, troopTotal,
+  SECTION_HQ_LABEL, HQ_METHODS, HQ_LEADERS,
+} from '../lib/visits.ts';
+
+check('總會日期寫法：18.1.2026（唔補零）', () => {
+  assert.strictEqual(hqDate('2026-01-18'), '18.1.2026');
+  assert.strictEqual(hqDate('2026-03-08'), '8.3.2026');
+  assert.strictEqual(hqDate('2026-12-31'), '31.12.2026');
+  assert.strictEqual(hqDate(''), '');
+  assert.strictEqual(hqDate('唔係日期'), '');
+});
+
+check('總會期間標題：2026年1月-3月；跨年出兩個年份', () => {
+  assert.strictEqual(hqPeriodLabel('2026-01-01', '2026-03-31'), '2026年1月-3月');
+  assert.strictEqual(hqPeriodLabel('2026-04-01', '2026-06-30'), '2026年4月-6月');
+  assert.strictEqual(hqPeriodLabel('2025-12-01', '2026-01-31'), '2025年12月-2026年1月');
+  assert.strictEqual(hqPeriodLabel('', ''), '');
+});
+
+check('旅團總數：只計仲運作嘅旅', () => {
+  assert.strictEqual(troopTotal(units), 5);
+  const withInactive: ScoutUnit[] = [...units, { ...unit('999', {}), active: false }];
+  assert.strictEqual(troopTotal(withInactive), 5);
+});
+
+check('匯報支部欄：童軍 → 童軍支部、冇填 → 全旅', () => {
+  assert.strictEqual(SECTION_HQ_LABEL.scout, '童軍支部');
+  assert.strictEqual(SECTION_HQ_LABEL.gh, '小童軍支部');
+  assert.strictEqual(SECTION_HQ_LABEL[''], '全旅');
+  assert.deepStrictEqual(HQ_METHODS, ['面談', '電話', 'WhatsApp', 'Email', '其他']);
+  assert.ok(HQ_LEADERS.includes('旅長及支部領袖'));
+});
+
+check('總會匯報：一筆記錄 = 一行，冇填人數當 1、冇跟進出 NA', () => {
+  const rows = officialReport([
+    { ...visit('206', '2026-01-18', 'scout'), leaderMet: '支部團長', method: '面談', support: '旅團發展方向' },
+    { ...visit('17', '2026-02-08', ''), leaderMet: '旅長及支部領袖', method: '電話', officerCount: 4, support: '增長人數', followUp: 'Form Submission' },
+    { ...visit('50', '2026-01-18', 'venture'), method: 'WhatsApp' },
+  ]);
+  assert.strictEqual(rows.length, 3);
+  // 排序：旅號細到大（17 → 50 → 206）
+  assert.deepStrictEqual(rows.map(r => r.troop), ['17', '50', '206']);
+  const r17 = rows[0];
+  assert.strictEqual(r17.sectionLabel, '全旅');
+  assert.strictEqual(r17.dateText, '8.2.2026');
+  assert.strictEqual(r17.officerCount, 4);
+  assert.strictEqual(r17.followUp, 'Form Submission');
+  const r50 = rows[1];
+  assert.strictEqual(r50.leaderMet, '');            // 冇填就空（唔會作嘢）
+  assert.strictEqual(r50.officerCount, 1);          // 冇填人數 = 1
+  assert.strictEqual(r50.followUp, 'NA');           // 冇跟進 = NA
+  assert.strictEqual(r50.sectionLabel, '深資童軍支部');
+  const r206 = rows[2];
+  assert.strictEqual(r206.method, '面談');
+  assert.strictEqual(r206.support, '旅團發展方向');
+  assert.strictEqual(r206.followUp, 'NA');
+});
+
+check('總會匯報：同旅同日可以有幾行（電話一筆 Email 一筆，跟官方樣本）', () => {
+  const rows = officialReport([
+    { ...visit('180', '2026-01-18', 'cub'), method: '電話', support: 'Census', followUp: '支部領袖人數未達最低要求' },
+    { ...visit('180', '2026-01-18', 'cub'), method: 'Email', support: '幼童軍年齡降低' },
+  ]);
+  assert.strictEqual(rows.length, 2);
+  assert.strictEqual(rows[0].method, '電話');
+  assert.strictEqual(rows[1].method, 'Email');
+  assert.strictEqual(rows[1].followUp, 'NA');
+});
+
+check('總會匯報：壞記錄（冇旅號／冇日期）唔會出', () => {
+  const rows = officialReport([
+    visit('', '2026-01-01'),
+    { ...visit('206', '') },
+    visit('206', '2026-01-01'),
+  ]);
+  assert.strictEqual(rows.length, 1);
+});
+
 console.log(`\n全部通過（${pass} 項）✓`);

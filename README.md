@@ -51,7 +51,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.8.1"` 即通。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.10.0"` 即通。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -64,7 +64,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.8.1"` 即代表用緊最新後台。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.10.0"` 即代表用緊最新後台。
 
 ---
 
@@ -99,23 +99,24 @@
 - **舊部署升級**：貼新 `Code.gs` → 跑一次 `setupSheets()` → 重新部署。setupSheets 會自動：升級 AwardTypes 舊預設（你自己改過嘅數值唔會被掂）、Perms `awards` → `ddcUp`、移除 news 卡＋Perms 行、News 表補 `deleted/deletedAt/deletedBy`、新建 `ContactNames` 表、contacts 卡改名「聯絡簿」— **已有資料全部保留**。
 - 測試：`node scripts/test-upgrade-gs.js`（7 項 4.8.1→4.9.0 升級模擬）、`node scripts/test-awards-gs.js`（21 項）、`node --experimental-strip-types scripts/test-awards-logic.ts`（27 項）、`node scripts/test-news-gs.js`（38 項）、`node scripts/check-member-alignment.js`（成員 API 對齊）。
 
-## 🏕 旅團探訪（v4.8.1）
+## 🏕 旅團探訪（v4.8.1 → v4.10.0 總會格式匯報）
 
-`/visit` — 幹部撳一下旅團格仔就登記探訪；DC 揀日期範圍即出報告。
+`/visit` — 幹部撳一下旅團格仔就登記探訪；DC 揀日期範圍即出報告，**一鍵生成總會格式 Excel 直接交總會**。
 
 | 分頁 | 做咩 |
 |---|---|
-| 🗺 探訪登記 | 全區旅團排成**方塊磚**：**未探紅框、探過綠框**。撳方塊 = 揀咗（藍色 ✔），同一日可以一次過揀 X／Y／Z 幾個旅；撳「💾 儲存登記」先會寫後端（**未撳 Save 咩都唔會入數**）。**一日一個旅淨係一次**：已經登記咗嗰日嘅方塊會鎖住（🔒）。日期預設今日、**Save 嗰日就係探訪日期**；聽日入返嚟自動清零，同一個旅下個月再探再撳過就得。方塊右下「✎ 詳細」可以補日期／備註／跟進 |
-| 📊 探訪報告 | 揀「由幾月到幾月」（有本季／全年／上下半年／9 月–8 月童軍年度快捷掣）→ 探訪 list ＋ **邊個幹部探咗幾多次、探過邊啲旅** ＋ 仲有邊幾旅未探 → 一鍵匯出 CSV 交總會 |
+| 🗺 探訪登記 | 全區旅團排成**方塊磚**：**未探紅框、探過綠框**。撳方塊 = 揀咗（藍色 ✔），同一日可以一次過揀 X／Y／Z 幾個旅；撳「💾 儲存登記」先會寫後端（**未撳 Save 咩都唔會入數**）。**一日一個旅淨係一次**：已經登記咗嗰日嘅方塊會鎖住（🔒）。日期預設今日、**Save 嗰日就係探訪日期**；聽日入返嚟自動清零，同一個旅下個月再探再撳過就得。方塊右下「✎ 詳細」可以補日期／備註／跟進。**快速儲存自動填「面談、1 人」**（最大機會，唔啱先改）— 與旅領袖會面／區已提供支援／跟進呢幾欄唔使即刻填，**事後喺「最近登記」撳「編輯」先補都得** |
+| 📊 探訪報告 | 揀「由幾月到幾月」（有本季／全年／上下半年／9 月–8 月童軍年度快捷掣）→ 頂頂係 **🏢 總會季度匯報（區職員探訪區內旅團匯報）**：跟總會官方表格八欄（旅號／支部／與旅領袖會面／探訪日期／探訪方式／區職員探訪人數／區已經提供之支援之項目／地域-總會需要跟進之項目），**一鍵匯出 Excel（.xlsx）直接交總會** — 標題「香 港 童 軍 總 會」、期間「2026年1月-3月」、區會、旅團總數全部自動填好；下面仲有探訪 list ＋ **👥 邊個幹部探咗幾多次、探過邊啲旅（內部自己睇，唔會出現喺總會嗰份）** ＋ 仲有邊幾旅未探 → 內部詳細 CSV |
 | ⚙️ 旅團名單 | 全區 28 個旅（旅號、主辦機構、五個支部團數），可直接改或者由官網／Excel 貼上；改完會順手同步 `Config TROOP_LIST`，「活動知會」「聯結簿」一齊更新 |
 
 - **一入去只睇自己支部**：跟角色自動揀（`ADC_GH` → 小童軍、`ADC_CUBS` → 幼童軍、`ADC_SCOUT` → 童軍），DC 等其他角色 = 全部支部；頂部隨時切換，揀完會記住（localStorage）。
 - **支部分開計**：探咗 17 旅童軍團，唔會當幼童軍團都探咗；冇填支部嘅記錄當「全旅」，邊個支部都計入。
 - 內建旅團名單跟港島地域官網「筲箕灣區旅團一覽表」（覆檢日期 2026-03-31），`101` 旅嗰啲 `1+A1+S1`（空童軍團／海童軍團）寫法照樣保留。
 - 後台 4.8.1：新增 `Units`（旅團名單）同 `Visits`（探訪記錄）兩張表 + `getVisitBoard`／`saveVisit`／`deleteVisit`／`saveUnits`；權限用卡片 `visit` = ✏️。
+- **總會格式匯報（v4.10.0）**：`Visits` 表加四欄 `leaderMet`／`method`／`officerCount`／`support`；`getVisitBoard` 回傳 `districtName`（Config `districtName`）做匯報表頭。一筆記錄 = 匯報一行（同旅同日可以有幾行，例如電話一筆 Email 一筆，跟總會樣本）；日期出 `18.1.2026`、冇跟進出 `NA`、冇填人數當 1；排序旅號細到大、同旅舊到新。**舊部署升級：貼新 `Code.gs` → 跑一次 `setupSheets()` 就會自動補四欄，舊資料全部保留**；生成 Excel 嘅 xlsx 產生器係零依賴（`lib/xlsx.ts`＋`lib/hqReport.ts`）。
 - **一日一個旅一次（v4.8.1）**：同一日、同一個旅、同一位幹部只會有一筆記錄 —— 轉支部撳都當同一次（「今日去咗 206 旅」就係一次）。前端方塊會鎖住，後台 `saveVisit` 都會擋（雙重保險）。第二位幹部同日探同一個旅 = 佢有佢名下嗰筆（會先確認）。第二日、下個月再探同一個旅照樣得。
 - **防呆**：揀咗未儲存唔會寫後端；離開頁面會提示；儲存前有確認清單；寫失敗嗰啲會留返喺揀選度可以再試。
-- 測試：`node scripts/test-visit-gs.js`（18 項後台）、`node --experimental-strip-types scripts/test-visit-logic.ts`（18 項報告邏輯）。
+- 測試：`node scripts/test-visit-gs.js`（23 項後台）、`node --experimental-strip-types scripts/test-visit-logic.ts`（25 項報告邏輯）、`node --experimental-strip-types scripts/test-xlsx.ts`（6 項 xlsx 產生器＋總會匯報檔）。
 
 ## 🎖 獎勵提名（v4.7.3）
 
