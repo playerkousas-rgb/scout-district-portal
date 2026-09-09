@@ -39,7 +39,7 @@ check('收費 100＋原價 200＋費用段全文', () => {
 });
 
 check('資助說明：費用段「原價…資助」嗰句抽得出（v4.16.0）', () => {
-  assert.ok(f.subsidyNote.includes('原價港幣200元'));
+  assert.ok(f.subsidyNote.startsWith('本活動原價港幣200元'), `應由「本活動原價」開始（而家：「${f.subsidyNote.slice(0, 20)}…」）`);
   assert.ok(f.subsidyNote.includes('青少年成員及童軍領袖訓練資助計劃'));
   assert.ok(f.subsidyNote.includes('減半'));
 });
