@@ -264,6 +264,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 - **由訓練班 Sheet 讀取**：`/training` 貼上該班 `/exec`＋Key → 一撳自動帶入名稱／名額／收費／日期場地／截止／聯絡（主後台 `pullCourseProfile` → 該班 `getCourseProfile`，讀 `Input01`／`Input02`，label 對位；節次有「通告顯示日期」先上通告）。
 - **由通告網址讀取**：`/training` 貼上區網通告 PDF 連結 → 一撳自動讀出通告名／收費（連原價）／名額／截止／參加資格／節次／場地／聯絡（`/api/notice` 伺服器抓 PDF＋`pdf-parse` 抽字＋`lib/notice-parse.ts` label 對位；帖文頁連結會自動跟入面條 PDF；讀唔到會逐項警告唔會死填）。同 Sheet 讀取夾埋用：開班登記淨貼三樣（`/exec`＋Key＋通告連結）就填好晒表。
+- **開班登記精簡**：表單常駐淨三樣（① 收表 Script ② 入數紙 Drive 資料夾 ③ 通告連結）＋「📥 由訓練班 Sheet 讀取」＋「📥 由通告網址讀取」兩掣並排＋儲存；自動填好嘅欄收埋喺「🔍 自動填好嘅資料」（讀完自動展開檢查）；**課程代碼留空由後台自動編**（`cl_…`）。測試：`node --experimental-strip-types scripts/test-training-wiring.ts`（10 項接線 regression）。
 - **區通告卡**（`/circulars`，職員專用，PDF only）：掛接訓練班 → 從訓練班帶入 → 補內文 → 列印傳統格式 PDF → 上載區網／交總會 → 回填 `noticeUrl`。編號人手輸入（區內唔重複）；報名辦法預設成員系統（Config `MEMBER_PORTAL_URL`）。
 - member-portal **唔使改**。詳見 [`docs/course-sheet-pull.md`](docs/course-sheet-pull.md)。
 

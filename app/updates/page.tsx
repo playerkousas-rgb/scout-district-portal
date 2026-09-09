@@ -5,6 +5,16 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>🎯 開班登記精簡：淨貼三樣＋兩個讀取掣（舊制）</h3>
+        <ul>
+          <li>🧭 <b>表單淨返三樣嘢</b>：① 收表 Script（<code>/exec</code>＋Key，CL 交嚟兩行一次過貼都識自動分開）② 入數紙 Drive 資料夾 ③ 通告連結 → 撳「📥 由訓練班 Sheet 讀取」＋「📥 由通告網址讀取」→ 儲存</li>
+          <li>📥 <b>「📥 由通告網址讀取」掣補返</b>：上版個 handler 仲喺度但表單掣唔見咗（淨返教學字眼），而家兩個讀取掣並排，加咗接線 regression 測試（<code>scripts/test-training-wiring.ts</code>）防再犯</li>
+          <li>🔍 <b>自動填好嘅欄收埋晒</b>：名稱／收費／名額／截止／節次⋯⋯全部收喺「🔍 自動填好嘅資料」，讀取完自動展開俾你檢查先儲存，畫面唔再一嘢彈十幾個格</li>
+          <li>🔢 <b>課程代碼唔使填</b>：吉住由後台自動編（<code>cl_…</code>），儲存後會話你知編咗咩；編輯舊班先至見到個代碼格</li>
+          <li>ℹ️ 純前端改動；後台 <code>Code.gs</code>／訓練班模版／member-portal 都<b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>📥 舊制開班：通告網址自動讀料（唔使換後台）</h3>
         <ul>
           <li>📥 <b>「🎓 訓練班管理」加「由通告網址讀取」</b>：貼上區網通告 PDF 連結一撳，通告名／收費（連原價）／名額／截止／參加資格／節次／場地／查詢聯絡自動填好——職員唔使再對住通告逐格打字</li>
