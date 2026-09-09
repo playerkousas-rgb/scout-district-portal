@@ -85,6 +85,15 @@ await check('readFromNotice 填晒通告全文欄（leader／uniform／remarks�
   assert.ok(body.includes('f.badges.join'), '徽章要由 badges 串埋');
 });
 
+await check('通告／Sheet 讀取都將 fileNo 接到課程編號 courseNo', () => {
+  const noticeAt = page.indexOf('async function readFromNotice');
+  const noticeBody = page.slice(noticeAt, page.indexOf('async function save()', noticeAt));
+  const sheetAt = page.indexOf('async function pullFromSheet');
+  const sheetBody = page.slice(sheetAt, noticeAt);
+  assert.ok(noticeBody.includes('courseNo: f.fileNo || d.courseNo'), '通告讀取要帶入內文檔案編號');
+  assert.ok(sheetBody.includes('courseNo: p.circular?.fileNo || d.courseNo'), 'Sheet 讀取要帶入 Print_通告 檔案編號');
+});
+
 await check('讀取成功／編輯舊班都會自動展開收埋區（setShowAuto(true) ≥ 3 處）', () => {
   const n = page.split('setShowAuto(true)').length - 1;
   assert.ok(n >= 3, `setShowAuto(true) 應該起碼 3 處（Sheet 讀取／通告讀取／編輯），而家 ${n}`);

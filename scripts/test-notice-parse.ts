@@ -22,14 +22,44 @@ console.log('通告 URL 自動讀料（parser）測試');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const textA = readFileSync(join(here, 'notice-2607-a.txt'), 'utf8');
+const textHead = readFileSync(join(here, 'notice-2607-head.txt'), 'utf8');
 // 變體 B：逐字隔開（模擬 pdf-parse 最散嘅排版）
 const textB = textA.replace(/([^\n])/g, '$1 ').replace(/ +/g, ' ');
 
 const URL_2607 = 'https://www.skwscout.org.hk/wp-content/uploads/2026/05/2607.pdf';
 const f = parseNoticeText(textA, { url: URL_2607, today: '2026-06-01' });
+const head = parseNoticeText(textHead, { url: URL_2607, today: '2026-06-01' });
 
 check('標題＝訓練班名', () => {
   assert.strictEqual(f.title, '社區參與章、公民章暨積極公民獎章系列訓練班');
+});
+
+check('真 PDF 通告頭之後仍揀到標題（唔會將會名當標題）', () => {
+  assert.strictEqual(head.title, '社區參與章、公民章暨積極公民獎章系列訓練班');
+});
+
+check('真 PDF 通告頭之後仍讀到 5 節（header label 唔會截走節次表）', () => {
+  assert.strictEqual(head.sessions.length, 5);
+  assert.strictEqual(head.sessions[4]?.dateISO, '2026-09-16');
+});
+
+check('通告頭文字讀到檔案編號 2607＋發出日期 2026-05-22', () => {
+  assert.strictEqual(head.fileNo, '2607');
+  assert.strictEqual(head.fileNoFrom, 'text');
+  assert.strictEqual(head.issueDate, '2026-05-22');
+});
+
+check('檔案編號／發出日期冇冒號都認，但唔誤認普通內文', () => {
+  const noColon = textHead.replace('檔案編號：2607', '檔案編號2607').replace('發出日期：2026年5月22日', '發出日期2026年5月22日');
+  const g = parseNoticeText(noColon, { url: URL_2607, today: '2026-06-01' });
+  assert.strictEqual(g.fileNo, '2607');
+  assert.strictEqual(g.fileNoFrom, 'text');
+  assert.strictEqual(g.issueDate, '2026-05-22');
+  assert.deepStrictEqual(g.warnings, []);
+});
+
+check('帶通告頭 2607 fixture 零警告', () => {
+  assert.deepStrictEqual(head.warnings, []);
 });
 
 check('收費 100＋原價 200＋費用段全文', () => {
