@@ -162,6 +162,69 @@ API（全部需 `canCourse`）：`createCourseSheet {link, setup, cells, clEmail
 Print_通告／接納通知書／財政預算／訓練班完成報告／領取證書紀錄／總會資助計劃／
 取錄名單／合格名單／學員名單／學員出席紀錄／收支紀錄／班職員名單。座標範圍：行 1–500、欄 1–30。
 
+### 🛡 防呆：rev 樂觀鎖＋一次過儲存（v4.15.0）
+
+十個職員同時看＋改唔撞爛，靠四樣（全部做喺班 Script，職員前端照跟）：
+
+1. **改完一次過存**：`saveCourseBatch` 一個 call 存晒（唔好逐格 auto-save，每格打一次後端）。
+2. **先驗證、後執行**：成批有錯就乜都唔寫（唔會寫一半）。
+3. **ScriptLock 排隊**：同時撳儲存會排住嚟；真係等唔到就回 `locked: true`，叫職員再撳一次。
+4. **rev 樂觀鎖**：班 Sheet 隱藏 `_Sync` 分頁（A1 rev／B1 savedAt／C1 by）。讀全文帶 `rev`／`revSavedAt`／`revBy`；
+   儲存帶 `baseRev`（讀返嚟嗰個）；有人快咗一步就回 `conflict: true`＋邊個幾時改過，今次乜都冇寫入。
+   成功先 bump rev＋回新 `rev`／`savedAt`——**存儲先確認**。支出係 append-only（唔同職員自動唔同行），
+   所以 `addExpenseRow`／純支出 batch 唔對 `baseRev`、唔 bump rev。區系統推送都會 bump rev。
+
+```json
+// 一次過儲存（cells＋完成報告＋證書＋支出，一個確認）
+{ "action": "saveCourseBatch", "apiKey": "ck_...", "baseRev": 7, "by": "李職員",
+  "cells": [{ "tab": "Input02 訓練班資料", "row": 18, "col": 2, "value": "2026-10-01" }],
+  "completion": [{ "code": "S01", "pass": "合格" }],
+  "cert": [{ "code": "S01", "pickupDate": "2026-11-01" }],
+  "expenses": [{ "amounts": { "B": "500" }, "note": "營費" }] }
+// → { "ok": true, "data": { "saved": true, "rev": 8, "savedAt": "2026-09-09T…",
+//     "details": { "cellsUpdated": 1, "skippedTabs": [], "completionRows": [10],
+//                  "certRows": [7], "expenses": [{ "row": 10, "receiptNo": "3" }] } } }
+
+// 有人快咗一步（HTTP 照 200，ok:false＋conflict:true，乜都冇寫入）
+// → { "ok": false, "conflict": true, "rev": 8, "savedAt": "…", "by": "陳職員",
+//     "error": "有人快咗一步改過（陳職員，…），請重讀最新再儲存（你今次乜都冇寫入）" }
+```
+
+職員前端食譜（抄得）：本地 draft＋dirty 提示 → 㩒［儲存］先打後端 → 成功 show 伺服器時間＋新 rev；
+見 `conflict: true` 就 banner「邊個幾時改過，請重讀再存」＋［重新讀取］掣；儲存緊 disable 個掣；唔做 auto-save。
+
+
+### 🛡 防呆：rev 樂觀鎖＋一次過儲存（v4.15.0）
+
+十個職員同時看＋改唔撞爛，靠四樣（全部做喺班 Script，職員前端照跟）：
+
+1. **改完一次過存**：`saveCourseBatch` 一個 call 存晒（唔好逐格 auto-save，每格打一次後端）。
+2. **先驗證、後執行**：成批有錯就乜都唔寫（唔會寫一半）。
+3. **ScriptLock 排隊**：同時撳儲存會排住嚟；真係等唔到就回 `locked: true`，叫職員再撳一次。
+4. **rev 樂觀鎖**：班 Sheet 隱藏 `_Sync` 分頁（A1 rev／B1 savedAt／C1 by）。讀全文帶 `rev`／`revSavedAt`／`revBy`；
+   儲存帶 `baseRev`（讀返嚟嗰個）；有人快咗一步就回 `conflict: true`＋邊個幾時改過，今次乜都冇寫入。
+   成功先 bump rev＋回新 `rev`／`savedAt`——**存儲先確認**。支出係 append-only（唔同職員自動唔同行），
+   所以 `addExpenseRow`／純支出 batch 唔對 `baseRev`、唔 bump rev。區系統推送都會 bump rev。
+
+```json
+// 一次過儲存（cells＋完成報告＋證書＋支出，一個確認）
+{ "action": "saveCourseBatch", "apiKey": "ck_...", "baseRev": 7, "by": "李職員",
+  "cells": [{ "tab": "Input02 訓練班資料", "row": 18, "col": 2, "value": "2026-10-01" }],
+  "completion": [{ "code": "S01", "pass": "合格" }],
+  "cert": [{ "code": "S01", "pickupDate": "2026-11-01" }],
+  "expenses": [{ "amounts": { "B": "500" }, "note": "營費" }] }
+// → { "ok": true, "data": { "saved": true, "rev": 8, "savedAt": "2026-09-09T…",
+//     "details": { "cellsUpdated": 1, "skippedTabs": [], "completionRows": [10],
+//                  "certRows": [7], "expenses": [{ "row": 10, "receiptNo": "3" }] } } }
+
+// 有人快咗一步（HTTP 照 200，ok:false＋conflict:true，乜都冇寫入）
+// → { "ok": false, "conflict": true, "rev": 8, "savedAt": "…", "by": "陳職員",
+//     "error": "有人快咗一步改過（陳職員，…），請重讀最新再儲存（你今次乜都冇寫入）" }
+```
+
+職員前端食譜（抄得）：本地 draft＋dirty 提示 → 㩒［儲存］先打後端 → 成功 show 伺服器時間＋新 rev；
+見 `conflict: true` 就 banner「邊個幾時改過，請重讀再存」＋［重新讀取］掣；儲存緊 disable 個掣；唔做 auto-save。
+
 ### 主後台：`pullCourseProfile`（POST，需 `canCourse`）
 
 ```json
@@ -210,15 +273,15 @@ v4.13.0 新增 `feeNote`／`signupNote` 欄，舊表自動補）／
 
 ## 部署
 
-1. 主後台：`gs/Code.gs`（v4.14.0）全部覆蓋 → 跑 `setupSheets()`（自動補 `CourseLinks`
+1. 主後台：`gs/Code.gs`（v4.15.0）全部覆蓋 → 跑 `setupSheets()`（自動補 `CourseLinks`
    `sheetId`／`setupJson` 兩欄＋`COURSE_TEMPLATE_ID`／`COURSE_FOLDER_ID` Config）→ 重新部署。
-   驗證：`?action=getHealthCheck` 見 `version: "4.14.0"`。
+   驗證：`?action=getHealthCheck` 見 `version: "4.15.0"`。（v4.15.0 唔使跑 setupSheets，冇新表。）
 2. 新制總模版：開空白 Sheet → 貼訓練班模版 → 跑 `setupCourseSheet()` → 試算表 ID
    填 Config `COURSE_TEMPLATE_ID`（`/training` 新分頁會顯示設好未）。
 3. Config 填 `MEMBER_PORTAL_URL`（成員系統網址，通告「報名辦法」用）。
-4. 訓練班 Script 模版：`gs/Code.gs.course.js`（v4.14.0 加 `getCourseSheetRaw`）。**新開班**用新模版一鍵建表；
+4. 訓練班 Script 模版：`gs/Code.gs.course.js`（v4.14.0 加 `getCourseSheetRaw`＋`🔑 產生 API Key`＋寫入 API；v4.15.0 加 `saveCourseBatch`＋rev 防呆＋`_Sync` 版本號）。**新開班**用新模版一鍵建表；
    **舊班要將新模版覆蓋貼上**（千祈唔好重跑 setup，會清空！），pull 通告全文先用到。
-   改完模版記得 `cp gs/Code.gs.course.js public/downloads/Code.gs.course.js.txt`。
+   改完記得同步下載檔：`cp gs/Code.gs.course.js public/downloads/Code.gs.course.js.txt`（主後台都改埋就一併 `cp gs/Code.gs public/downloads/Code.gs.txt`）。
 5. member-portal：**唔使改**（`noticeUrl` 照舊指向區網 PDF；報名用現有內置表）。
 
 ## 測試

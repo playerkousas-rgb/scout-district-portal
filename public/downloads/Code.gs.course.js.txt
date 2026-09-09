@@ -1345,6 +1345,7 @@ function doPost(e) {
     case 'setCompletionRow': return json(setCompletionRow_(body));
     case 'setCertRow':       return json(setCertRow_(body));
     case 'addExpenseRow':    return json(addExpenseRow_(body));
+    case 'saveCourseBatch':   return json(saveCourseBatch_(body));
     default:              return json(err('未知的 action: ' + action));
   }
 }
@@ -1371,6 +1372,7 @@ function getCourseSheetRaw_(b) {
   if (ps) {
     try { pw = ps.getRange('W1:X5').getValues(); } catch (e) { pw = []; }
   }
+  var revInfo = getRevInfo_(ss);
   return ok({
     input01: dump(IN1), input02: dump(IN2), input03: dump(IN3), input04: dump(IN4),
     resp: dump(RESP_SHEET), paramsWX: pw,
@@ -1378,11 +1380,17 @@ function getCourseSheetRaw_(b) {
     finance: dump('Print_財政預算'), completion: dump('Print_訓練班完成報告'),
     cert: dump('Print_領取證書紀錄'), subsidy: dump('Print_總會資助計劃'),
     pulledAt: new Date().toISOString(),
+    rev: revInfo.rev, revSavedAt: revInfo.savedAt, revBy: revInfo.by,
   });
 }
 
 // ===================== 寫入 API（職員前端用：改設定／合格／證書／實支） =====================
-// 同 getCourseSheetRaw 一齊組成職員前端契約：讀全文 → 改 → 寫返格。
+// 同 getCourseSheetRaw 一齊組成職員前端契約：讀全文（帶 rev）→ 改 → 一次過儲存。
+// 🛡 防呆（十個職員同時看＋改都唔撞爛）：
+//   1. 改完先存：saveCourseBatch 一個 call 存晒（唔好逐格 auto-save，每格打一次後端）。
+//   2. 先驗證、後執行：成批有錯就乜都唔寫（唔會寫一半）。
+//   3. ScriptLock 排隊：同時撳儲存會排住嚟，唔會交錯寫爛。
+//   4. rev 樂觀鎖：儲存帶 baseRev（讀返嚟嗰個）；有人快咗一步就回 conflict，唔覆蓋人哋嘢。
 // 全部要 apiKey；座標跟 v4.13.0 模版（人手舊表唔保證啱位）。
 
 var COURSE_WRITABLE_TABS = [IN1, IN2, IN3, IN4, RESP_SHEET, PARAM_SHEET,
@@ -1391,93 +1399,290 @@ var COURSE_WRITABLE_TABS = [IN1, IN2, IN3, IN4, RESP_SHEET, PARAM_SHEET,
   'Print_取錄名單', 'Print_合格名單', 'Print_學員名單', 'Print_學員出席紀錄',
   'Print_收支紀錄', 'Print_班職員名單'];
 
-/** 通用寫格：{cells:[{tab,row,col,value}]}（上限 1000 格；冇嗰頁／唔識嗰頁 skip） */
+var SYNC_TAB = '_Sync'; // 隱藏分頁：A1 rev／B1 savedAt／C1 by（邊個職員存）
+
+function normCell_(v) { return String(v == null ? '' : v).trim(); }
+
+/** 讀版本（冇 _Sync 即舊表，當 rev 0） */
+function getRevInfo_(ss) {
+  try {
+    var sh = ss.getSheetByName(SYNC_TAB);
+    if (!sh) return { rev: 0, savedAt: '', by: '' };
+    var v = sh.getDataRange().getValues();
+    var row = (v && v[0]) || [];
+    return { rev: Number(row[0]) || 0, savedAt: normCell_(row[1]), by: normCell_(row[2]) };
+  } catch (e) { return { rev: 0, savedAt: '', by: '' }; }
+}
+
+/** 存完 bump rev（冇 _Sync 就開一個收埋）；回 { rev, savedAt, by } */
+function bumpRev_(ss, by) {
+  var sh = ss.getSheetByName(SYNC_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(SYNC_TAB);
+    try { sh.hideSheet(); } catch (e) {}
+  }
+  var info = { rev: getRevInfo_(ss).rev + 1, savedAt: new Date().toISOString(), by: String(by || '') };
+  sh.getRange(1, 1).setValue(info.rev);
+  sh.getRange(1, 2).setValue(info.savedAt);
+  sh.getRange(1, 3).setValue(info.by);
+  return info;
+}
+
+/** baseRev 對唔上 → conflict（叫前端重讀再存，今次乜都冇寫） */
+function conflict_(ss) {
+  var cur = getRevInfo_(ss);
+  var who = cur.by || '另一職員';
+  return { ok: false, conflict: true, rev: cur.rev, savedAt: cur.savedAt, by: cur.by,
+    error: '有人快咗一步改過（' + who + (cur.savedAt ? '，' + cur.savedAt : '') + '），請重讀最新再儲存（你今次乜都冇寫入）' };
+}
+
+function checkBaseRev_(ss, baseRev) {
+  if (baseRev === undefined || baseRev === null || baseRev === '') return null; // 唔帶 = 照寫
+  if (Number(baseRev) !== getRevInfo_(ss).rev) return conflict_(ss);
+  return null;
+}
+
+/** 寫入鎖：排隊等最多 10 秒；等唔到就叫職員再撳一次（唔會寫一半） */
+function withCourseLock_(fn) {
+  var lock = null;
+  try {
+    lock = LockService.getScriptLock();
+    lock.waitLock(10000);
+  } catch (e) {
+    return { ok: false, locked: true, error: '太多人同時儲存緊，請等幾秒再撳一次［儲存］（你今次乜都冇寫入）' };
+  }
+  try {
+    return fn();
+  } finally {
+    try { if (lock) lock.releaseLock(); } catch (e) {}
+  }
+}
+
+/** cells 座標預檢（唔識嘅頁唔當錯，到執行先 skip）→ 錯訊或 '' */
+function validateCells_(cells) {
+  for (var i = 0; i < cells.length; i++) {
+    var c = cells[i] || {};
+    if (COURSE_WRITABLE_TABS.indexOf(String(c.tab || '')) < 0) continue;
+    var row = Number(c.row), col = Number(c.col);
+    if (!row || !col || row < 1 || col < 1 || row > 500 || col > 30) return '格座標不正確（第 ' + (i + 1) + ' 格）';
+  }
+  return '';
+}
+
+/** 完成報告搵學員列（rows 10–31，A 學員編號／B 中文姓名）→ row 或 -1 */
+function findCompletionRow_(sh, code, name) {
+  var v = sh.getDataRange().getValues();
+  for (var r = 9; r <= 30 && r < v.length; r++) {
+    if ((code && normCell_(v[r][0]) === code) || (!code && name && normCell_(v[r][1]) === name)) return r + 1;
+  }
+  return -1;
+}
+
+/** 領取證書搵學員列（rows 7–29，B 學員編號／C 中文姓名）→ row 或 -1 */
+function findCertRow_(sh, code, name) {
+  var v = sh.getDataRange().getValues();
+  for (var r = 6; r <= 28 && r < v.length; r++) {
+    if ((code && normCell_(v[r][1]) === code) || (!code && name && normCell_(v[r][2]) === name)) return r + 1;
+  }
+  return -1;
+}
+
+/** Input04 空收據行（rows 8–42，B–J 冇嘢即空）→ [{ row, receiptNo }] */
+function emptyExpenseRows_(sh) {
+  var v = sh.getDataRange().getValues();
+  var out = [];
+  for (var r = 7; r <= 41; r++) {
+    var empty = true;
+    for (var c = 1; c <= 9; c++) {
+      if (normCell_((v[r] || [])[c]) !== '') { empty = false; break; }
+    }
+    if (empty) out.push({ row: r + 1, receiptNo: normCell_((v[r] || [])[0]) });
+  }
+  return out;
+}
+
+var EXPENSE_COLS = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+
+/** 通用寫格：{cells:[{tab,row,col,value}]}（上限 1000 格；冇嗰頁／唔識嗰頁 skip；錯一格就成批唔寫） */
 function setCourseCells_(b) {
   if (!authKey_(b.apiKey)) return err('Unauthorized: invalid or missing apiKey');
   var cells = b.cells;
   if (!Array.isArray(cells) || !cells.length) return err('cells 必填（陣列）');
   if (cells.length > 1000) return err('一次最多寫 1000 格');
+  var bad = validateCells_(cells);
+  if (bad) return err(bad);
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var updated = 0, skipped = [];
-  for (var i = 0; i < cells.length; i++) {
-    var c = cells[i] || {};
-    var tab = String(c.tab || '');
-    var row = Number(c.row), col = Number(c.col);
-    if (COURSE_WRITABLE_TABS.indexOf(tab) < 0) { if (tab && skipped.indexOf(tab) < 0) skipped.push(tab); continue; }
-    if (!row || !col || row < 1 || col < 1 || row > 500 || col > 30) return err('格座標不正確（第 ' + (i + 1) + ' 格）');
-    var sh = ss.getSheetByName(tab);
-    if (!sh) { if (skipped.indexOf(tab) < 0) skipped.push(tab); continue; }
-    sh.getRange(row, col).setValue(c.value === undefined ? '' : c.value);
-    updated++;
-  }
-  return ok({ updated: updated, skippedTabs: skipped });
+  return withCourseLock_(function () {
+    var stale = checkBaseRev_(ss, b.baseRev);
+    if (stale) return stale;
+    var skipped = [], updated = 0;
+    for (var i = 0; i < cells.length; i++) {
+      var c = cells[i] || {};
+      var tab = String(c.tab || '');
+      if (COURSE_WRITABLE_TABS.indexOf(tab) < 0) { if (tab && skipped.indexOf(tab) < 0) skipped.push(tab); continue; }
+      var sh = ss.getSheetByName(tab);
+      if (!sh) { if (skipped.indexOf(tab) < 0) skipped.push(tab); continue; }
+      sh.getRange(Number(c.row), Number(c.col)).setValue(c.value === undefined ? '' : c.value);
+      updated++;
+    }
+    var info = bumpRev_(ss, b.by);
+    return ok({ updated: updated, skippedTabs: skipped, rev: info.rev, savedAt: info.savedAt });
+  });
 }
 
 /** 完成報告學員列：by 學員編號／中文姓名，寫 D 證書／E 合格與否／F 不合格原因（淨寫有帶嘅欄） */
 function setCompletionRow_(b) {
   if (!authKey_(b.apiKey)) return err('Unauthorized: invalid or missing apiKey');
-  var code = String(b.code || '').trim(), name = String(b.name || '').trim();
+  var code = normCell_(b.code), name = normCell_(b.name);
   if (!code && !name) return err('code（學員編號）或 name（中文姓名）二揀一必填');
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Print_訓練班完成報告');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('Print_訓練班完成報告');
   if (!sh) return err('找不到「Print_訓練班完成報告」分頁');
-  var v = sh.getDataRange().getValues();
-  for (var r = 9; r <= 30 && r < v.length; r++) { // rows 10–31
-    var a = String(v[r][0] == null ? '' : v[r][0]).trim();
-    var n = String(v[r][1] == null ? '' : v[r][1]).trim();
-    if ((code && a === code) || (!code && name && n === name)) {
-      if (b.certNo !== undefined) sh.getRange(r + 1, 4).setValue(b.certNo);
-      if (b.pass !== undefined) sh.getRange(r + 1, 5).setValue(b.pass);
-      if (b.failReason !== undefined) sh.getRange(r + 1, 6).setValue(b.failReason);
-      return ok({ updated: true, row: r + 1 });
-    }
-  }
-  return err('完成報告搵唔到呢位學員（先確認已取錄）');
+  return withCourseLock_(function () {
+    var stale = checkBaseRev_(ss, b.baseRev);
+    if (stale) return stale;
+    var row = findCompletionRow_(sh, code, name);
+    if (row < 0) return err('完成報告搵唔到呢位學員（先確認已取錄）');
+    if (b.certNo !== undefined) sh.getRange(row, 4).setValue(b.certNo);
+    if (b.pass !== undefined) sh.getRange(row, 5).setValue(b.pass);
+    if (b.failReason !== undefined) sh.getRange(row, 6).setValue(b.failReason);
+    var info = bumpRev_(ss, b.by);
+    return ok({ updated: true, row: row, rev: info.rev, savedAt: info.savedAt });
+  });
 }
 
 /** 領取證書：by 學員編號／中文姓名，寫 E 證書編號／F 領取日期／G 簽收（淨寫有帶嘅欄） */
 function setCertRow_(b) {
   if (!authKey_(b.apiKey)) return err('Unauthorized: invalid or missing apiKey');
-  var code = String(b.code || '').trim(), name = String(b.name || '').trim();
+  var code = normCell_(b.code), name = normCell_(b.name);
   if (!code && !name) return err('code（學員編號）或 name（中文姓名）二揀一必填');
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Print_領取證書紀錄');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('Print_領取證書紀錄');
   if (!sh) return err('找不到「Print_領取證書紀錄」分頁');
-  var v = sh.getDataRange().getValues();
-  for (var r = 6; r <= 28 && r < v.length; r++) { // rows 7–29，B–G
-    var a = String((v[r][1] == null ? '' : v[r][1])).trim();
-    var n = String((v[r][2] == null ? '' : v[r][2])).trim();
-    if ((code && a === code) || (!code && name && n === name)) {
-      if (b.certNo !== undefined) sh.getRange(r + 1, 5).setValue(b.certNo);
-      if (b.pickupDate !== undefined) sh.getRange(r + 1, 6).setValue(b.pickupDate);
-      if (b.signed !== undefined) sh.getRange(r + 1, 7).setValue(b.signed);
-      return ok({ updated: true, row: r + 1 });
-    }
-  }
-  return err('領取證書紀錄搵唔到呢位學員（先確認已取錄）');
+  return withCourseLock_(function () {
+    var stale = checkBaseRev_(ss, b.baseRev);
+    if (stale) return stale;
+    var row = findCertRow_(sh, code, name);
+    if (row < 0) return err('領取證書紀錄搵唔到呢位學員（先確認已取錄）');
+    if (b.certNo !== undefined) sh.getRange(row, 5).setValue(b.certNo);
+    if (b.pickupDate !== undefined) sh.getRange(row, 6).setValue(b.pickupDate);
+    if (b.signed !== undefined) sh.getRange(row, 7).setValue(b.signed);
+    var info = bumpRev_(ss, b.by);
+    return ok({ updated: true, row: row, rev: info.rev, savedAt: info.savedAt });
+  });
 }
 
-/** 實際支出：搵 Input04 第一個空收據行（8–42）寫入；amounts={B:v,C:v,…,J:v}／note→K 欄 */
+/** 實際支出：搵 Input04 第一個空收據行（8–42）寫入；amounts={B:v,…,J:v}／note→K 欄。
+ *  append-only：唔對 baseRev、唔 bump rev（唔會撞爛人哋嘅嘢；鎖排隊保證唔同職員唔同行）。 */
 function addExpenseRow_(b) {
   if (!authKey_(b.apiKey)) return err('Unauthorized: invalid or missing apiKey');
-  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(IN4);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(IN4);
   if (!sh) return err('找不到「' + IN4 + '」分頁');
   var amounts = b.amounts || {};
-  var hasNote = b.note !== undefined && String(b.note).trim() !== '';
-  var keys = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].filter(function (L) {
-    return amounts[L] !== undefined && String(amounts[L]).trim() !== '';
+  var keys = EXPENSE_COLS.filter(function (L) {
+    return amounts[L] !== undefined && normCell_(amounts[L]) !== '';
   });
+  var hasNote = b.note !== undefined && normCell_(b.note) !== '';
   if (!keys.length && !hasNote) return err('amounts／note 至少填一樣');
-  var v = sh.getDataRange().getValues();
-  for (var r = 7; r <= 41; r++) { // rows 8–42
-    var empty = true;
-    for (var c = 1; c <= 9; c++) {
-      if (String(((v[r] || [])[c] == null ? '' : v[r][c])).trim() !== '') { empty = false; break; }
+  return withCourseLock_(function () {
+    var empties = emptyExpenseRows_(sh);
+    if (!empties.length) return err('支出表已滿（35 行收據用晒）');
+    var slot = empties[0];
+    keys.forEach(function (L) { sh.getRange(slot.row, L.charCodeAt(0) - 64).setValue(amounts[L]); });
+    if (hasNote) sh.getRange(slot.row, 11).setValue(b.note);
+    return ok({ added: true, row: slot.row, receiptNo: slot.receiptNo, rev: getRevInfo_(ss).rev, savedAt: new Date().toISOString() });
+  });
+}
+
+function expenseKeys_(amounts) {
+  var am = amounts || {};
+  return EXPENSE_COLS.filter(function (L) { return am[L] !== undefined && normCell_(am[L]) !== ''; });
+}
+
+/** 一次過儲存：{cells?, completion?[], cert?[], expenses?[], baseRev?, by?}
+ *  全部驗證過先寫；有錯就成批唔寫。淨係得 expenses 就唔對 baseRev／唔 bump（同 addExpenseRow 一樣）。 */
+function saveCourseBatch_(b) {
+  if (!authKey_(b.apiKey)) return err('Unauthorized: invalid or missing apiKey');
+  var cells = b.cells || [], completions = b.completion || [], certs = b.cert || [], expenses = b.expenses || [];
+  if (!cells.length && !completions.length && !certs.length && !expenses.length) return err('冇嘢要存（cells／completion／cert／expenses 至少帶一樣）');
+  if (cells.length > 1000) return err('一次最多寫 1000 格');
+  var bad = validateCells_(cells);
+  if (bad) return err(bad);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var shComp = completions.length ? ss.getSheetByName('Print_訓練班完成報告') : null;
+  var shCert = certs.length ? ss.getSheetByName('Print_領取證書紀錄') : null;
+  var shExp = expenses.length ? ss.getSheetByName(IN4) : null;
+  if (completions.length && !shComp) return err('找不到「Print_訓練班完成報告」分頁');
+  if (certs.length && !shCert) return err('找不到「Print_領取證書紀錄」分頁');
+  if (expenses.length && !shExp) return err('找不到「' + IN4 + '」分頁');
+  return withCourseLock_(function () {
+    var overwrite = cells.length > 0 || completions.length > 0 || certs.length > 0;
+    if (overwrite) { var stale = checkBaseRev_(ss, b.baseRev); if (stale) return stale; }
+    // ── 驗證（鎖入面，唔寫） ──
+    var compRows = [];
+    for (var i = 0; i < completions.length; i++) {
+      var cp = completions[i] || {};
+      var cc = normCell_(cp.code), cn = normCell_(cp.name);
+      if (!cc && !cn) return err('completion 第 ' + (i + 1) + ' 筆：code 或 name 必填（成批冇寫入）');
+      var cr = findCompletionRow_(shComp, cc, cn);
+      if (cr < 0) return err('completion 第 ' + (i + 1) + ' 筆搵唔到學員（成批冇寫入）');
+      compRows.push({ row: cr, p: cp });
     }
-    if (!empty) continue;
-    keys.forEach(function (L) { sh.getRange(r + 1, L.charCodeAt(0) - 64).setValue(amounts[L]); });
-    if (hasNote) sh.getRange(r + 1, 11).setValue(b.note);
-    return ok({ added: true, receiptNo: String(((v[r] || [])[0] == null ? '' : v[r][0])).trim(), row: r + 1 });
-  }
-  return err('支出表已滿（35 行收據用晒）');
+    var certRows = [];
+    for (var j = 0; j < certs.length; j++) {
+      var tp = certs[j] || {};
+      var tc = normCell_(tp.code), tn = normCell_(tp.name);
+      if (!tc && !tn) return err('cert 第 ' + (j + 1) + ' 筆：code 或 name 必填（成批冇寫入）');
+      var tr = findCertRow_(shCert, tc, tn);
+      if (tr < 0) return err('cert 第 ' + (j + 1) + ' 筆搵唔到學員（成批冇寫入）');
+      certRows.push({ row: tr, p: tp });
+    }
+    for (var k = 0; k < expenses.length; k++) {
+      var ex = expenses[k] || {};
+      if (!expenseKeys_(ex.amounts).length && !(ex.note !== undefined && normCell_(ex.note) !== '')) {
+        return err('expenses 第 ' + (k + 1) + ' 筆：amounts／note 至少填一樣（成批冇寫入）');
+      }
+    }
+    var expSlots = expenses.length ? emptyExpenseRows_(shExp) : [];
+    if (expSlots.length < expenses.length) {
+      return err('支出表空位唔夠（得 ' + expSlots.length + ' 行，要 ' + expenses.length + ' 行；成批冇寫入）');
+    }
+    // ── 執行 ──
+    var skipped = [], updated = 0;
+    for (var m = 0; m < cells.length; m++) {
+      var c = cells[m] || {};
+      var tab = String(c.tab || '');
+      if (COURSE_WRITABLE_TABS.indexOf(tab) < 0) { if (tab && skipped.indexOf(tab) < 0) skipped.push(tab); continue; }
+      var sh = ss.getSheetByName(tab);
+      if (!sh) { if (skipped.indexOf(tab) < 0) skipped.push(tab); continue; }
+      sh.getRange(Number(c.row), Number(c.col)).setValue(c.value === undefined ? '' : c.value);
+      updated++;
+    }
+    compRows.forEach(function (t) {
+      if (t.p.certNo !== undefined) shComp.getRange(t.row, 4).setValue(t.p.certNo);
+      if (t.p.pass !== undefined) shComp.getRange(t.row, 5).setValue(t.p.pass);
+      if (t.p.failReason !== undefined) shComp.getRange(t.row, 6).setValue(t.p.failReason);
+    });
+    certRows.forEach(function (t) {
+      if (t.p.certNo !== undefined) shCert.getRange(t.row, 5).setValue(t.p.certNo);
+      if (t.p.pickupDate !== undefined) shCert.getRange(t.row, 6).setValue(t.p.pickupDate);
+      if (t.p.signed !== undefined) shCert.getRange(t.row, 7).setValue(t.p.signed);
+    });
+    var expOut = [];
+    for (var n = 0; n < expenses.length; n++) {
+      var exm = expenses[n] || {}, amm = exm.amounts || {}, slot = expSlots[n];
+      expenseKeys_(amm).forEach(function (L) { shExp.getRange(slot.row, L.charCodeAt(0) - 64).setValue(amm[L]); });
+      if (exm.note !== undefined && normCell_(exm.note) !== '') shExp.getRange(slot.row, 11).setValue(exm.note);
+      expOut.push({ row: slot.row, receiptNo: slot.receiptNo });
+    }
+    var info = overwrite ? bumpRev_(ss, b.by) : { rev: getRevInfo_(ss).rev, savedAt: new Date().toISOString() };
+    return ok({ saved: true, rev: info.rev, savedAt: info.savedAt,
+      details: { cellsUpdated: updated, skippedTabs: skipped,
+        completionRows: compRows.map(function (t) { return t.row; }),
+        certRows: certRows.map(function (t) { return t.row; }),
+        expenses: expOut } });
+  });
 }
 
 // ===================== Course Profile（開班自動填表＋通告預填） =====================

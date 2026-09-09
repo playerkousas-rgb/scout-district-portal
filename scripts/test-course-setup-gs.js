@@ -66,6 +66,7 @@ function makeCourseTab(name, rows = 110, cols = 25) {
         },
       };
     },
+    hideSheet: () => {},
     _data: data,
   };
 }
@@ -78,7 +79,7 @@ function makeCourseSs() {
   // 參數 W/X 常數（W=23, X=24）
   tabs['參數']._data[1][22] = '成員系統報名網址'; tabs['參數']._data[1][23] = 'https://member.example/training';
   tabs['參數']._data[2][22] = 'FPS 識別碼'; tabs['參數']._data[2][23] = '102866183';
-  return { getSheetByName: (n) => tabs[n] || null, _tabs: tabs };
+  return { getSheetByName: (n) => tabs[n] || null, insertSheet: (n) => (tabs[n] = makeCourseTab(n)), _tabs: tabs };
 }
 let courseSs = makeCourseSs();
 const openedIds = [];
@@ -336,9 +337,33 @@ check('saveCourseLink 照存 sheetId／setupJson；undefined＝保留', () => {
   assert.strictEqual(got.hasSetup, true);
 });
 
-check('健康檢查版本 4.14.0', () => {
+check('健康檢查版本 4.15.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.14.0');
+  assert.strictEqual(parsed.data.version, '4.15.0');
+});
+
+
+check('防呆：push 成功會 bump 班 Sheet _Sync rev（by 區系統）', () => {
+  const cur = courseSs._tabs['_Sync'] ? courseSs._tabs['_Sync']._data[0][0] : 0;
+  const r = ctx.pushCourseSetup_(dcToken, { courseId: 'cl-direct', cells: [
+    { tab: 'Input02 訓練班資料', row: 1, col: 1, value: 'x' },
+  ] });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.rev, cur + 1);
+  const sync = courseSs._tabs['_Sync']._data;
+  assert.strictEqual(sync[0][0], cur + 1);
+  assert.strictEqual(sync[0][2], '區系統');
+  assert.ok(sync[0][1], '有 savedAt');
+  const r2 = ctx.pushCourseSetup_(dcToken, { courseId: 'cl-direct', cells: [] });
+  assert.strictEqual(r2.data.rev, cur + 2);
+});
+
+check('防呆：direct 直讀 raw 帶 rev（同 _Sync 一致）', () => {
+  const r = ctx.pullCourseSheetRaw_(dcToken, { courseId: 'cl-direct' });
+  assert.ok(r.ok, JSON.stringify(r));
+  const sync = courseSs._tabs['_Sync'];
+  assert.strictEqual(r.data.rev, sync ? sync._data[0][0] : 0);
+  assert.strictEqual(r.data.revBy, '區系統');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

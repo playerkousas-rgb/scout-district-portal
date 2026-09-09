@@ -28,6 +28,7 @@ function makeSheet(name, rows) {
       getValue: () => at(row, col),
       setValue: (v) => { at(row, col); data[row - 1][col - 1] = v; },
     }),
+    hideSheet: () => {},
     _data: data,
   };
 }
@@ -136,11 +137,19 @@ const sheets = {
 
 const props = {};
 let lastAlert = '';
+let lockShouldFail = false;
 const ctx = {
+  LockService: {
+    getScriptLock: () => ({
+      waitLock: () => { if (lockShouldFail) throw new Error('lock busy'); },
+      releaseLock: () => {},
+    }),
+  },
   console,
   SpreadsheetApp: {
     getActiveSpreadsheet: () => ({
       getSheetByName: (n) => sheets[n] || null,
+      insertSheet: (n) => (sheets[n] = makeSheet(n, [])),
     }),
     getUi: () => ({ alert: (title, msg) => { lastAlert = String(title) + '\n' + String(msg == null ? '' : msg); } }),
   },
@@ -407,7 +416,7 @@ sheets['Print_領取證書紀錄'] = makeSheet('Print_領取證書紀錄', realC
 sheets['Input04_Print支出表'] = makeSheet('Input04_Print支出表', realInput04());
 
 check('寫入 API：錯 key 全部被擋（經 doPost router）', () => {
-  ['setCourseCells', 'setCompletionRow', 'setCertRow', 'addExpenseRow'].forEach(a => {
+  ['setCourseCells', 'setCompletionRow', 'setCertRow', 'addExpenseRow', 'saveCourseBatch'].forEach(a => {
     const r = JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action: a, apiKey: 'wrong' }) } }));
     assert.strictEqual(r.ok, false);
     assert.ok(/Unauthorized/.test(r.error), a);
@@ -483,6 +492,135 @@ check('addExpenseRow：乜都冇填／爆滿 → 報錯', () => {
   assert.strictEqual(r.ok, false);
   assert.ok(/已滿/.test(r.error));
   sheets['Input04_Print支出表'] = keep;
+});
+
+
+const revNow = () => ctx.getCourseSheetRaw_({ apiKey: KEY }).data.rev;
+
+check('防呆：raw 帶 rev／revSavedAt／revBy', () => {
+  const d = ctx.getCourseSheetRaw_({ apiKey: KEY }).data;
+  assert.strictEqual(typeof d.rev, 'number');
+  assert.ok('revSavedAt' in d && 'revBy' in d);
+});
+
+check('防呆：儲存回 rev＋savedAt，rev 每次＋1', () => {
+  const r0 = revNow();
+  const r = ctx.setCourseCells_({ apiKey: KEY, by: '陳職員', cells: [
+    { tab: 'Input02 訓練班資料', row: 4, col: 2, value: '31' },
+  ] });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.rev, r0 + 1);
+  assert.ok(r.data.savedAt);
+  assert.strictEqual(revNow(), r0 + 1);
+  assert.strictEqual(ctx.getCourseSheetRaw_({ apiKey: KEY }).data.revBy, '陳職員');
+});
+
+check('防呆：baseRev 舊 → conflict＋乜都冇寫；新 baseRev 先寫得', () => {
+  const r0 = revNow();
+  const before = sheets['Input02 訓練班資料']._data[3][1];
+  const stale = ctx.setCourseCells_({ apiKey: KEY, baseRev: r0 - 1, cells: [
+    { tab: 'Input02 訓練班資料', row: 4, col: 2, value: '爛嘢' },
+  ] });
+  assert.strictEqual(stale.ok, false);
+  assert.strictEqual(stale.conflict, true);
+  assert.strictEqual(stale.rev, r0);
+  assert.ok(/快咗一步/.test(stale.error));
+  assert.ok(/陳職員/.test(stale.error), '話埋邊個改過');
+  assert.strictEqual(sheets['Input02 訓練班資料']._data[3][1], before, '乜都冇寫入');
+  assert.strictEqual(revNow(), r0, 'rev 唔郁');
+  const fresh = ctx.setCourseCells_({ apiKey: KEY, baseRev: r0, cells: [
+    { tab: 'Input02 訓練班資料', row: 4, col: 2, value: '32' },
+  ] });
+  assert.ok(fresh.ok, JSON.stringify(fresh));
+  assert.strictEqual(fresh.data.rev, r0 + 1);
+});
+
+check('防呆：錯座標 → 成批冇寫（連第一格都唔郁）', () => {
+  const before = sheets['Input02 訓練班資料']._data[3][1];
+  const r0 = revNow();
+  const bad = ctx.setCourseCells_({ apiKey: KEY, cells: [
+    { tab: 'Input02 訓練班資料', row: 4, col: 2, value: '想寫爛' },
+    { tab: 'Input02 訓練班資料', row: 999, col: 1, value: 'x' },
+  ] });
+  assert.strictEqual(bad.ok, false);
+  assert.strictEqual(sheets['Input02 訓練班資料']._data[3][1], before);
+  assert.strictEqual(revNow(), r0);
+});
+
+check('防呆：鎖忙 → 友善錯誤＋冇寫入', () => {
+  lockShouldFail = true;
+  const before = sheets['Input02 訓練班資料']._data[3][1];
+  const r0 = revNow();
+  const r = ctx.setCourseCells_({ apiKey: KEY, cells: [
+    { tab: 'Input02 訓練班資料', row: 4, col: 2, value: '鎖住都想寫' },
+  ] });
+  lockShouldFail = false;
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.locked, true);
+  assert.ok(/太多人同時儲存/.test(r.error));
+  assert.strictEqual(sheets['Input02 訓練班資料']._data[3][1], before);
+  assert.strictEqual(revNow(), r0);
+});
+
+check('防呆：addExpenseRow 係 append-only，唔 bump rev', () => {
+  const r0 = revNow();
+  const r = ctx.addExpenseRow_({ apiKey: KEY, amounts: { C: '88' }, note: '防呆試' });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.rev, r0);
+  assert.strictEqual(revNow(), r0);
+});
+
+check('saveCourseBatch：混合一次過存，單一確認＋rev＋1', () => {
+  const r0 = revNow();
+  const r = ctx.saveCourseBatch_({ apiKey: KEY, baseRev: r0, by: '李職員',
+    cells: [{ tab: 'Input02 訓練班資料', row: 5, col: 2, value: '33' }],
+    completion: [{ code: 'SFA-01', pass: '合格' }],
+    cert: [{ code: 'SFA-01', pickupDate: '2026-09-20' }],
+    expenses: [{ amounts: { D: '200' }, note: 'batch支出' }],
+  });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.saved, true);
+  assert.strictEqual(r.data.rev, r0 + 1);
+  assert.ok(r.data.savedAt);
+  const d = plain(r.data.details);
+  assert.strictEqual(d.cellsUpdated, 1);
+  assert.deepStrictEqual(d.completionRows, [10]);
+  assert.deepStrictEqual(d.certRows, [7]);
+  assert.strictEqual(d.expenses.length, 1);
+  assert.strictEqual(sheets['Input02 訓練班資料']._data[4][1], '33');
+  assert.strictEqual(sheets['Print_訓練班完成報告']._data[9][4], '合格');
+  assert.strictEqual(sheets['Print_領取證書紀錄']._data[6][5], '2026-09-20');
+});
+
+check('saveCourseBatch：有錯就成批冇寫（格＋完成報告＋支出都唔郁）', () => {
+  const beforeCell = sheets['Input02 訓練班資料']._data[4][1];
+  const beforePass = sheets['Print_訓練班完成報告']._data[9][4];
+  const expBefore = JSON.stringify(sheets['Input04_Print支出表']._data);
+  const r0 = revNow();
+  const r = ctx.saveCourseBatch_({ apiKey: KEY,
+    cells: [{ tab: 'Input02 訓練班資料', row: 5, col: 2, value: '想寫爛' }],
+    completion: [{ code: '冇呢個人' }],
+    expenses: [{ amounts: { E: '1' } }],
+  });
+  assert.strictEqual(r.ok, false);
+  assert.ok(/成批冇寫入/.test(r.error));
+  assert.strictEqual(sheets['Input02 訓練班資料']._data[4][1], beforeCell);
+  assert.strictEqual(sheets['Print_訓練班完成報告']._data[9][4], beforePass);
+  assert.strictEqual(JSON.stringify(sheets['Input04_Print支出表']._data), expBefore);
+  assert.strictEqual(revNow(), r0);
+});
+
+check('saveCourseBatch：純 expenses 得，唔對 baseRev 唔 bump', () => {
+  const r0 = revNow();
+  const r = ctx.saveCourseBatch_({ apiKey: KEY, baseRev: 999999, expenses: [{ amounts: { F: '66' } }] });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.rev, r0);
+  assert.strictEqual(revNow(), r0);
+});
+
+check('saveCourseBatch：冇嘢／缺 key → 報錯', () => {
+  assert.strictEqual(ctx.saveCourseBatch_({ apiKey: KEY }).ok, false);
+  assert.strictEqual(ctx.saveCourseBatch_({ apiKey: KEY, completion: [{}] }).ok, false);
 });
 
 console.log(pass ? `\n全部通過（${pass} 項）✓` : '\n冇跑到任何測試');

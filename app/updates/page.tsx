@@ -5,6 +5,15 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.15.0 — 🛡 寫入防呆：rev 樂觀鎖＋一次過儲存</h3>
+        <ul>
+          <li>🛡 <b>十個職員同時改都唔撞爛</b>：班 Sheet 加隱藏 <code>_Sync</code> 版本號；讀全文帶 <code>rev</code>，儲存帶返 <code>baseRev</code>——有人快咗一步就唔寫，直接話你邊個幾時改過，叫你重讀再存</li>
+          <li>💾 <b>改完一次過存</b>：新 <code>saveCourseBatch</code> 一個 call 存晒（設定格＋完成報告＋證書＋支出）；成批驗證，有錯就乜都唔寫。唔好逐格 auto-save，每格打一次後端</li>
+          <li>🔒 全部寫入加鎖排隊，唔會交錯寫爛；支出係 append-only（唔同職員自動唔同行）；區系統推送都會 bump rev</li>
+          <li>⚠️ 要換新 <code>Code.gs</code>（v4.15.0）→ 重新部署（唔使跑 setupSheets，冇新表）；訓練班模版覆蓋貼上（新開班用新模版一鍵建表，舊班覆蓋唔好重跑 setup）。member-portal <b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>📝 訓練班模版更新 — ✍️ 寫入 API（職員前端基本合約）</h3>
         <ul>
           <li>✍️ <b>每班 Script 加 4 個寫入 API</b>（全部要該班 API Key）：<code>setCourseCells</code> 通用寫格（上限 1000 格，唔識嘅頁自動 skip）／<code>setCompletionRow</code> 完成報告學員列（D 證書／E 合格與否／F 原因）／<code>setCertRow</code> 領取證書（E 證書編號／F 領取日期／G 簽收）／<code>addExpenseRow</code> 實際支出（自動搵下一個空收據行）。對位用學員編號優先、中文姓名後備</li>
@@ -242,7 +251,7 @@ export default function UpdatesPage() {
       </div>
       <div className="info-card">
         <h3>後台程式碼</h3>
-        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.14.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
+        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.15.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
       </div>
     </>
   );

@@ -705,6 +705,7 @@ export interface CourseSheetRaw {
   cert: SheetMatrix;         // Print_領取證書紀錄
   subsidy: SheetMatrix;      // Print_總會資助計劃
   pulledAt: string;
+  rev?: number; revSavedAt?: string; revBy?: string; // v4.15.0：_Sync 版本號（防呆樂觀鎖用）
 }
 
 /** 名單列（approved 順序） */

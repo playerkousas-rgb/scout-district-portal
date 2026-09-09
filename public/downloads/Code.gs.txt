@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.14.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.15.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -129,6 +129,8 @@
  *   saveCircular／deleteCircular／setCircularStatus（circulars 卡 edit 權限）
  *   pullCourseProfile（canCourse）  由訓練班 Script 讀 getCourseProfile，開班自動填表
  * courseId 掛接 CourseLinks：附帶該班名額／已報／截止 snapshot。
+ * v4.15.0 寫入防呆：班 Sheet _Sync 版本號（rev 樂觀鎖＋儲存確認）＋訓練班 Script
+ * saveCourseBatch 一次過儲存；區系統推送都會 bump rev。
  * v4.14.0 新制直入：區系統填設定 → createCourseSheet 自動複製班 Sheet＋寫入 →
  * pushCourseSetup 雙向同步 → pullCourseSheetRaw 讀全文 → 12 張網頁列印。
  * 區網 PDF 連結回填 CourseLinks.noticeUrl（成員系統訓練班自動跳轉睇真通告）。
@@ -300,7 +302,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.14.0',
+      version: '4.15.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -3369,6 +3371,21 @@ function createCourseSheet_(token, b) {
  * 推送設定：將區系統嘅設定寫返入班 Sheet（direct openById，唔經 /exec）。
  * b: { courseId, setup, cells }。只限自動建嘅班（有 sheetId）。
  */
+/** 班 Sheet 版本號 bump（同訓練班 Script _Sync 同一格：A1 rev／B1 savedAt／C1 by）。
+ *  區系統推送都要 bump，等職員前端知有人改過（讀返嚟嘅 rev 對唔上就會 conflict）。 */
+function bumpCourseRev_(ss, by) {
+  var sh = ss.getSheetByName('_Sync');
+  if (!sh) { sh = ss.insertSheet('_Sync'); try { sh.hideSheet(); } catch (e) {} }
+  var rev = 0;
+  try { rev = Number((sh.getDataRange().getValues()[0] || [])[0]) || 0; } catch (e) { rev = 0; }
+  rev++;
+  var at = new Date().toISOString();
+  sh.getRange(1, 1).setValue(rev);
+  sh.getRange(1, 2).setValue(at);
+  sh.getRange(1, 3).setValue(String(by || ''));
+  return { rev: rev, savedAt: at };
+}
+
 function pushCourseSetup_(token, b) {
   var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
   b = b || {};
@@ -3376,16 +3393,19 @@ function pushCourseSetup_(token, b) {
   if (!link) return err('找不到此訓練班（courseId）');
   var sheetId = String(link.sheetId || '').trim();
   if (!sheetId) return err('呢班係人手建表，冇後端 Sheet ID（新制推送只限區系統自動建嘅班）');
-  var applied;
+  var applied, css;
   try {
-    applied = applySetupCells_(SpreadsheetApp.openById(sheetId), b.cells || []);
+    css = SpreadsheetApp.openById(sheetId);
+    applied = applySetupCells_(css, b.cells || []);
   } catch (e) { return err('寫入班 Sheet 失敗：' + e); }
+  var revInfo = { rev: -1, savedAt: '' };
+  try { revInfo = bumpCourseRev_(css, '區系統'); } catch (e) { revInfo = { rev: -1, savedAt: '' }; }
   if (b.setup) {
     var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.COURSE_LINKS);
     var idx = rowIndexByCol_(sh, 'courseId', String(b.courseId).trim());
     if (idx > 0) setCellByHeader_(sh, idx, 'setupJson', JSON.stringify(b.setup));
   }
-  return ok({ pushed: true, courseId: String(b.courseId).trim(), sheetId: sheetId, cellsApplied: applied.applied, skippedTabs: applied.skippedTabs });
+  return ok({ pushed: true, courseId: String(b.courseId).trim(), sheetId: sheetId, cellsApplied: applied.applied, skippedTabs: applied.skippedTabs, rev: revInfo.rev });
 }
 
 /** 由試算表 ID 直接 dump 成份 raw（同訓練班 Script getCourseSheetRaw 同一形狀） */
@@ -3397,6 +3417,14 @@ function dumpCourseSheetRaw_(ss) {
   var pw = [];
   var ps = ss.getSheetByName('參數');
   if (ps) { try { pw = ps.getRange('W1:X5').getValues(); } catch (e) { pw = []; } }
+  var rev = 0, revSavedAt = '', revBy = '';
+  try {
+    var sync = ss.getSheetByName('_Sync');
+    if (sync) {
+      var sv = sync.getDataRange().getValues();
+      if (sv && sv[0]) { rev = Number(sv[0][0]) || 0; revSavedAt = String(sv[0][1] || ''); revBy = String(sv[0][2] || ''); }
+    }
+  } catch (e) {}
   return {
     input01: dump('Input01 訓練班預算'), input02: dump('Input02 訓練班資料'),
     input03: dump('Input03 時間表'), input04: dump('Input04_Print支出表'),
@@ -3405,6 +3433,7 @@ function dumpCourseSheetRaw_(ss) {
     finance: dump('Print_財政預算'), completion: dump('Print_訓練班完成報告'),
     cert: dump('Print_領取證書紀錄'), subsidy: dump('Print_總會資助計劃'),
     pulledAt: new Date().toISOString(),
+    rev: rev, revSavedAt: revSavedAt, revBy: revBy,
   };
 }
 
