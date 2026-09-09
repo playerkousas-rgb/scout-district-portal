@@ -259,7 +259,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 - **用邊個連結？** 貼 **PDF**（正本，名額／班領導人／服裝／備註／查詢齊晒）最好；貼**帖文頁**都得——會自動跟去 PDF 讀正本，仲讀埋網頁標籤（徽章／支部）。網頁管理員嘅擇要係刪減版，少咗一堆項目，所以唔好齋靠佢。
 - **CourseLinks 加 5 欄**（`leader`／`uniform`／`remarks`／`signupText`／`feeNote`）：由「📥 由通告網址讀取」或「📥 由訓練班 Sheet 讀取」（Print_通告內文）帶入；`listCourseLinks` 公開回傳 → 成員系統訓練班列表顯示 班領導人／服裝／「付款須知及備註（通告全文）」。舊表 `setupSheets()` 自動補欄，唔清資料。
 - **多班同掛冇問題**：幾個班同時啟用，各自指向自己嘅收表 Script；成員報邊個班，`submitCourseReg` 就按 `courseId` 轉發去嗰個班嘅 Script（apiKey／入數紙資料夾各自歸屬），報名互唔干擾。
-- 測試：`node scripts/test-course-links-gs.js`（10 項：新欄寫讀＋三班兩 Script 對號轉發＋舊表升級）、`node --experimental-strip-types scripts/test-notice-parse.ts`（19 項：2607 PDF＋網頁擇要版＋標籤）。
+- 測試：`node scripts/test-course-links-gs.js`（10 項：新欄寫讀＋三班兩 Script 對號轉發＋舊表升級）、`node --experimental-strip-types scripts/test-notice-parse.ts`（24 項：2607 PDF＋通告頭／無冒號 label＋網頁擇要版＋標籤）。
 
 ## 📘 工作簿跟足開班文件＋CL 填一次（v4.13.0）
 
@@ -271,7 +271,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 - **由訓練班 Sheet 讀取**：`/training` 貼上該班 `/exec`＋Key → 一撳自動帶入名稱／名額／收費／日期場地／截止／聯絡（主後台 `pullCourseProfile` → 該班 `getCourseProfile`，讀 `Input01`／`Input02`，label 對位；節次有「通告顯示日期」先上通告）。
 - **由通告網址讀取**：`/training` 貼上區網通告 **PDF 或帖文頁**連結都得 → 一撳自動讀出通告名／收費（連原價＋資助說明）／名額／截止／參加資格／節次／場地／聯絡／**班領導人／服裝／備註／報名辦法／費用全文**，再由標題／網頁標籤拆出**徽章／支部**（`/api/notice` 伺服器抓 PDF＋`pdf-parse` 抽字＋`lib/notice-parse.ts` label 對位；貼帖文頁會自動跟入面條 PDF 正本＋讀埋標籤；讀唔到會逐項警告唔會死填）。同 Sheet 讀取夾埋用：開班登記淨貼三樣（`/exec`＋Key＋通告連結）就填好晒表。
-- **開班登記精簡**：表單常駐淨三樣（① 收表 Script ② 入數紙 Drive 資料夾 ③ 通告連結）＋「📥 由訓練班 Sheet 讀取」＋「📥 由通告網址讀取」兩掣並排＋儲存；自動填好嘅欄收埋喺「🔍 自動填好嘅資料」（讀完自動展開檢查）；**課程代碼留空由後台自動編**（`cl_…`）。測試：`node --experimental-strip-types scripts/test-training-wiring.ts`（12 項接線 regression）。
+- **開班登記精簡**：表單常駐淨三樣（① 收表 Script ② 入數紙 Drive 資料夾 ③ 通告連結）＋「📥 由訓練班 Sheet 讀取」＋「📥 由通告網址讀取」兩掣並排＋儲存；自動填好嘅欄收埋喺「🔍 自動填好嘅資料」（讀完自動展開檢查）；**課程代碼留空由後台自動編**（`cl_…`）。測試：`node --experimental-strip-types scripts/test-training-wiring.ts`（13 項接線 regression）。
 - **區通告卡**（`/circulars`，職員專用，PDF only）：掛接訓練班 → 從訓練班帶入 → 補內文 → 列印傳統格式 PDF → 上載區網／交總會 → 回填 `noticeUrl`。編號人手輸入（區內唔重複）；報名辦法預設成員系統（Config `MEMBER_PORTAL_URL`）。
 - member-portal 顯示通告全文欄要套 [`docs/member-portal-course-fields.patch`](docs/member-portal-course-fields.patch)（v4.16.0，包含 FPS QR）。詳見 [`docs/course-sheet-pull.md`](docs/course-sheet-pull.md)。
 

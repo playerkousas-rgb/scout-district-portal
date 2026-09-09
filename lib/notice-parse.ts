@@ -57,9 +57,20 @@ export function zhDateToISO(y: string, m: string, d: string, todayISO: string): 
 
 interface LabelHit { label: string; at: number; end: number }
 
-/** 喺 flat 流搵 label 錨點（label＋冒號；順全篇搵，唔假設次序） */
+/** 檔案編號／發出日期有時係 PDF 表格字，抽出後冇冒號；冇冒號時要見到值形先認。 */
+function metadataValueWithoutColon(f: string, valueAt: number): boolean {
+  const next = f.slice(valueAt, valueAt + 1);
+  if (/[0-9０-９]/u.test(next)) return true;
+  if (next === '（' || next === '(') {
+    return /[0-9０-９]/u.test(f.slice(valueAt + 1, valueAt + 10));
+  }
+  return false;
+}
+
+/** 喺 flat 流搵 label 錨點（label＋冒號；檔案頭兩個 label 容忍冇冒號） */
 function findLabels(f: string): LabelHit[] {
   const hits: LabelHit[] = [];
+  const metadataLabels = new Set<string>(['檔案編號', '發出日期']);
   LABELS.forEach(label => {
     let from = 0;
     for (;;) {
@@ -67,11 +78,13 @@ function findLabels(f: string): LabelHit[] {
       if (at < 0) break;
       const after = f.slice(at + label.length, at + label.length + 1);
       from = at + 1;
-      // 緊接冒號先算（「有關費用並」呢啲內文唔計）
-      if (after !== '：' && after !== ':') continue;
+      const hasColon = after === '：' || after === ':';
+      // 一般內文 label 必須有冒號；通告頭嘅檔案編號／發出日期，
+      // pdf-parse 有機會將冒號漏掉，所以只接受「下一字似值」嘅變體。
+      if (!hasColon && (!metadataLabels.has(label) || !metadataValueWithoutColon(f, at + label.length))) continue;
       // 同一 label 只取第一個錨點
       if (hits.some(h => h.label === label)) break;
-      hits.push({ label, at, end: at + label.length + 1 });
+      hits.push({ label, at, end: at + label.length + (hasColon ? 1 : 0) });
       break;
     }
   });
@@ -80,9 +93,53 @@ function findLabels(f: string): LabelHit[] {
 }
 
 /** 節次表頭（日期／時間／地點，中間咩分隔都得） */
+function tableHeadMatch(f: string): RegExpExecArray | null {
+  return /日期.{0,3}時間.{0,3}地點/.exec(f);
+}
+
 function tableHeadAt(f: string): number {
-  const m = /日期.{0,3}時間.{0,3}地點/.exec(f);
+  const m = tableHeadMatch(f);
   return m ? (m.index ?? -1) : -1;
+}
+
+/** 回傳通告頭 metadata 值嘅尾端，方便由「信頭＋值」之後開始搵標題。 */
+function metadataValueEnd(f: string, hit: LabelHit): number {
+  const tail = f.slice(hit.end, hit.end + 48);
+  const value = hit.label === '檔案編號'
+    ? /[（(]?([0-9０-９]{1,6})/.exec(tail)
+    : /[（(]?(\d{4})年(\d{1,2})月(\d{1,2})日/.exec(tail);
+  if (!value || value.index === undefined) return hit.end;
+  let end = hit.end + value.index + value[0].length;
+  // header 有時會將值包喺全形／半形括號內；唔好令右括號黐咗標題。
+  if (f[end] === '）' || f[end] === ')') end++;
+  return end;
+}
+
+/** 通告頭嘅所有 label＋值完結位置（只睇表頭之前，免得正文重提時影響標題）。 */
+function noticeHeaderEnd(f: string, hits: LabelHit[], titleBoundary: number): number {
+  let end = 0;
+  for (const hit of hits) {
+    if (hit.at >= titleBoundary) break;
+    if (hit.label !== '檔案編號' && hit.label !== '發出日期') continue;
+    end = Math.max(end, metadataValueEnd(f, hit));
+  }
+  return end;
+}
+
+const TITLE_HINT = /訓練班|課程|獎章|章/u;
+
+/**
+ * 標題區可能仲有 logo／會名等信頭碎料；剔走常見信頭後，揀含標題關鍵字而且最長嘅一嚿。
+ * flat() 已經移除換行，所以唔依賴 PDF 原本嘅行結構。
+ */
+function pickTitle(titleZone: string): string {
+  const chunks = String(titleZone || '')
+    .split(/香港童軍總會|港島地域|筲箕灣區|活動通告|通告/u)
+    .map(s => s.trim())
+    .filter(Boolean);
+  const marked = chunks.filter(s => TITLE_HINT.test(s));
+  const candidates = marked.length ? marked : chunks;
+  return candidates.sort((a, b) => b.length - a.length)[0] || '';
 }
 
 /** 由節次 chunk 拆 time／venue（time 係時間字集最長前綴＋以時半分結尾） */
@@ -102,10 +159,14 @@ function splitTimeVenue(rest: string): { time: string; venue: string } {
 }
 
 function parseSessions(f: string, hits: LabelHit[], todayISO: string): NoticeSession[] {
-  const headAt = tableHeadAt(f);
+  const head = tableHeadMatch(f);
+  const headAt = head?.index ?? -1;
   if (headAt < 0) return [];
-  const headEnd = headAt + (/日期.{0,3}時間.{0,3}地點/.exec(f)?.[0].length || 6);
-  const nextLabel = hits.length ? (hits[0]?.at ?? f.length) : f.length;
+  const headEnd = headAt + (head?.[0].length || 6);
+  // 檔案頭嘅「檔案編號／發出日期」都係 hits，但唔可以用佢哋截走節次表。
+  // 只由表頭之後第一個正文 label 結束節次區。
+  const bodyLabel = hits.filter(h => h.at > headEnd)[0];
+  const nextLabel = bodyLabel?.at ?? f.length;
   const zone = f.slice(headEnd, Math.max(headEnd, nextLabel));
   const chunks = zone.split(/(?=\d{4}年\d{1,2}月\d{1,2}日)/).map(s => s.trim()).filter(Boolean);
   const out: NoticeSession[] = [];
@@ -223,16 +284,15 @@ export function parseNoticeText(rawText: string, opts: ParseNoticeOpts = {}): No
     return f.slice(h.end, end);
   };
 
-  // ── 標題：表頭／第一個 label 之前，剔走頁首碎料 ──
+  // ── 標題：剔走通告頭，再由標題區揀最長嘅關鍵字嚿 ──
   const headAt = tableHeadAt(f);
-  const firstLabelAt = hits.length ? (hits[0]?.at ?? f.length) : f.length;
-  const cut = Math.min(headAt >= 0 ? headAt : f.length, firstLabelAt);
-  let titleZone = f.slice(0, Math.max(0, cut));
-  titleZone = titleZone
-    .replace(/^(香港童軍總會[^區]{0,12}區)?/, '')
-    .replace(/^(通告|活動通告|訓練班通告)?/, '');
-  // 表頭圖片 alt／頁碼碎料（短過 4 字嘅頭尾碎料唔要）
-  empty.title = titleZone.trim();
+  const firstBodyLabel = hits.find(h => h.label !== '檔案編號' && h.label !== '發出日期');
+  // 有節次表就以表頭做邊界；冇表時沿用「第一個正文 label 之前」嘅後備。
+  const titleBoundary = headAt >= 0 ? headAt : (firstBodyLabel?.at ?? f.length);
+  const headerEnd = noticeHeaderEnd(f, hits, titleBoundary);
+  const titleStart = headerEnd > 0 && headerEnd < titleBoundary ? headerEnd : 0;
+  const titleZone = f.slice(titleStart, Math.max(titleStart, titleBoundary));
+  empty.title = pickTitle(titleZone);
   if (!empty.title) empty.warnings.push('讀唔到通告標題');
 
   // ── 節次 ──

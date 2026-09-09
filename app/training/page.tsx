@@ -111,6 +111,7 @@ export default function TrainingPage() {
       title: link.title || d.title,
       badgeName: link.badgeName || d.badgeName,
       section: link.section || d.section,
+      courseNo: p.circular?.fileNo || d.courseNo,
       fee: link.fee || d.fee,
       quota: link.quota || d.quota,
       deadline: link.deadline || d.deadline,
@@ -148,6 +149,7 @@ export default function TrainingPage() {
     setDraft(d => ({
       ...d,
       title: f.title || d.title,
+      courseNo: f.fileNo || d.courseNo,
       fee: f.fee || d.fee,
       originalFee: f.originalFee || d.originalFee,
       subsidyNote: f.subsidyNote || d.subsidyNote,
