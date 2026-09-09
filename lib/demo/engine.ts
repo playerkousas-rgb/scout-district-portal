@@ -10,7 +10,7 @@
  */
 
 import {
-  freshDemoDb, demoUserFor, demoRoomEvents, demoBudget,
+  freshDemoDb, demoUserFor, demoRoomEvents, demoBudget, demoCourseProfile,
   DEMO_ORG_GROUPS, DEMO_STAFF_ROWS, DEMO_HKSA_COUNCIL, DEMO_HKSA_DEPTS,
   DEMO_TOKEN, type DemoDb, type DemoUser,
 } from './seed.ts';
@@ -624,6 +624,82 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const r = requireUser(token, 2); if (isErr(r)) return r;
       d.courseLinks = d.courseLinks.filter(x => x.courseId !== payload.courseId);
       persistDb(); return ok({ deleted: true });
+    }
+    case 'pullCourseProfile': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const execUrl = String(payload.scriptExecUrl || payload.apiBase || '').trim();
+      if (!execUrl && !payload.courseId) return fail('缺少訓練班 Script 網址（scriptExecUrl）');
+      return ok(demoCourseProfile());
+    }
+
+    // ── 區通告 ──
+    case 'getCirculars': {
+      const r = requireUser(token); if (isErr(r)) return r;
+      const list = d.circulars.filter(n => n.id).map((n): AnyObj => {
+        const link = n.courseId ? d.courseLinks.find(x => x.courseId === n.courseId) : undefined;
+        const dl = String(n.deadline || '').trim();
+        return {
+          ...n,
+          isOpen: n.status === 'published' && (!dl || dl >= today()),
+          course: link ? {
+            courseId: link.courseId, title: link.title, fee: link.fee ?? '', deadline: link.deadline ?? '',
+            quota: link.quota ?? '', filled: link.filled ?? '', noticeUrl: link.noticeUrl || '',
+          } : null,
+        };
+      }).sort((a, b) => String(b.issueDate || '').localeCompare(String(a.issueDate || '')));
+      let maxNo = 0;
+      d.circulars.forEach(n => {
+        const m = String(n.circularNo || '').trim().match(/^(\d{1,6})$/);
+        if (m) maxNo = Math.max(maxNo, Number(m[1]));
+      });
+      return ok({ items: list, suggestedNo: maxNo > 0 ? String(maxNo + 1) : '' });
+    }
+    case 'saveCircular': {
+      const r = requireUser(token, 3); if (isErr(r)) return r;
+      const c = (payload.circular || {}) as AnyObj;
+      const no = String(c.circularNo || '').trim();
+      const title = String(c.title || '').trim();
+      if (!no) return fail('通告編號必填');
+      if (!title) return fail('標題必填');
+      const dup = d.circulars.find(x => String(x.circularNo) === no && x.id !== c.id);
+      if (dup) return fail(`通告編號「${no}」已經用咗（${dup.title || dup.id}）`);
+      const row = c.id ? d.circulars.find(x => x.id === c.id) : undefined;
+      if (row) {
+        Object.assign(row, c, { id: row.id, districtCode: row.districtCode, createdAt: row.createdAt, updatedAt: nowIso() });
+        if ((row.status === 'published' || row.status === 'closed') && !row.publishedAt) {
+          row.publishedAt = nowIso(); row.publishedBy = (r as DemoUser).displayName;
+        }
+        persistDb(); return ok({ saved: true, id: row.id, created: false });
+      }
+      const id = genId('cr');
+      const now = nowIso();
+      const st = c.status || 'draft';
+      d.circulars.unshift({
+        id, districtCode: 'DEMO', ...c, circularNo: no, title, status: st,
+        publishedAt: (st === 'published' || st === 'closed') ? now : '',
+        publishedBy: (st === 'published' || st === 'closed') ? (r as DemoUser).displayName : '',
+        updatedAt: now, createdAt: now,
+      });
+      persistDb(); return ok({ saved: true, id, created: true });
+    }
+    case 'deleteCircular': {
+      const r = requireUser(token, 3); if (isErr(r)) return r;
+      const row = d.circulars.find(x => x.id === payload.id);
+      if (!row) return fail('找不到該通告');
+      d.circulars = d.circulars.filter(x => x.id !== payload.id);
+      persistDb(); return ok({ deleted: true, id: payload.id });
+    }
+    case 'setCircularStatus': {
+      const r = requireUser(token, 3); if (isErr(r)) return r;
+      const st = String(payload.status || '').toLowerCase();
+      if (['draft', 'published', 'closed', 'archived'].indexOf(st) < 0) return fail('狀態不正確');
+      const row = d.circulars.find(x => x.id === payload.id);
+      if (!row) return fail('找不到該通告');
+      row.status = st; row.updatedAt = nowIso();
+      if ((st === 'published' || st === 'closed') && !row.publishedAt) {
+        row.publishedAt = nowIso(); row.publishedBy = (r as DemoUser).displayName;
+      }
+      persistDb(); return ok({ saved: true, id: payload.id, status: st });
     }
 
     // ── 外掛 ──

@@ -59,6 +59,7 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'visit', title: '旅團探訪', icon: '🏕', type: 'builtin', url: '/visit', description: '一撳登記探訪 · 未探旅團紅燈 · 季度報告', order: 1, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'contacts', title: '聯絡簿', icon: '📇', type: 'builtin', url: '/contacts', description: '聯絡電話：旅團 · 港島地域 · 總會（職員姓名區方可改）', order: 2, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'awards', title: '獎勵提名', icon: '🎖', type: 'builtin', url: '/awards', description: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', order: 3, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'circulars', title: '區通告', icon: '📜', type: 'builtin', url: '/circulars', description: '開班資料自動帶入 · 傳統通告列印 PDF 上載區網', order: 4, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'budget', title: '區年度預算', icon: '📑', type: 'builtin', url: '/budget', description: '直讀區方預算 Sheet · 按月／支部 · 資助合計', order: 5, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'committee', title: '委任系統', icon: '🗂', type: 'builtin', url: '/committee', description: '委任 · 續任 · R02', order: 7, enabled: true, embed: false, source: 'core', category: 'todo' },
   { cardId: 'unit', title: '旅團管理系統', icon: '🧭', type: 'builtin', url: '/unit', description: '旅名冊 · 人數統計', order: 8, enabled: true, embed: false, source: 'core', category: 'todo' },
@@ -99,6 +100,7 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
       const lv = roleLevel[role];
       if (c.cardId === 'awards') m[c.cardId][role] = lv <= 2 ? 'edit' : '';
       else if (c.cardId === 'visit') m[c.cardId][role] = lv <= 3 ? 'edit' : 'view';
+      else if (c.cardId === 'circulars') m[c.cardId][role] = lv <= 4 ? 'edit' : 'view';
       else m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
     });
   });
@@ -252,6 +254,71 @@ export function demoIncidentReports(): Record<string, any>[] {
   ];
 }
 
+export function demoCirculars(): Record<string, any>[] {
+  return [
+    {
+      id: 'cr-01', districtCode: 'DEMO', circularNo: '2607', category: '訓練班',
+      title: '社區參與章、公民章暨積極公民獎章系列訓練班（示範）', sections: '童軍',
+      sessions: [
+        { date: '2026年7月20日（星期一）', time: '晚上7時至晚上10時', venue: '區總部 1704 室' },
+        { date: '2026年7月27日（星期一）', time: '晚上7時至晚上10時', venue: '區總部 1704 室' },
+      ],
+      leader: '楊德銘先生', eligibility: '1．已宣誓及持有有效紀錄冊之童軍支部成員；\n2．港島地域成員將獲優先取錄。',
+      fee: '100', originalFee: '', subsidyNote: '', quota: '30', deadline: dateOnly(-20), courseId: 'cl-01',
+      signupUrl: '', uniform: '整齊童軍制服',
+      remarks: '1．報名前須獲得家長及旅團領袖同意；\n2．學員必須全期出席，不得遲到或早退。',
+      contactName: '楊德銘', contactEmail: 'civics@demo', contactPhone: '5721 1100', enquiryNote: '',
+      attachments: [], issueDate: dateOnly(-30), issuer: '區總監 陳大文', signedBy: '',
+      status: 'published', publishedAt: iso(30), publishedBy: '黃志強', updatedAt: iso(1), createdAt: iso(35),
+    },
+    {
+      id: 'cr-02', districtCode: 'DEMO', circularNo: '2612', category: '活動',
+      title: '秋季大露營（示範草稿）', sections: '小童軍、幼童軍、童軍',
+      sessions: [{ date: '', time: '', venue: '' }],
+      leader: '', eligibility: '', fee: '', originalFee: '', subsidyNote: '', quota: '', deadline: '', courseId: '',
+      signupUrl: '', uniform: '', remarks: '', contactName: '', contactEmail: '', contactPhone: '', enquiryNote: '',
+      attachments: [], issueDate: dateOnly(0), issuer: '', signedBy: '',
+      status: 'draft', publishedAt: '', publishedBy: '', updatedAt: iso(0), createdAt: iso(0),
+    },
+    {
+      id: 'cr-03', districtCode: 'DEMO', circularNo: '2599', category: '訓練班',
+      title: '步操基礎班（示範・已截止）', sections: '童軍',
+      sessions: [{ date: '2026年5月10日（星期日）', time: '上午9時至下午1時', venue: '區總部' }],
+      leader: '林志傑先生', eligibility: '童軍支部成員', fee: '50', originalFee: '', subsidyNote: '',
+      quota: '40', deadline: dateOnly(10), courseId: '', signupUrl: '', uniform: '整齊童軍制服',
+      remarks: '', contactName: '林志傑', contactEmail: 'demo3@demo', contactPhone: '9345 6789', enquiryNote: '',
+      attachments: [], issueDate: dateOnly(-60), issuer: '區總監 陳大文', signedBy: '楊德銘',
+      status: 'closed', publishedAt: iso(60), publishedBy: '黃志強', updatedAt: iso(10), createdAt: iso(65),
+    },
+  ];
+}
+
+/** pullCourseProfile 示範回傳：照 Input01／Input02 結構（第1屆工作坊式 sample，虛構資料） */
+export function demoCourseProfile(): Record<string, any> {
+  return {
+    courseName: '第1屆急救工作坊（示範）', quota: '22', fee: '25', staffCount: '1',
+    deadline: dateOnly(-25), publishDate: dateOnly(-32), totalStaff: '1', residentStaff: '1',
+    sessions: [
+      { date: dateOnly(-40), time: '1900 - 2200', venue: '區總部', displayDate: '2026年10月9日（星期五）', displayTime: '晚上7時至晚上10時', displayVenue: '區總部', showOnCircular: true },
+      { date: dateOnly(-42), time: '0900 - 1700', venue: '區總部', displayDate: '2026年10月11日（星期日）', displayTime: '上午9時至下午5時', displayVenue: '區總部', showOnCircular: true },
+      { date: dateOnly(-43), time: '0000 - 1300', venue: '區總部', displayDate: '', displayTime: '', displayVenue: '', showOnCircular: false },
+    ],
+    staff: [
+      { role: '班領導人', name: '陳大文', title: '先生', unit: '筲箕灣區 區領袖', qualification: '急救教練員', phone: '9123 4567', email: 'demo@demo' },
+      { role: '班務行政', name: '黃志強', title: '先生', unit: '筲箕灣區', qualification: '', phone: '9234 5678', email: 'demo-adc@demo' },
+    ],
+    leader: { role: '班領導人', name: '陳大文', title: '先生', unit: '筲箕灣區 區領袖', qualification: '急救教練員', phone: '9123 4567', email: 'demo@demo' },
+    edition: '1', section: '童軍', badge: '急救', customName: '', form1: '', form2: '工作坊',
+    expectedIntake: '22', expectedFee: '25', expectedStaff: '4',
+    budgetDates: [
+      { date: dateOnly(-40), time: '1900 - 2200', venue: '區總部' },
+      { date: dateOnly(-42), time: '0900 - 1700', venue: '區總部' },
+    ],
+    budgetApproved: '500', subsidyRequired: '-1100',
+    pulledAt: new Date().toISOString(),
+  };
+}
+
 export function demoCourseLinks(): Record<string, any>[] {
   return [
     { courseId: 'cl-01', title: '初級領袖訓練班（BLT）2026 年 10 月班', badgeName: '領袖委任', section: '領袖', courseNo: 'BLT-2610', sessionsText: '10 月 3、10、17 日（週六）09:00–17:00', eligibility: '18 歲以上完成中五', fee: '850', deadline: `${dateOnly(15)} `, quota: '36', filled: '22', venue: '區總部 1704 室', contact: '訓練組 ddc.training@demo', active: 'TRUE', createdAt: iso(30) },
@@ -383,6 +450,7 @@ export interface DemoDb {
   activityNotices: Record<string, any>[];
   incidentReports: Record<string, any>[];
   courseLinks: Record<string, any>[];
+  circulars: Record<string, any>[];
   installedPlugins: string[];
   seq: number;
 }
@@ -396,6 +464,7 @@ export function freshDemoDb(): DemoDb {
       fpsAccountName: '筲箕灣區童軍會（示範戶口）',
       fpsAccountNumber: '123456-789（示範）',
       budgetSheetUrl: '',
+      memberPortalUrl: 'https://member-portal-demo.vercel.app',
     },
     system: { locked: false, lockMessage: '' },
     cards: JSON.parse(JSON.stringify(DEMO_CARDS)),
@@ -422,6 +491,7 @@ export function freshDemoDb(): DemoDb {
     activityNotices: demoActivityNotices(),
     incidentReports: demoIncidentReports(),
     courseLinks: demoCourseLinks(),
+    circulars: demoCirculars(),
     installedPlugins: [],
     seq: 1000,
   };

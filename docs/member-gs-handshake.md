@@ -328,3 +328,11 @@ member-portal 填表
 4. **部署 → 新部署**（或「管理部署」更新現有 Web App）。
 5. `Venues` / `Items` 表要有資料，member-portal 下拉先有得揀。
 6. 兩邊 Vercel 用同一個 `/exec` + 同一個 API Key。
+
+## 📜 區通告 PDF＋開班自動讀 Sheet（v4.12.0；member-portal 唔使改）
+
+- 管理系統新增 `pullCourseProfile`（讀訓練班 Sheet 自動開班）同 `circulars` 卡
+  （通告草稿 → 列印傳統格式 PDF → 上載區網 → 回填 `CourseLinks.noticeUrl`）。
+- 成員系統繼續用現有 `listCourseLinks`：`noticeUrl` 照舊指向**區網 PDF 真通告**；
+  報名用現有內置表（`submitCourseReg`）；通告「報名辦法」印成員系統 `/training` 網址。
+- 通告圖書館由區網／總會網站自動收錄，唔經本系統。詳見 `docs/course-sheet-pull.md`。

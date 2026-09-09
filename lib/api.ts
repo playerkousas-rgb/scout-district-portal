@@ -9,6 +9,7 @@ import type {
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
   CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
+  Circular, CircularsBoard, CircularStatus, CourseProfile,
 } from './types.ts';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers.ts';
 import type { IcsEvent } from './ics.ts';
@@ -153,6 +154,18 @@ export const api = {
     callPost('saveCourseLink', { token, link }),
   deleteCourseLink: (token: string, courseId: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteCourseLink', { token, courseId }),
+  pullCourseProfile: (token: string, req: { courseId?: string; scriptExecUrl?: string; scriptApiKey?: string }): Promise<ApiResult<CourseProfile>> =>
+    callPost('pullCourseProfile', { token, ...req }),
+
+  // 區通告（職員專用；輸出傳統格式 PDF 上載區網）
+  getCirculars: (token: string): Promise<ApiResult<CircularsBoard>> =>
+    callGet('getCirculars', { token }),
+  saveCircular: (token: string, circular: Partial<Circular>): Promise<ApiResult<{ saved: boolean; id: string; created: boolean }>> =>
+    callPost('saveCircular', { token, circular }),
+  deleteCircular: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
+    callPost('deleteCircular', { token, id }),
+  setCircularStatus: (token: string, id: string, status: CircularStatus): Promise<ApiResult<{ saved: boolean; id: string; status: CircularStatus }>> =>
+    callPost('setCircularStatus', { token, id, status }),
 
   // 借場（申請由 member-portal 公開端提交；呢度只做批核）
   listVenues: (): Promise<ApiResult<Venue[]>> => callGet('listVenues'),

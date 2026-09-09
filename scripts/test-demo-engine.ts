@@ -31,11 +31,12 @@ check('login：任何電郵密碼都入到同一個 ADC 示範身份（權限全
 });
 
 // ── 2. 卡片 ──
-check('getCards：權限全開 — 13 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
+check('getCards：權限全開 — 14 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
   const r = demoCall('getCards', { token: T.adc }, 'GET');
   assert.ok(r.ok);
   const ids = r.data.map((c: any) => c.cardId);
-  assert.strictEqual(ids.length, 13);
+  assert.strictEqual(ids.length, 14);
+  assert.ok(ids.indexOf('circulars') >= 0, '區通告卡要喺示範版出現');
   assert.ok(r.data.every((c: any) => c.access === 'edit'));
   assert.strictEqual(ids.indexOf('awards'), -1, '成人獎勵提名唔喺示範範圍');
   assert.strictEqual(ids.indexOf('news'), -1, 'news 卡已移除（消息喺主控台頂）');
@@ -167,7 +168,48 @@ check('extBudget：rows＋summary', () => {
   assert.ok(b.data.rows.length >= 5 && b.data.summary.length >= 3);
 });
 
-// ── 9. 重設 ──
+// ── 9. 區通告＋開班自動帶入 ──
+check('通告：3 張種子＋suggestedNo＝最大編號＋1；published 未過期＝接受報名中＋掛接班 snapshot', () => {
+  const b = demoCall('getCirculars', { token: T.adc }, 'GET');
+  assert.ok(b.ok);
+  assert.strictEqual(b.data.items.length, 3);
+  assert.strictEqual(b.data.suggestedNo, '2613');
+  const pub = b.data.items.find((n: any) => n.id === 'cr-01');
+  assert.ok(pub && pub.isOpen === true);
+  assert.ok(pub.course && pub.course.courseId === 'cl-01', '掛接訓練班 snapshot');
+  assert.strictEqual(typeof pub.url, 'undefined', 'PDF-only：唔再有公開 url 欄');
+  const bad = demoCall('getCirculars', { token: T.bad }, 'GET');
+  assert.strictEqual(bad.ok, false);
+});
+check('通告：編號重複被擋；開草稿→發佈（publishedAt 只設一次）→截止→封存→刪除', () => {
+  const dup = demoCall('saveCircular', { token: T.adc, circular: { circularNo: '2607', title: '撞號' } }, 'POST');
+  assert.strictEqual(dup.ok, false);
+  const created = demoCall('saveCircular', { token: T.adc, circular: { circularNo: '2613', title: '測試通告', category: '訓練班', sessions: [{ date: 'd', time: 't', venue: 'v' }], status: 'draft' } }, 'POST');
+  assert.ok(created.ok && created.data.created);
+  const id = created.data.id;
+  const p1 = demoCall('setCircularStatus', { token: T.adc, id, status: 'published' }, 'POST');
+  assert.ok(p1.ok);
+  const at1 = demoCall('getCirculars', { token: T.adc }, 'GET').data.items.find((n: any) => n.id === id).publishedAt;
+  assert.ok(at1, '首次發佈要設 publishedAt');
+  demoCall('setCircularStatus', { token: T.adc, id, status: 'closed' }, 'POST');
+  const at2 = demoCall('getCirculars', { token: T.adc }, 'GET').data.items.find((n: any) => n.id === id).publishedAt;
+  assert.strictEqual(at2, at1, '之後轉 status 唔可以再郁 publishedAt');
+  assert.ok(demoCall('setCircularStatus', { token: T.adc, id, status: 'archived' }, 'POST').ok);
+  assert.strictEqual(demoCall('setCircularStatus', { token: T.adc, id, status: 'bogus' }, 'POST').ok, false);
+  assert.ok(demoCall('deleteCircular', { token: T.adc, id }, 'POST').ok);
+  assert.strictEqual(demoCall('deleteCircular', { token: T.adc, id }, 'POST').ok, false, '刪咗再刪要報錯');
+});
+check('pullCourseProfile：冇 URL 被擋；有 URL 回示範 profile（Input02 結構：節次顯示＋班領導人）', () => {
+  assert.strictEqual(demoCall('pullCourseProfile', { token: T.adc }, 'POST').ok, false);
+  const r = demoCall('pullCourseProfile', { token: T.adc, scriptExecUrl: 'https://script.google.com/x/exec', scriptApiKey: 'k' }, 'POST');
+  assert.ok(r.ok);
+  assert.ok(r.data.courseName && r.data.deadline && r.data.quota && r.data.fee);
+  assert.ok(Array.isArray(r.data.sessions) && r.data.sessions.length >= 2);
+  assert.ok(r.data.sessions.some((x: any) => x.showOnCircular && x.displayDate), '至少一節上通告');
+  assert.ok(r.data.leader && /班領導人/.test(r.data.leader.role), '要有班領導人');
+});
+
+// ── 10. 重設 ──
 check('resetDemoData：加完消息重設返 4 條示範消息', () => {
   demoCall('saveAnnouncement', { token: T.adc, announcement: { title: '臨時消息', body: '' } }, 'POST');
   resetDemoData();

@@ -86,6 +86,7 @@ export interface DistrictConfig {
   fpsAccountName?: string;            // 轉數快戶口名（FPS QR 製作卡片用）
   fpsAccountNumber?: string | number; // Apps Script 會把純數字 Sheet 儲存格回傳為 number
   budgetSheetUrl?: string;            // v4.5.0：區年度預算 Google Sheet 網址（Config BUDGET_SHEET_URL；留空用內建）
+  memberPortalUrl?: string;           // v4.12.0：成員系統網址（通告「報名辦法」報名連結用）
 }
 
 export interface SystemState {
@@ -149,6 +150,59 @@ export interface CourseLink {
   fpsAccountName?: string;    // 生成當刻嘅收款戶口名（供公開端顯示）
   fpsAccountNumber?: string;  // 生成當刻嘅 FPS ID（供公開端顯示）
   fpsUpdatedAt?: string;      // QR 最後更新時間（ISO）
+}
+
+// ===================== 訓練班 Sheet profile（pullCourseProfile） =====================
+
+/** Input02 節次（showOnCircular = 有通告顯示日期，即上通告） */
+export interface CourseProfileSession {
+  date: string;         // yyyy-MM-dd
+  time: string;         // 例如 1900 - 2200
+  venue: string;
+  displayDate: string;  // 通告顯示日期（中文寫法）
+  displayTime: string;  // 通告顯示時間
+  displayVenue: string; // 通告顯示地點
+  showOnCircular: boolean;
+}
+
+/** Input02 職員（職位／姓名／稱謂／單位／資格／電話／電郵） */
+export interface CourseProfileStaff {
+  role: string;
+  name: string;
+  title: string;
+  unit: string;
+  qualification: string;
+  phone: string;
+  email: string;
+}
+
+/** 訓練班 Script getCourseProfile 回傳（Input01 預算＋Input02 資料） */
+export interface CourseProfile {
+  courseName: string;
+  quota: string;
+  fee: string;
+  staffCount: string;
+  deadline: string;       // yyyy-MM-dd
+  publishDate: string;    // 最遲公佈取錄名單日 yyyy-MM-dd
+  totalStaff: string;
+  residentStaff: string;
+  sessions: CourseProfileSession[];
+  staff: CourseProfileStaff[];
+  leader: CourseProfileStaff | null;  // 班領導人
+  // ── Input01 預算 ──
+  edition: string;
+  section: string;
+  badge: string;
+  customName: string;
+  form1: string;
+  form2: string;
+  expectedIntake: string;
+  expectedFee: string;
+  expectedStaff: string;
+  budgetDates: { date: string; time: string; venue: string }[];
+  budgetApproved: string;
+  subsidyRequired: string;
+  pulledAt: string;
 }
 
 // ===================== 一次性服務：借場 / 借物資 / 知會 =====================
@@ -456,4 +510,76 @@ export interface VisitBoard {
   years: number[];
   sections: { key: VisitSection; label: string }[];
   me: { email: string; role: string; name: string; defaultSection: VisitSection | '' };
+}
+
+/**
+ * 📜 區通告（v4.12.0）— Circulars 表（職員專用；輸出傳統格式 PDF）。
+ * 訓練班 Sheet → 訓練班目錄 → 通告草稿自動預填 → 列印 PDF 上載區網／交總會。
+ * sessions／attachments 喺 Sheet 以 JSON 字串存，API 讀寫都係陣列。
+ */
+export type CircularStatus = 'draft' | 'published' | 'closed' | 'archived';
+
+export interface CircularSession {
+  date: string;   // 節日期（yyyy-MM-dd 或中文寫法）
+  time: string;   // 時間（例如 下午七時至十時）
+  venue: string;  // 地點
+}
+
+export interface CircularAttachment {
+  label: string;
+  url: string;
+}
+
+/** 掛接訓練班 snapshot（後台由 CourseLinks 即時讀出） */
+export interface CircularCourseSnap {
+  courseId: string;
+  title: string;
+  fee: string;
+  deadline: string;
+  quota: string;
+  filled: string;
+  noticeUrl?: string;   // 區網 PDF 連結（職員回填；成員系統跳轉睇真通告）
+}
+
+export interface Circular {
+  id: string;
+  districtCode?: string;
+  circularNo: string;             // 通告編號（人手輸入，跨類別共用，區內唔重複）
+  category: string;               // 訓練班／活動／服務／比賽／會議／行政／其他
+  title: string;
+  sections?: string;              // 支部（「、」分隔）：小童軍／幼童軍／童軍／深資童軍／樂行童軍／領袖
+  sessions?: CircularSession[];
+  leader?: string;                // 班領導人
+  eligibility?: string;           // 參加資格
+  fee?: string;                   // 費用（字串：100／免費／詳見內文…）
+  originalFee?: string;
+  subsidyNote?: string;
+  quota?: string;
+  deadline?: string;              // 截止日期 yyyy-MM-dd
+  courseId?: string;              // 掛接訓練班（報名直達；留空＝純通告）
+  signupUrl?: string;              // 報名連結（成員系統訓練班頁；列印為報名辦法文字）
+  uniform?: string;               // 服裝
+  remarks?: string;               // 備註
+  contactName?: string;           // 查詢聯絡人
+  contactEmail?: string;
+  contactPhone?: string;
+  enquiryNote?: string;           // 查詢補充（例如「如在 X 月 X 日尚未接獲通知…」）
+  attachments?: CircularAttachment[];
+  issueDate?: string;             // 發出日期
+  issuer?: string;                // 署名（例如 區總監 袁可秀）
+  signedBy?: string;              // 代行（例如 楊德銘）
+  status?: CircularStatus;        // draft 草稿／published 已發佈／closed 截止／archived 封存
+  publishedAt?: string;
+  publishedBy?: string;           // 只管理系統回傳
+  updatedAt?: string;
+  createdAt?: string;             // 只管理系統回傳
+  // ── 後台計好嘅 ──
+  isOpen?: boolean;               // 接受報名中（已發佈＋未過截止）
+  course?: CircularCourseSnap | null;
+}
+
+/** 管理系統列表：全部通告＋下一個建議編號 */
+export interface CircularsBoard {
+  items: Circular[];
+  suggestedNo: string;
 }

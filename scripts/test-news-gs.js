@@ -241,8 +241,11 @@ check('未到日期（date 喺將來）未顯示', () => {
 });
 
 check('since 只回之後更新過嘅（供成員端「有新消息」判斷）', () => {
-  // 減 1 毫秒：saveAnnouncement 可能同一毫秒發生（since 係「嚴格之後」先當新消息）
-  const now = new Date(Date.now() - 1).toISOString();
+  // 先取值做 since（舊 save 一定早過／等於佢，<= 過濾必定唔出）；再等時鐘行前 5ms，
+  // 之後嘅 save updatedAt 必定新過 since —— 唔靠運氣，唔會同一毫秒撞車。
+  const now = new Date().toISOString();
+  const tSpin = Date.now();
+  while (Date.now() - tSpin < 5) { /* spin 等時鐘行前 */ }
   assert.strictEqual(ctx.listAnnouncements_({ since: now }).length, 0);
   assert.ok(ctx.saveAnnouncement_(dcToken, { title: '最新', body: '啱啱發' }).ok);
   const fresh = ctx.listAnnouncements_({ since: now });
@@ -308,9 +311,9 @@ check('doGet 公開路由 listAnnouncements 通', () => {
   assert.ok(parsed.data.length >= 0);
 });
 
-check('健康檢查版本 4.10.0', () => {
+check('健康檢查版本 4.12.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.10.0');
+  assert.strictEqual(parsed.data.version, '4.12.0');
 });
 
 // ───────────────────────────────────────────────────────────

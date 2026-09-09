@@ -18,6 +18,8 @@
  *        · 該班 API Key
  *        · 入數紙 Drive 資料夾 ID
  *      → 儲存（active = 啟用）即完成 SET UP。
+ *      → 設好 URL＋Key 之後按「由訓練班 Sheet 讀取」，名稱／名額／收費／日期／截止等自動帶入
+ *        （action=getCourseProfile：讀 Input01／Input02，label 對位，容忍行號差異）。
  *
  * 儲存後即時生效：
  *   - 公開端（成員系統 member-portal）見到呢個班嘅通告（noticeUrl）同報名入口；
@@ -331,6 +333,7 @@ function doPost(e) {
     case 'addReg':        return json(addReg_(body));
     case 'listRegs':      return json(listRegs_(body));
     case 'setRegStatus':  return json(setRegStatus_(body));
+    case 'getCourseProfile': return json(getCourseProfile_(body));
     default:              return json(err('未知的 action: ' + action));
   }
 }
@@ -340,6 +343,232 @@ function doGet(e) {
   if (!authKey_(p.apiKey)) return json(err('Unauthorized: invalid or missing apiKey'));
   if ((p.action || '') === 'stats') return json(ok({ count: countRegs_() }));
   return json(err('未知的 action'));
+}
+
+// ===================== Course Profile（開班自動填表） =====================
+// 讀 Input01 訓練班預算＋Input02 訓練班資料 → 結構化 JSON。
+// 全部用 A 欄 label 對位（唔寫死行號），容忍 template 版同實填版行號差異：
+//   實填版 Input02：B1 名稱／B4 名額／B5 收費／B6 職員／第 8 行表頭＋第 9 行起節次／
+//     B18 截止／B19 公佈／第 22 行職員表頭＋第 23 行起職員（A–G：職位／姓名／稱謂／
+//     單位／資格／電話／電郵）／B45 總人數／B46 常駐人數。
+
+function getCourseProfile_(b) {
+  if (!authKey_(b.apiKey)) return err('Unauthorized: invalid or missing apiKey');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var s2 = ss.getSheetByName('Input02 訓練班資料');
+  if (!s2) return err('找不到「Input02 訓練班資料」分頁（請先執行 setupCourseSheet）');
+  var s1 = ss.getSheetByName('Input01 訓練班預算');
+
+  var v2 = s2.getDataRange().getValues();
+  var profile = {
+    courseName: profileValByLabel_(v2, '活動/訓練班名稱', 1),
+    quota: profileValByLabel_(v2, '名額', 1),
+    fee: profileValByLabel_(v2, '預計收費', 1),
+    staffCount: profileValByLabel_(v2, '職員人數', 1),
+    deadline: profileDateByLabel_(v2, '截止報名日期', 1),
+    publishDate: profileDateByLabel_(v2, '最遲公佈取錄名單日', 1),
+    totalStaff: profileValByLabel_(v2, '班職員總人數', 1),
+    residentStaff: profileValByLabel_(v2, '常駐班職員人數', 1),
+    sessions: profileSessions_(v2),
+    staff: profileStaff_(v2),
+    // Input01（預算；冇呢頁就留空，唔報錯）
+    edition: '', section: '', badge: '', customName: '', form1: '', form2: '',
+    expectedIntake: '', expectedFee: '', expectedStaff: '',
+    budgetDates: [], budgetApproved: '', subsidyRequired: '',
+  };
+  if (s1) {
+    var v1 = s1.getDataRange().getValues();
+    if (!profile.courseName) profile.courseName = profileValByLabel_(v1, '活動/訓練班名稱', 1);
+    profile.edition = profileValByLabel_(v1, '屆別', 1);
+    profile.section = profileValByLabel_(v1, '支部', 1);
+    profile.badge = profileValByLabel_(v1, '專章', 1);
+    profile.customName = profileValByLabel_(v1, '自定義名稱', 1);
+    profile.form1 = profileValByLabel_(v1, '形式-1', 1);
+    profile.form2 = profileValByLabel_(v1, '形式-2', 1);
+    profile.expectedIntake = profileValByLabel_(v1, '預計收生人數', 1);
+    profile.expectedFee = profileValByLabel_(v1, '預計收費', 1);
+    profile.expectedStaff = profileValByLabel_(v1, '職員人數', 1);
+    profile.budgetDates = profileBudgetDates_(v1);
+    profile.budgetApproved = profileValContains_(v1, '批准總預算', 1);
+    profile.subsidyRequired = profileValContains_(v1, '申請津貼', 1);
+  }
+  // 班領導人 = 職位含「班領導人」嘅第一行（prefer 正職）
+  profile.leader = null;
+  for (var i = 0; i < profile.staff.length; i++) {
+    if (String(profile.staff[i].role || '').indexOf('班領導人') >= 0) { profile.leader = profile.staff[i]; break; }
+  }
+  profile.pulledAt = new Date().toISOString();
+  return ok(profile);
+}
+
+/** A 欄 label 完全相符 → 回該行第 colIndex 欄（0-based）trim 後字串 */
+function profileValByLabel_(values, label, colIndex) {
+  for (var r = 0; r < values.length; r++) {
+    if (String(values[r][0] == null ? '' : values[r][0]).trim() === label) {
+      return String(values[r][colIndex] == null ? '' : values[r][colIndex]).trim();
+    }
+  }
+  return '';
+}
+
+/** A 欄包含關鍵字 → 回該行第 colIndex 欄（預算總額嗰類 label 用） */
+function profileValContains_(values, keyword, colIndex) {
+  for (var r = 0; r < values.length; r++) {
+    if (String(values[r][0] == null ? '' : values[r][0]).indexOf(keyword) >= 0) {
+      return String(values[r][colIndex] == null ? '' : values[r][colIndex]).trim();
+    }
+  }
+  return '';
+}
+
+/** A 欄 label → 該格 raw 值正規化做日期（Date 物件／字串都收） */
+function profileDateByLabel_(values, label, colIndex) {
+  for (var r = 0; r < values.length; r++) {
+    if (String(values[r][0] == null ? '' : values[r][0]).trim() === label) {
+      return profileDate_(values[r][colIndex]);
+    }
+  }
+  return '';
+}
+
+/** A 欄 label 完全相符 → 回行號（0-based），搵唔到回 -1 */
+function profileRowOf_(values, label) {
+  for (var r = 0; r < values.length; r++) {
+    if (String(values[r][0] == null ? '' : values[r][0]).trim() === label) return r;
+  }
+  return -1;
+}
+
+/** 日期正規化 → yyyy-MM-dd（Date 物件／d/m/yyyy 字串／本身 ISO 都收；失敗回原文 trim） */
+function profileDate_(v) {
+  if (v == null || v === '') return '';
+  if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime())) {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  var s = String(v).trim();
+  var m = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+  if (m) {
+    var d = Number(m[1]), mo = Number(m[2]), y = Number(m[3]);
+    if (y < 100) y += 2000;
+    if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
+      return y + '-' + ('0' + mo).slice(-2) + '-' + ('0' + d).slice(-2);
+    }
+  }
+  return s.slice(0, 20);
+}
+
+/** Input02 節次：活動日期及場地 → 截止報名日期 之間；表頭行自動對欄。
+ *  實填版：表頭行喺 label 上面一行，且 label 行本身就係第一節資料；
+ *  template 版：label 行本身就係表頭。所以表頭由上而下搵，資料由 label 行開始讀。 */
+function profileSessions_(v) {
+  var start = profileRowOf_(v, '活動日期及場地');
+  var end = profileRowOf_(v, '截止報名日期');
+  if (start < 0) return [];
+  if (end < 0) end = v.length;
+  // 表頭行：先掃 label 上面 4 行，再掃 label 行起 3 行（template 版 label 行即表頭）
+  var hdr = -1, dateC = 1, timeC = 3, venueC = 4, ddC = -1, dtC = -1, dvC = -1;
+  var isHdr = function (r) { return /日期|時間|場地|通告顯示|dd\/mm/i.test(v[r].join(' ')); };
+  for (var r = Math.max(0, start - 4); r < start; r++) {
+    if (isHdr(r)) { hdr = r; break; }
+  }
+  if (hdr < 0) {
+    for (var r2 = start; r2 < end && r2 < start + 3; r2++) {
+      if (isHdr(r2)) { hdr = r2; break; }
+    }
+  }
+  if (hdr >= 0) {
+    for (var c = 0; c < v[hdr].length; c++) {
+      var h = String(v[hdr][c] == null ? '' : v[hdr][c]);
+      if (h.indexOf('通告顯示日期') >= 0) ddC = c;
+      else if (h.indexOf('通告顯示時間') >= 0) dtC = c;
+      else if (h.indexOf('通告顯示地點') >= 0) dvC = c;
+      else if (h === '日期' || h.indexOf('dd/mm') >= 0 || h.indexOf('dd/MM') >= 0) dateC = c;
+      else if (h.indexOf('時間') >= 0 && h.indexOf('通告') < 0 && h.indexOf('需時') < 0) timeC = c;
+      else if ((h.indexOf('場地') >= 0 || h === '地點') && h.indexOf('通告') < 0) venueC = c;
+    }
+  }
+  var out = [];
+  var cell = function (row, c) { return c < 0 ? '' : String(row[c] == null ? '' : row[c]).trim(); };
+  for (var i = start; i < end; i++) {
+    if (i === hdr) continue;
+    var rawCell = dateC < 0 ? '' : v[i][dateC];
+    if (rawCell === '' || rawCell == null) continue;
+    if (/日期|dd\/mm/i.test(String(rawCell))) continue;
+    var dd = cell(v[i], ddC);
+    out.push({
+      date: profileDate_(rawCell),
+      time: cell(v[i], timeC),
+      venue: cell(v[i], venueC),
+      displayDate: dd, displayTime: cell(v[i], dtC), displayVenue: cell(v[i], dvC),
+      showOnCircular: !!dd,
+    });
+    if (out.length >= 60) break;
+  }
+  return out;
+  function c0(row, c) { return c < 0 ? '' : String(row[c] == null ? '' : row[c]).trim(); }
+}
+
+/** Input02 職員：含「職位＋姓名」嘅表頭行之後，直到總人數行／表尾 */
+function profileStaff_(v) {
+  var hdr = -1;
+  var end = v.length;
+  for (var r = 0; r < v.length; r++) {
+    var a = String(v[r][0] == null ? '' : v[r][0]).trim();
+    if (a === '班職員總人數' || a === '常駐班職員人數') { end = Math.min(end, r); }
+  }
+  for (var i = 0; i < end; i++) {
+    var joined = v[i].join(' ');
+    if (joined.indexOf('職位') >= 0 && joined.indexOf('姓名') >= 0) { hdr = i; break; }
+  }
+  if (hdr < 0) return [];
+  var roleC = 0, nameC = 1, titleC = 2, unitC = 3, qualC = -1, phoneC = 4, emailC = 5;
+  for (var c = 0; c < v[hdr].length; c++) {
+    var h = String(v[hdr][c] == null ? '' : v[hdr][c]);
+    if (!h) continue;
+    if (h.indexOf('職位') >= 0) roleC = c;
+    else if (h.indexOf('姓名') >= 0) nameC = c;
+    else if (h.indexOf('稱謂') >= 0) titleC = c;
+    else if (h.indexOf('資格') >= 0) qualC = c;
+    else if (h.indexOf('單位') >= 0 || h.indexOf('職銜') >= 0) unitC = c;
+    else if (h.indexOf('電話') >= 0) phoneC = c;
+    else if (h.indexOf('電郵') >= 0 || h.toLowerCase().indexOf('email') >= 0) emailC = c;
+  }
+  var out = [];
+  var cell = function (row, x) { return x < 0 ? '' : String(row[x] == null ? '' : row[x]).trim(); };
+  for (var j = hdr + 1; j < end; j++) {
+    var role = cell(v[j], roleC), name = cell(v[j], nameC);
+    if (!role && !name) continue;
+    out.push({
+      role: role, name: name, title: cell(v[j], titleC), unit: cell(v[j], unitC),
+      qualification: cell(v[j], qualC), phone: cell(v[j], phoneC), email: cell(v[j], emailC),
+    });
+    if (out.length >= 60) break;
+  }
+  return out;
+}
+
+/** Input01 預算日期：活動日期及場地 → 財政預算／支出分類／截止報名日期 之間（B 日期／C 時間／E 場地） */
+function profileBudgetDates_(v) {
+  var start = profileRowOf_(v, '活動日期及場地');
+  if (start < 0) return [];
+  var end = v.length;
+  ['財政預算', '支出分類', '截止報名日期'].forEach(function (label) {
+    var r = profileRowOf_(v, label);
+    if (r > start) end = Math.min(end, r);
+  });
+  var out = [];
+  for (var i = start; i < end; i++) {
+    var rawCell = v[i][1];
+    if (rawCell === '' || rawCell == null) continue;
+    if (/日期|dd\/mm/i.test(String(rawCell))) continue;
+    out.push({
+      date: profileDate_(rawCell),
+      time: String(v[i][2] == null ? '' : v[i][2]).trim(),
+      venue: String(v[i][4] == null ? '' : v[i][4]).trim(),
+    });
+    if (out.length >= 60) break;
+  }
+  return out;
 }
 
 // ===================== 收表（intake）寫入「表格回應」 =====================

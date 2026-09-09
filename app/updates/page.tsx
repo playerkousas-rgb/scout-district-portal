@@ -5,6 +5,15 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.12.0 — 📥 開班自動讀 Sheet + 📜 區通告列印 PDF</h3>
+        <ul>
+          <li>📥 <b>「🎓 訓練班管理」新增「由訓練班 Sheet 讀取」</b>：貼上該班收表 Script <code>/exec</code>＋API Key 一撳，名稱／名額／收費／日期場地／截止／班領導人聯絡等由 <code>Input01</code>／<code>Input02</code> 自動帶入，ADC 唔使再人手重打；已開班都可以用 <code>courseId</code> 重讀。主後台 <code>pullCourseProfile</code> → 該班 Script <code>getCourseProfile</code>（label 對位，容忍實填版同模版版行號差異）</li>
+          <li>📜 <b>新卡片「區通告」</b>（職員專用，PDF only）：開新通告 → 掛接訓練班 →「⬇ 從訓練班帶入資料」預填節數／收費／名額／截止 → 補參加資格／備註 →「🖨 列印 PDF」出傳統通告格式（節數表／費用＋FPS QR／報名辦法／署名）→ 上載區網／交總會（圖書館自動收錄）→「↗ 回填訓練班」將區網 PDF 連結寫入 <code>noticeUrl</code>，成員系統該班即跳轉睇真通告</li>
+          <li>🔢 <b>通告編號人手輸入</b>（跨類別共用，區內唔重複；只係建議下一個號碼）；報名辦法預設成員系統訓練班頁（Config <code>MEMBER_PORTAL_URL</code>），成員用內置報名表報名，唔再用 Google Form</li>
+          <li>⚠️ 要換新 <code>Code.gs</code>（v4.12.0）→ <code>setupSheets()</code>（自動補 <code>Circulars</code> 表＋卡片＋權限）→ 重新部署；舊訓練班要將新收表模版覆蓋貼上先用到自動讀取（唔使重跑 setup）。member-portal <b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.11.0 — 🎓 訓練班開班教學 + 收表 Script 模版下載</h3>
         <ul>
           <li>📥 <b>「🎓 訓練班管理」頁頂新增「開班前：下載收表 Script 模版 + 教學」</b>：一撳下載該班專用收表 Script（<code>Code.gs.course.js</code>），照住 7 步做 — 下載 → 開空白 Sheet → 貼上 → RUN SETUP（<code>setupCourseSheet()</code>）→ 部署 → 返嚟貼上 <code>/exec</code> 網址 + API Key + Drive 資料夾 ID → 儲存即完成</li>
@@ -207,7 +216,7 @@ export default function UpdatesPage() {
       </div>
       <div className="info-card">
         <h3>後台程式碼</h3>
-        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.4.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
+        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.12.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
       </div>
     </>
   );

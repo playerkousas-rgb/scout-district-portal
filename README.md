@@ -248,11 +248,18 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 > 改動咗模版 `gs/Code.gs.course.js` 之後，記得 `cp gs/Code.gs.course.js public/downloads/Code.gs.course.js.txt` 同步下載檔。
 
+## 📥 開班自動讀 Sheet + 📜 區通告 PDF（v4.12.0）
+
+- **由訓練班 Sheet 讀取**：`/training` 貼上該班 `/exec`＋Key → 一撳自動帶入名稱／名額／收費／日期場地／截止／聯絡（主後台 `pullCourseProfile` → 該班 `getCourseProfile`，讀 `Input01`／`Input02`，label 對位；節次有「通告顯示日期」先上通告）。
+- **區通告卡**（`/circulars`，職員專用，PDF only）：掛接訓練班 → 從訓練班帶入 → 補內文 → 列印傳統格式 PDF → 上載區網／交總會 → 回填 `noticeUrl`。編號人手輸入（區內唔重複）；報名辦法預設成員系統（Config `MEMBER_PORTAL_URL`）。
+- member-portal **唔使改**。詳見 [`docs/course-sheet-pull.md`](docs/course-sheet-pull.md)。
+
 ## 📚 文件索引
 
 | 文件 | 內容 |
 |---|---|
 | `docs/member-gs-handshake.md` | **member-portal ↔ GS 合約**（消息發佈置頂；借物資打通；借場填表→Teamup→批核） |
+| `docs/course-sheet-pull.md` | **訓練班 Sheet → 開班登記 → 區通告 PDF**（v4.12.0：pull 流程＋欄位對應＋部署） |
 | `docs/venue-booking-flow.md` | 借場流程（而家：填表+Teamup+批核；密碼稍後） |
 | `docs/booking-setup-merge-checklist.md` | 貼 Code.gs → setup → 填 Key → 驗證 → 測試 嘅逐步操作 |
 | `docs/keys-checklist.md` | **找回 + 驗證 Teamup / TTLock API Key**（你唔記得 Key 睇呢份） |

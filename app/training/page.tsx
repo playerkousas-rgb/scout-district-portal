@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
-import type { CourseLink, UserSession } from '@/lib/types';
+import type { CourseLink, CourseProfile, UserSession } from '@/lib/types';
 import CourseFpsBlock, { type CourseFpsResult } from '@/components/CourseFpsBlock';
 import { DEFAULT_FPS_ACCOUNT, normalizeFpsId } from '@/lib/fps';
 import BackLink, { BackBar } from '@/components/BackLink';
@@ -29,6 +29,7 @@ export default function TrainingPage() {
   const [editingId, setEditingId] = useState('');
   const [fpsCourseId, setFpsCourseId] = useState('');   // 正在生成 QR 嘅班
   const [fpsSaving, setFpsSaving] = useState(false);
+  const [pulling, setPulling] = useState(false);
   const [account, setAccount] = useState({ name: DEFAULT_FPS_ACCOUNT.name, id: DEFAULT_FPS_ACCOUNT.id, loaded: false });
 
   async function load(s: UserSession) {
@@ -76,6 +77,42 @@ export default function TrainingPage() {
   function reset() { setEditingId(''); setDraft(EMPTY); setMsg(''); }
   function set(k: keyof CourseLink, v: string) { setDraft(d => ({ ...d, [k]: v })); }
 
+  /** 📥 由訓練班 Sheet 讀取：經該班收表 Script profile API 自動帶入課程資料 */
+  async function pullFromSheet() {
+    if (!session) return;
+    setError(''); setMsg('');
+    const req = {
+      ...(editingId ? { courseId: editingId } : {}),
+      scriptExecUrl: (draft.scriptExecUrl || '').trim(),
+      scriptApiKey: (draft.scriptApiKey || '').trim(),
+    };
+    if (!req.scriptExecUrl && !editingId) { setError('請先貼上「收表 Script /exec 網址」'); return; }
+    setPulling(true);
+    const r = await api.pullCourseProfile(session.token, req);
+    setPulling(false);
+    if (!r.ok || !r.data) { setError(r.error || '讀取失敗'); return; }
+    const p: CourseProfile = r.data;
+    const shown = (p.sessions || []).filter(s => s.showOnCircular);
+    const sess = shown.length ? shown : (p.sessions || []);
+    const sessionsText = sess.map(s => [s.displayDate || s.date, s.displayTime || s.time, s.displayVenue || s.venue].filter(Boolean).join(' ').trim()).filter(Boolean).join('；');
+    const venues = Array.from(new Set(sess.map(s => (s.displayVenue || s.venue || '').trim()).filter(Boolean))).join('、');
+    const leader = p.leader || (p.staff || [])[0];
+    const contact = leader ? [((leader.name || '') + (leader.title || '')).trim() + (leader.role ? `（${leader.role}）` : ''), leader.phone || '', leader.email || ''].filter(x => x.trim()).join(' ') : '';
+    setDraft(d => ({
+      ...d,
+      title: p.courseName || d.title,
+      badgeName: p.badge || d.badgeName,
+      section: p.section || d.section,
+      fee: p.fee !== undefined && String(p.fee) !== '' ? String(p.fee) : d.fee,
+      quota: p.quota !== undefined && String(p.quota) !== '' ? String(p.quota) : d.quota,
+      deadline: p.deadline || d.deadline,
+      venue: venues || d.venue,
+      sessionsText: sessionsText || d.sessionsText,
+      contact: contact || d.contact,
+    }));
+    setMsg(`已由訓練班 Sheet 帶入「${p.courseName || ''}」資料 ✓（請檢查後儲存）`);
+  }
+
   async function save() {
     if (!session) return;
     setError(''); setMsg('');
@@ -110,8 +147,9 @@ export default function TrainingPage() {
         </div>
         <p style={{ margin: '4px 0 12px', fontSize: 13.5 }}>
           每個訓練班要 1 份<b>獨立</b>嘅收表 Script（貼喺該班自己嗰張 Google Sheet 嘅 Apps Script 度）。
-          下載模版 → 開空白 Sheet → 執行 SETUP → 部署 → 返嚟呢度貼上 URL 同資料夾位置，就完成 SET UP；
-          儲存（啟用）後，<b>該班通告會即時掛上成員系統</b>俾成員報名。
+          下載模版 → 開空白 Sheet → 填好 Input01／Input02／Input03 → 執行 SETUP → 部署 →
+          返嚟呢度貼上 URL／Key／資料夾 ID → 撳「📥 由訓練班 Sheet 讀取」自動帶入課程資料 → 儲存（啟用）。
+          儲存後，<b>該班會即時掛上成員系統</b>俾成員用內置報名表報名。
         </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 14 }}>
           <a className="btn-sm" href="/downloads/Code.gs.course.js.txt" download="Code.gs.course.js" style={{ textDecoration: 'none', display: 'inline-block' }}>
@@ -126,15 +164,17 @@ export default function TrainingPage() {
           <li><b>⚙️ RUN SETUP</b>：執行 <code>setupCourseSheet()</code>（首次授權：Review permissions → Advanced → Allow）。
             會自動建立齊所有分頁、產生該班 <b>API Key</b>（只顯示一次，即刻複製）、並喺 Drive 建立「入數紙」資料夾（彈窗會顯示<b>網址 + ID</b>）。</li>
           <li><b>🚀 部署</b>：部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：任何人）→ 複製 <code>/exec</code> 網址。</li>
-          <li><b>📝 返嚟開班登記</b>：喺下面表單填課程資料，再貼上：
+          <li><b>📝 返嚟開班登記</b>：喺下面表單貼上：
             <ul style={{ margin: '4px 0', paddingLeft: 22 }}>
               <li><b>收表 Script /exec 網址</b> → 「收表 Script /exec 網址」欄</li>
               <li><b>該班 API Key</b> → 「該班 API Key」欄</li>
               <li><b>入數紙 Drive 資料夾 ID</b> → 「入數紙 Drive 資料夾 ID」欄</li>
             </ul>
+            然後撳「📥 由訓練班 Sheet 讀取」—— 名稱／名額／收費／日期場地／截止／聯絡等會由 Input01／Input02 自動帶入，唔使再人手重打。
           </li>
-          <li><b>📢 掛通告上成員系統</b>：填「通告連結 noticeUrl」＋確認「啟用」✔ → 撳「＋ 開班登記」儲存。
-            儲存後，<b>成員系統會即時顯示呢個班（連通告連結），成員即可報名</b>；截止日一過會自動收埋。</li>
+          <li><b>📢 掛班上成員系統</b>：確認「啟用」✔ → 撳「＋ 開班登記」儲存。
+            儲存後，<b>成員系統會即時顯示呢個班，成員即可用內置報名表報名</b>；截止日一過會自動收埋。
+            通告 PDF 上載區網後，將連結貼入「通告連結 noticeUrl」並儲存，成員即可跳轉睇真通告。</li>
         </ol>
       </section>
 
@@ -158,6 +198,9 @@ export default function TrainingPage() {
           <input placeholder="場地 venue" value={draft.venue || ''} onChange={e => set('venue', e.target.value)} style={{ width: 150 }} />
           <input placeholder="通告連結 noticeUrl" value={draft.noticeUrl || ''} onChange={e => set('noticeUrl', e.target.value)} style={{ width: 300 }} />
           <input placeholder="聯絡 contact" value={draft.contact || ''} onChange={e => set('contact', e.target.value)} style={{ width: 200 }} />
+          <input placeholder="節數 sessionsText（自動帶入，可改）" value={draft.sessionsText || ''} onChange={e => set('sessionsText', e.target.value)} style={{ width: 340 }} />
+          <input placeholder="參加資格 eligibility" value={draft.eligibility || ''} onChange={e => set('eligibility', e.target.value)} style={{ width: 220 }} />
+          <input placeholder="資助說明 subsidyNote" value={draft.subsidyNote || ''} onChange={e => set('subsidyNote', e.target.value)} style={{ width: 220 }} />
         </div>
         <div className="account-form" style={{ flexWrap: 'wrap', display: 'flex', gap: 8, marginTop: 8 }}>
           <input placeholder="收表 Script /exec 網址 *" value={draft.scriptExecUrl || ''} onChange={e => set('scriptExecUrl', e.target.value)} style={{ width: 360 }} />
@@ -168,8 +211,11 @@ export default function TrainingPage() {
             啟用
           </label>
         </div>
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn-sm" onClick={save}>{editingId ? '💾 儲存變更' : '＋ 開班登記'}</button>
+          <button className="mini-btn" onClick={pullFromSheet} disabled={pulling || (!draft.scriptExecUrl?.trim() && !editingId)}>
+            {pulling ? '讀取中…' : '📥 由訓練班 Sheet 讀取'}
+          </button>
         </div>
       </section>
 
