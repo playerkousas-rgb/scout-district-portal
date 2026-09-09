@@ -248,11 +248,30 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 > 改動咗模版 `gs/Code.gs.course.js` 之後，記得 `cp gs/Code.gs.course.js public/downloads/Code.gs.course.js.txt` 同步下載檔。
 
+## 🆕 新制直入試驗（v4.14.0）
+
+- **`/training` 新分頁**：成份設定喺區系統填 → `createCourseSheet` 由總模版自動複製班 Sheet＋寫入（476 格）＋開班登記＋分享畀 CL；`pushCourseSetup` 雙向同步；`pullCourseSheetRaw` 讀全文。
+- **12 張網頁列印**：通告／取錄／合格／學員／出席／接納／班職員／收支／財政預算／資助／完成報告／領取證書，直接印 PDF。
+- 舊制（CL 填 Sheet）原封不動並存；舊班喺新頁只讀＋列印。部署：`Code.gs` → `setupSheets()` → 設 `COURSE_TEMPLATE_ID`。詳見 [`docs/course-sheet-pull.md`](docs/course-sheet-pull.md) 新制一節。
+
+## 📘 工作簿跟足開班文件＋CL 填一次（v4.13.0）
+
+- **模版重寫**：`gs/Code.gs.course.js` 一鍵起出同實物一樣的全本工作簿（Input01 預算 8 分類／Input02 黃格＋✓上通告／Input03／Input04／12 張 Print 自動帶入／表格回應 36 欄／參數 22 欄 110 專章）。公式係等效寫法，`#N/A` 一律收起；參數 W/X 新增區會常數（成員系統網址／FPS／區網）。
+- **CL 填一次**：ADC 下載交 CL → CL 填＋做通告 → 區總監批 → 上載＋ADC 開班（pull 唔使重打）；「從訓練班帶入」連通告內文（資格／費用說明／服裝／備註／查詢／報名辦法／署名／編號／發出日期）都預填，只填空欄。
+- 通告加 `feeNote`／`signupNote` 兩欄（舊表自動補）。**舊班更新模版：覆蓋貼上就得，唔好重跑 setup**。詳見 [`docs/course-sheet-pull.md`](docs/course-sheet-pull.md)。
+
+## 📥 開班自動讀 Sheet + 📜 區通告 PDF（v4.12.0）
+
+- **由訓練班 Sheet 讀取**：`/training` 貼上該班 `/exec`＋Key → 一撳自動帶入名稱／名額／收費／日期場地／截止／聯絡（主後台 `pullCourseProfile` → 該班 `getCourseProfile`，讀 `Input01`／`Input02`，label 對位；節次有「通告顯示日期」先上通告）。
+- **區通告卡**（`/circulars`，職員專用，PDF only）：掛接訓練班 → 從訓練班帶入 → 補內文 → 列印傳統格式 PDF → 上載區網／交總會 → 回填 `noticeUrl`。編號人手輸入（區內唔重複）；報名辦法預設成員系統（Config `MEMBER_PORTAL_URL`）。
+- member-portal **唔使改**。詳見 [`docs/course-sheet-pull.md`](docs/course-sheet-pull.md)。
+
 ## 📚 文件索引
 
 | 文件 | 內容 |
 |---|---|
 | `docs/member-gs-handshake.md` | **member-portal ↔ GS 合約**（消息發佈置頂；借物資打通；借場填表→Teamup→批核） |
+| `docs/course-sheet-pull.md` | **訓練班工作簿 → 開班登記 → 區通告 PDF**（v4.14.0：舊制 pull＋新制直入＋欄位對應＋部署） |
 | `docs/venue-booking-flow.md` | 借場流程（而家：填表+Teamup+批核；密碼稍後） |
 | `docs/booking-setup-merge-checklist.md` | 貼 Code.gs → setup → 填 Key → 驗證 → 測試 嘅逐步操作 |
 | `docs/keys-checklist.md` | **找回 + 驗證 Teamup / TTLock API Key**（你唔記得 Key 睇呢份） |

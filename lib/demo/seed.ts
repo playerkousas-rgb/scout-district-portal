@@ -59,6 +59,7 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'visit', title: '旅團探訪', icon: '🏕', type: 'builtin', url: '/visit', description: '一撳登記探訪 · 未探旅團紅燈 · 季度報告', order: 1, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'contacts', title: '聯絡簿', icon: '📇', type: 'builtin', url: '/contacts', description: '聯絡電話：旅團 · 港島地域 · 總會（職員姓名區方可改）', order: 2, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'awards', title: '獎勵提名', icon: '🎖', type: 'builtin', url: '/awards', description: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', order: 3, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'circulars', title: '區通告', icon: '📜', type: 'builtin', url: '/circulars', description: '開班資料自動帶入 · 傳統通告列印 PDF 上載區網', order: 4, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'budget', title: '區年度預算', icon: '📑', type: 'builtin', url: '/budget', description: '直讀區方預算 Sheet · 按月／支部 · 資助合計', order: 5, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'committee', title: '委任系統', icon: '🗂', type: 'builtin', url: '/committee', description: '委任 · 續任 · R02', order: 7, enabled: true, embed: false, source: 'core', category: 'todo' },
   { cardId: 'unit', title: '旅團管理系統', icon: '🧭', type: 'builtin', url: '/unit', description: '旅名冊 · 人數統計', order: 8, enabled: true, embed: false, source: 'core', category: 'todo' },
@@ -99,6 +100,7 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
       const lv = roleLevel[role];
       if (c.cardId === 'awards') m[c.cardId][role] = lv <= 2 ? 'edit' : '';
       else if (c.cardId === 'visit') m[c.cardId][role] = lv <= 3 ? 'edit' : 'view';
+      else if (c.cardId === 'circulars') m[c.cardId][role] = lv <= 4 ? 'edit' : 'view';
       else m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
     });
   });
@@ -252,12 +254,90 @@ export function demoIncidentReports(): Record<string, any>[] {
   ];
 }
 
-export function demoCourseLinks(): Record<string, any>[] {
+export function demoCirculars(): Record<string, any>[] {
   return [
-    { courseId: 'cl-01', title: '初級領袖訓練班（BLT）2026 年 10 月班', badgeName: '領袖委任', section: '領袖', courseNo: 'BLT-2610', sessionsText: '10 月 3、10、17 日（週六）09:00–17:00', eligibility: '18 歲以上完成中五', fee: '850', deadline: `${dateOnly(15)} `, quota: '36', filled: '22', venue: '區總部 1704 室', contact: '訓練組 ddc.training@demo', active: 'TRUE', createdAt: iso(30) },
+    {
+      id: 'cr-01', districtCode: 'DEMO', circularNo: '2607', category: '訓練班',
+      title: '社區參與章、公民章暨積極公民獎章系列訓練班（示範）', sections: '童軍',
+      sessions: [
+        { date: '2026年7月20日（星期一）', time: '晚上7時至晚上10時', venue: '區總部 1704 室' },
+        { date: '2026年7月27日（星期一）', time: '晚上7時至晚上10時', venue: '區總部 1704 室' },
+      ],
+      leader: '楊德銘先生', eligibility: '1．已宣誓及持有有效紀錄冊之童軍支部成員；\n2．港島地域成員將獲優先取錄。',
+      fee: '100', originalFee: '', subsidyNote: '', feeNote: '活動費用港幣100元正（包括行政、茶點及膳食等）。', quota: '30', deadline: dateOnly(-20), courseId: 'cl-01',
+      signupUrl: '', signupNote: '請於筲箕灣區成員系統訓練班版面填妥網上報名表。', uniform: '整齊童軍制服',
+      remarks: '1．報名前須獲得家長及旅團領袖同意；\n2．學員必須全期出席，不得遲到或早退。',
+      contactName: '楊德銘', contactEmail: 'civics@demo', contactPhone: '5721 1100', enquiryNote: '',
+      attachments: [], issueDate: dateOnly(-30), issuer: '區總監 陳大文', signedBy: '',
+      status: 'published', publishedAt: iso(30), publishedBy: '黃志強', updatedAt: iso(1), createdAt: iso(35),
+    },
+    {
+      id: 'cr-02', districtCode: 'DEMO', circularNo: '2612', category: '活動',
+      title: '秋季大露營（示範草稿）', sections: '小童軍、幼童軍、童軍',
+      sessions: [{ date: '', time: '', venue: '' }],
+      leader: '', eligibility: '', fee: '', originalFee: '', subsidyNote: '', quota: '', deadline: '', courseId: '',
+      signupUrl: '', uniform: '', remarks: '', contactName: '', contactEmail: '', contactPhone: '', enquiryNote: '',
+      attachments: [], issueDate: dateOnly(0), issuer: '', signedBy: '',
+      status: 'draft', publishedAt: '', publishedBy: '', updatedAt: iso(0), createdAt: iso(0),
+    },
+    {
+      id: 'cr-03', districtCode: 'DEMO', circularNo: '2599', category: '訓練班',
+      title: '步操基礎班（示範・已截止）', sections: '童軍',
+      sessions: [{ date: '2026年5月10日（星期日）', time: '上午9時至下午1時', venue: '區總部' }],
+      leader: '林志傑先生', eligibility: '童軍支部成員', fee: '50', originalFee: '', subsidyNote: '',
+      quota: '40', deadline: dateOnly(10), courseId: '', signupUrl: '', uniform: '整齊童軍制服',
+      remarks: '', contactName: '林志傑', contactEmail: 'demo3@demo', contactPhone: '9345 6789', enquiryNote: '',
+      attachments: [], issueDate: dateOnly(-60), issuer: '區總監 陳大文', signedBy: '楊德銘',
+      status: 'closed', publishedAt: iso(60), publishedBy: '黃志強', updatedAt: iso(10), createdAt: iso(65),
+    },
+  ];
+}
+
+/** pullCourseProfile 示範回傳：照 Input01／Input02 結構（第1屆工作坊式 sample，虛構資料） */
+export function demoCourseProfile(): Record<string, any> {
+  return {
+    courseName: '第1屆急救工作坊（示範）', quota: '22', fee: '25', staffCount: '1',
+    deadline: dateOnly(-25), publishDate: dateOnly(-32), totalStaff: '1', residentStaff: '1',
+    sessions: [
+      { date: dateOnly(-40), time: '1900 - 2200', venue: '區總部', displayDate: '2026年10月9日（星期五）', displayTime: '晚上7時至晚上10時', displayVenue: '區總部', showOnCircular: true },
+      { date: dateOnly(-42), time: '0900 - 1700', venue: '區總部', displayDate: '2026年10月11日（星期日）', displayTime: '上午9時至下午5時', displayVenue: '區總部', showOnCircular: true },
+      { date: dateOnly(-43), time: '0000 - 1300', venue: '區總部', displayDate: '', displayTime: '', displayVenue: '', showOnCircular: false },
+    ],
+    staff: [
+      { role: '班領導人', name: '陳大文', title: '先生', unit: '筲箕灣區 區領袖', qualification: '急救教練員', phone: '9123 4567', email: 'demo@demo' },
+      { role: '班務行政', name: '黃志強', title: '先生', unit: '筲箕灣區', qualification: '', phone: '9234 5678', email: 'demo-adc@demo' },
+    ],
+    leader: { role: '班領導人', name: '陳大文', title: '先生', unit: '筲箕灣區 區領袖', qualification: '急救教練員', phone: '9123 4567', email: 'demo@demo' },
+    edition: '1', section: '童軍', badge: '急救', customName: '', form1: '', form2: '工作坊',
+    expectedIntake: '22', expectedFee: '25', expectedStaff: '4',
+    budgetDates: [
+      { date: dateOnly(-40), time: '1900 - 2200', venue: '區總部' },
+      { date: dateOnly(-42), time: '0900 - 1700', venue: '區總部' },
+    ],
+    budgetApproved: '500', subsidyRequired: '-1100',
+    circular: {
+      title: '第1屆急救工作坊（示範）', fileNo: '2613', fileNoRaw: '檔案編號: 2613',
+      issueDate: '2026年9月1日', issueDateISO: dateOnly(-8),
+      leaderText: '陳大文先生（急救教練員）',
+      eligibility: '已宣誓及持有有效紀錄冊之童軍支部成員。',
+      feeText: '活動費用港幣25元正（包括行政及茶點）。', payText: '',
+      quotaText: '22人', deadlineText: '', signupText: '請於筲箕灣區成員系統訓練班版面填妥網上報名表。',
+      uniform: '整齊童軍制服', remarks: ['1. 學員必須全期出席，不得遲到或早退。'], enquiry: '如有查詢請與班領導人聯絡。',
+      signer: '陳大文', deputy: '', deputyRaw: '',
+    },
+    pulledAt: new Date().toISOString(),
+  };
+}
+
+export function demoCourseLinks(): Record<string, any>[] {
+  const setupJson = JSON.stringify(demoCourseSetup());
+  const links = [
+    { courseId: 'cl-01', sheetId: 'demo-sheet-cl01', setupJson: '__DEMO_SETUP__', title: '初級領袖訓練班（BLT）2026 年 10 月班', badgeName: '領袖委任', section: '領袖', courseNo: 'BLT-2610', sessionsText: '10 月 3、10、17 日（週六）09:00–17:00', eligibility: '18 歲以上完成中五', fee: '850', deadline: `${dateOnly(15)} `, quota: '36', filled: '22', venue: '區總部 1704 室', contact: '訓練組 ddc.training@demo', active: 'TRUE', createdAt: iso(30) },
     { courseId: 'cl-02', title: '遠足導師班（HWC）2026 年 11 月班', badgeName: '遠足', section: '領袖', courseNo: 'HWC-2611', sessionsText: '11 月 7、14 日（週六）全天', eligibility: '持有初級領袖訓練班證書', fee: '680', originalFee: '760', subsidyNote: '區方資助 $80／人', deadline: `${dateOnly(40)} `, quota: '24', filled: '9', venue: '香港童軍中心', contact: '訓練組 ddc.training@demo', active: 'TRUE', createdAt: iso(20) },
     { courseId: 'cl-03', title: '急救證書課程（SFA）2027 年 1 月班', badgeName: '急救', section: '跨支部', courseNo: 'SFA-2701', sessionsText: '1 月 9、16、23、30 日（週六）晚間', eligibility: '12 歲以上', fee: '1200', deadline: `${dateOnly(90)} `, quota: '30', filled: '30', venue: '聖十字架堂禮堂', contact: '區秘書處', active: 'TRUE', createdAt: iso(10) },
   ];
+  links[0].setupJson = setupJson;
+  return links;
 }
 
 // ───────────────────────── 帳戶 ─────────────────────────
@@ -383,6 +463,7 @@ export interface DemoDb {
   activityNotices: Record<string, any>[];
   incidentReports: Record<string, any>[];
   courseLinks: Record<string, any>[];
+  circulars: Record<string, any>[];
   installedPlugins: string[];
   seq: number;
 }
@@ -396,6 +477,8 @@ export function freshDemoDb(): DemoDb {
       fpsAccountName: '筲箕灣區童軍會（示範戶口）',
       fpsAccountNumber: '123456-789（示範）',
       budgetSheetUrl: '',
+      memberPortalUrl: 'https://member-portal-demo.vercel.app',
+      courseTemplateSet: true,
     },
     system: { locked: false, lockMessage: '' },
     cards: JSON.parse(JSON.stringify(DEMO_CARDS)),
@@ -422,7 +505,263 @@ export function freshDemoDb(): DemoDb {
     activityNotices: demoActivityNotices(),
     incidentReports: demoIncidentReports(),
     courseLinks: demoCourseLinks(),
+    circulars: demoCirculars(),
     installedPlugins: [],
     seq: 1000,
+  };
+}
+
+// ===================== 新制直入示範（v4.14.0） =====================
+// demoCourseSetup：填好嘅開班設定；demoCourseSheetRaw：同一班嘅班 Sheet raw
+//（座標同真正模版一致，等前端 parse／列印有嘢睇）。
+
+export function demoCourseSetup(): Record<string, any> {
+  const staff = (role: string, name = '', title = '', unit = '', qualification = '', phone = '', email = '') =>
+    ({ role, name, title, unit, qualification, phone, email });
+  return {
+    courseId: 'cl-demo', courseName: '第1屆急救工作坊（示範）', edition: '1', section: '童軍',
+    badge: '急救', customName: '', form1: '實體', form2: '工作坊',
+    expectedIntake: '22', expectedFee: '25', expectedStaff: '4',
+    budgetDates: [
+      { date: dateOnly(-40), time: '1900 - 2200', venue: '區總部' },
+      { date: dateOnly(-42), time: '0900 - 1700', venue: '區總部' },
+    ],
+    expenses: {
+      meals: [
+        { date: dateOnly(-42), time: '1200 - 1300', breakfast: '', lunch: '55', dinner: '', snack: '', water: '', who: '學員' },
+        { date: dateOnly(-42), time: '1800 - 1900', breakfast: '', lunch: '', dinner: '65', snack: '', water: '', who: '學員' },
+        ...Array.from({ length: 6 }, () => ({ date: '', time: '', breakfast: '', lunch: '', dinner: '', snack: '', water: '', who: '' })),
+      ],
+      venue: [
+        { place: '區總部 1704 室', period: '2 日', qty: '2', qty2: '', price: '100' },
+        { place: '其他收費', period: '', qty: '', qty2: '', price: '' },
+        { place: '', period: '', qty: '', qty2: '', price: '' },
+      ],
+      camp: Array.from({ length: 3 }, () => ({ place: '', period: '', qty: '', qty2: '', price: '' })),
+      lodging: Array.from({ length: 3 }, () => ({ place: '', period: '', qty: '', qty2: '', price: '' })),
+      transport: [
+        { route: '租車：區總部←→烏溪沙營地', budget: '600' },
+        { route: '器材運輸', budget: '200' },
+        ...Array.from({ length: 4 }, () => ({ route: '', budget: '' })),
+      ],
+      handouts: [
+        { item: '影印 Photocopy', qty: '25', price: '2' },
+        { item: '光碟 CD Rom', qty: '', price: '' },
+        { item: '快勞 File', qty: '', price: '' },
+      ],
+      program: [
+        { item: '急救耗材包', qty: '22', price: '5' },
+        { item: '', qty: '', price: '' },
+        { item: '', qty: '', price: '' },
+      ],
+      admin: [
+        { item: '攝影Photo', qty: '', price: '' },
+        { item: '印刷及郵費 Printing & Postage', qty: '', price: '' },
+        { item: '文具Stationery', qty: '1', price: '80' },
+      ],
+      souvenir: [
+        { item: '紀念品 Souvenir', qty: '22', price: '10' },
+        { item: '獎品 Prize', qty: '', price: '' },
+      ],
+      misc: [
+        { item: '後備金', amount: '200' },
+        { item: '', amount: '' },
+        { item: '', amount: '' },
+      ],
+    },
+    quota: '22', fee: '25', staffCount: '4',
+    sessions: [
+      { date: dateOnly(-40), spanNext: false, time: '1900 - 2200', venue: '區總部', displayDate: '2026年10月9日（星期五）', displayTime: '晚上7時至晚上10時', displayVenue: '區總部', show: true },
+      { date: dateOnly(-42), spanNext: false, time: '0900 - 1700', venue: '區總部', displayDate: '2026年10月11日（星期日）', displayTime: '上午9時至下午5時', displayVenue: '區總部', show: true },
+      ...Array.from({ length: 6 }, () => ({ date: '', spanNext: false, time: '', venue: '', displayDate: '', displayTime: '', displayVenue: '', show: true })),
+    ],
+    deadline: dateOnly(10), publishDate: dateOnly(5),
+    staff: [
+      staff('班領導人', '陳大文', '先生', '筲箕灣區 區領袖', '急救教練員', '9123 4567', 'demo@demo'),
+      staff('副班領導人'),
+      ...Array.from({ length: 18 }, (_, i) => staff(['副班領導人', '助理班領導人', '小隊導師', '小隊導師', '小隊導師', '小隊導師', '團隊長', '團隊長', '班務行政', '物資管理', '物資管理', '講師', '講師', '講師', '講師', '講師', '講師', '講師'][i])),
+    ],
+    residentStaff: '2',
+    timetable: [
+      { clothing: '整齊制服', flows: [
+        { mins: '30', item: '開班禮＋課程簡介', owner: '班領導人' },
+        { mins: '120', item: '創傷處理實習', owner: '講師' },
+        { mins: '', item: '', owner: '' }, { mins: '', item: '', owner: '' }, { mins: '', item: '', owner: '' },
+      ] },
+      { clothing: '', flows: Array.from({ length: 5 }, () => ({ mins: '', item: '', owner: '' })) },
+      { clothing: '', flows: Array.from({ length: 5 }, () => ({ mins: '', item: '', owner: '' })) },
+    ],
+    eligibility: '已宣誓及持有有效紀錄冊之童軍支部成員。',
+    feeNote: '活動費用港幣25元正（包括行政、茶點及講義）。',
+    uniform: '整齊童軍制服',
+    remarks: ['1. 學員必須全期出席，不得遲到或早退，並完成指定事工，始獲考慮頒發證書；', '2. 取錄與否，一概以電郵通知。'],
+    fileNo: '2613', issueDate: '2026年9月1日', signer: '陳大文', deputy: '',
+    acceptCheckin: '晚上6時45分', acceptItems: '書寫用品及筆記簿', acceptOthers: '必須全期出席，唔批早退', acceptNote: '請帶同有效紀錄冊',
+    financeApproved: '500', financeHqSubsidy: '0', subsidyOrigFee: '25',
+    clEmail: 'demo@demo',
+  };
+}
+
+/** 示範班 Sheet raw（1-based 座標逐格放，同真正模版一致） */
+export function demoCourseSheetRaw(): Record<string, any> {
+  const mk = (rows: number, cols: number): any[][] =>
+    Array.from({ length: rows }, () => Array.from({ length: cols }, () => ''));
+  const put = (m: any[][], r: number, c: number, v: any) => { m[r - 1][c - 1] = v; };
+  const S = demoCourseSetup();
+
+  // ── Input01（105×13） ──
+  const v1 = mk(105, 13);
+  put(v1, 1, 1, '活動/訓練班名稱'); put(v1, 1, 2, S.courseName);
+  put(v1, 4, 1, '屆別'); put(v1, 4, 2, S.edition);
+  put(v1, 5, 1, '支部'); put(v1, 5, 2, S.section);
+  put(v1, 6, 1, '專章'); put(v1, 6, 2, S.badge);
+  put(v1, 7, 1, '自定義名稱'); put(v1, 7, 2, S.customName);
+  put(v1, 8, 1, '形式-1'); put(v1, 8, 2, S.form1);
+  put(v1, 9, 1, '形式-2'); put(v1, 9, 2, S.form2);
+  put(v1, 11, 1, '預計收生人數'); put(v1, 11, 2, S.expectedIntake);
+  put(v1, 12, 1, '預計收費'); put(v1, 12, 2, S.expectedFee);
+  put(v1, 13, 1, '職員人數'); put(v1, 13, 2, S.expectedStaff);
+  put(v1, 15, 2, 'dd/mm/yyyy'); put(v1, 15, 3, '0000 - 2359'); put(v1, 15, 5, '場地');
+  put(v1, 16, 1, '活動日期及場地');
+  S.budgetDates.forEach((d: any, i: number) => {
+    put(v1, 16 + i, 2, d.date); put(v1, 16 + i, 3, d.time); put(v1, 16 + i, 5, d.venue);
+  });
+  put(v1, 25, 1, '財政預算');
+  put(v1, 26, 1, '項目批准總預算\nBudget Approved'); put(v1, 26, 2, S.financeApproved);
+  put(v1, 27, 1, '是次活動申請津貼\nSubsidy Required');
+  S.expenses.meals.forEach((l: any, i: number) => {
+    const r = 32 + i;
+    put(v1, r, 2, l.date); put(v1, r, 3, l.time); put(v1, r, 5, l.breakfast);
+    put(v1, r, 6, l.lunch); put(v1, r, 7, l.dinner); put(v1, r, 8, l.snack);
+    put(v1, r, 9, l.water); put(v1, r, 10, l.who);
+  });
+  const rentRows = (lines: any[], rows: number[]) => lines.forEach((l: any, i: number) => {
+    put(v1, rows[i], 2, l.place); put(v1, rows[i], 3, l.period);
+    put(v1, rows[i], 6, l.qty); put(v1, rows[i], 7, l.qty2); put(v1, rows[i], 8, l.price);
+  });
+  rentRows(S.expenses.venue, [47, 48, 49]);
+  rentRows(S.expenses.camp, [54, 55, 56]);
+  rentRows(S.expenses.lodging, [62, 63, 64]);
+  S.expenses.transport.forEach((l: any, i: number) => { put(v1, 69 + i, 3, l.route); put(v1, 69 + i, 8, l.budget); });
+  const qpRows = (lines: any[], start: number) => lines.forEach((l: any, i: number) => {
+    put(v1, start + i, 2, l.item); put(v1, start + i, 7, l.qty); put(v1, start + i, 8, l.price);
+  });
+  qpRows(S.expenses.handouts, 79); qpRows(S.expenses.program, 85);
+  qpRows(S.expenses.admin, 91); qpRows(S.expenses.souvenir, 97);
+  S.expenses.misc.forEach((l: any, i: number) => { put(v1, 102 + i, 2, l.item); put(v1, 102 + i, 5, l.amount); });
+
+  // ── Input02（46×11） ──
+  const v2 = mk(46, 11);
+  put(v2, 1, 1, '活動/訓練班名稱'); put(v2, 1, 2, S.courseName);
+  put(v2, 4, 1, '名額'); put(v2, 4, 2, S.quota);
+  put(v2, 5, 1, '預計收費'); put(v2, 5, 2, S.fee);
+  put(v2, 6, 1, '職員人數'); put(v2, 6, 2, S.staffCount);
+  put(v2, 8, 2, 'dd/mm/yyyy'); put(v2, 8, 3, '橫跨至下一日?'); put(v2, 8, 4, '0000 - 2359');
+  put(v2, 8, 5, '場地'); put(v2, 8, 7, '（自動）'); put(v2, 8, 8, '✓上通告');
+  put(v2, 8, 9, '通告顯示日期'); put(v2, 8, 10, '通告顯示時間'); put(v2, 8, 11, '通告顯示地點');
+  put(v2, 9, 1, '活動日期及場地');
+  S.sessions.forEach((x: any, i: number) => {
+    const r = 9 + i;
+    put(v2, r, 2, x.date); put(v2, r, 4, x.time); put(v2, r, 5, x.venue);
+    if (x.date) put(v2, r, 8, true);
+    put(v2, r, 9, x.displayDate); put(v2, r, 10, x.displayTime); put(v2, r, 11, x.displayVenue);
+  });
+  put(v2, 18, 1, '截止報名日期'); put(v2, 18, 2, S.deadline);
+  put(v2, 19, 1, '最遲公佈取錄名單日'); put(v2, 19, 2, S.publishDate);
+  put(v2, 21, 1, '職員資料');
+  ['職位', '姓名', '稱謂', '所屬單位 / 職銜', '資格標註', '電話', '電郵'].forEach((h, i) => put(v2, 22, 1 + i, h));
+  S.staff.forEach((st: any, i: number) => {
+    put(v2, 23 + i, 1, st.role); put(v2, 23 + i, 2, st.name); put(v2, 23 + i, 3, st.title);
+    put(v2, 23 + i, 4, st.unit); put(v2, 23 + i, 5, st.qualification);
+    put(v2, 23 + i, 6, st.phone); put(v2, 23 + i, 7, st.email);
+  });
+  put(v2, 45, 1, '班職員總人數'); put(v2, 45, 2, '1');
+  put(v2, 46, 1, '常駐班職員人數'); put(v2, 46, 2, S.residentStaff);
+
+  // ── Input03（31×5） ──
+  const v3 = mk(31, 5);
+  S.timetable.forEach((g: any, gi: number) => {
+    const top = [2, 12, 22][gi];
+    put(v3, top, 3, S.sessions[gi]?.date || ''); put(v3, top, 5, S.sessions[gi]?.venue || '');
+    put(v3, top + 1, 3, S.sessions[gi]?.time || ''); put(v3, top + 1, 5, g.clothing);
+    g.flows.forEach((f: any, i: number) => {
+      put(v3, top + 4 + i, 3, f.mins); put(v3, top + 4 + i, 4, f.item); put(v3, top + 4 + i, 5, f.owner);
+    });
+  });
+
+  // ── Input04（46×11）：第 43 行小計 ──
+  const v4 = mk(46, 11);
+  ['1200', '0', '300', '200', '300', '100', '50', '200', '0'].forEach((v, i) => put(v4, 43, 2 + i, v));
+
+  // ── 表格回應（37 欄） ──
+  const respRow = (o: Record<number, any>): any[] => {
+    const r = Array.from({ length: 37 }, () => '');
+    Object.entries(o).forEach(([k, v]) => { r[Number(k)] = v; });
+    return r;
+  };
+  const vr = [
+    respRow({ 1: '電郵地址', 2: '中文姓名', 4: '聯絡電話', 34: '學員編號', 35: '分組', 36: '審批狀態' }),
+    respRow({ 0: '2026/08/01', 1: 'chan@example.com', 2: '陳小文', 3: 'CHAN Siu Man', 4: '91230001', 5: '男', 7: '筲箕灣區', 8: '第123旅', 9: 'S123456', 10: '童軍', 16: '91230002', 29: '123', 34: 'SFA-01', 35: 'A', 36: 'approved' }),
+    respRow({ 0: '2026/08/02', 1: 'wong@example.com', 2: '黃小玲', 3: 'WONG Siu Ling', 4: '92340001', 5: '女', 7: '南區', 8: '第45旅', 9: 'S234567', 10: '童軍', 16: '92340002', 29: '45', 34: 'SFA-02', 35: 'A', 36: 'approved' }),
+    respRow({ 0: '2026/08/03', 1: 'lee@example.com', 2: '李小強', 3: 'LEE Siu Keung', 4: '93450001', 5: '男', 7: '筲箕灣區', 8: '第123旅', 34: '', 35: '', 36: 'pending' }),
+  ];
+
+  // ── 參數 W1:X5 ──
+  const wx = [
+    ['項目', '內容'],
+    ['成員系統報名網址', 'https://member-portal-demo.vercel.app/training'],
+    ['FPS 識別碼', '102866183'],
+    ['FPS 戶口名稱', 'SCOUT ASSOCIATION OF HONG KONG - SHAU KEI WAN DISTRICT'],
+    ['區會網址', 'www.skwscout.org.hk'],
+  ];
+
+  // ── Print_通告（45×7） ──
+  const vn = mk(45, 7);
+  put(vn, 12, 7, '檔案編號: 2613'); put(vn, 13, 7, S.issueDate);
+  put(vn, 15, 1, S.courseName);
+  put(vn, 22, 2, '班領導人：'); put(vn, 22, 3, '陳大文先生（急救教練員）');
+  put(vn, 23, 2, '參加資格：'); put(vn, 23, 3, S.eligibility);
+  put(vn, 24, 2, '費 用：'); put(vn, 24, 3, S.feeNote);
+  put(vn, 28, 2, '名 額：'); put(vn, 28, 3, '22人');
+  put(vn, 29, 2, '截止日期：'); put(vn, 29, 3, '2026年9月19日');
+  put(vn, 30, 2, '報名辦法：'); put(vn, 30, 3, '請於筲箕灣區成員系統訓練班版面填妥網上報名表。');
+  put(vn, 31, 2, '服 裝：'); put(vn, 31, 3, S.uniform);
+  put(vn, 32, 2, '備 註：');
+  S.remarks.forEach((t: string, i: number) => put(vn, 32 + i, 3, t));
+  put(vn, 39, 2, '查 詢：'); put(vn, 39, 3, '如有查詢，請電郵至 demo@demo 與班領導人聯絡。');
+  put(vn, 43, 5, S.signer);
+
+  // ── Print_接納通知書 ──
+  const va = mk(46, 12);
+  put(va, 23, 4, S.acceptCheckin); put(va, 30, 4, S.acceptItems);
+  put(va, 32, 4, S.acceptOthers); put(va, 34, 4, S.acceptNote);
+
+  // ── Print_財政預算（139×9） ──
+  const vf = mk(139, 9);
+  put(vf, 95, 2, S.financeApproved); put(vf, 90, 8, S.financeHqSubsidy);
+  put(vf, 87, 3, '550');
+
+  // ── Print_訓練班完成報告（31×6） ──
+  const vc = mk(31, 6);
+  put(vc, 10, 1, 'SFA-01'); put(vc, 10, 2, '陳小文'); put(vc, 10, 3, '123');
+  put(vc, 10, 4, 'CERT-2601'); put(vc, 10, 5, '合格');
+  put(vc, 11, 1, 'SFA-02'); put(vc, 11, 2, '黃小玲'); put(vc, 11, 3, '45');
+  put(vc, 11, 5, '缺席'); put(vc, 11, 6, '缺席第二節');
+
+  // ── Print_領取證書紀錄（29×7） ──
+  const vt = mk(29, 7);
+  put(vt, 7, 2, 'SFA-01'); put(vt, 7, 3, '陳小文'); put(vt, 7, 4, '123');
+  put(vt, 7, 5, 'CERT-2601'); put(vt, 7, 6, dateOnly(-5));
+
+  // ── Print_總會資助計劃（54×19） ──
+  const vs = mk(54, 19);
+  put(vs, 11, 17, S.subsidyOrigFee);
+  put(vs, 22, 1, '1'); put(vs, 22, 2, 'CHAN Siu Man'); put(vs, 22, 3, '陳小文');
+  put(vs, 22, 5, '123'); put(vs, 22, 8, 'CERT-2601');
+
+  return {
+    input01: v1, input02: v2, input03: v3, input04: v4, resp: vr, paramsWX: wx,
+    notice: vn, accept: va, finance: vf, completion: vc, cert: vt, subsidy: vs,
+    pulledAt: new Date().toISOString(),
   };
 }

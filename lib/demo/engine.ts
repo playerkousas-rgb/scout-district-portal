@@ -10,7 +10,8 @@
  */
 
 import {
-  freshDemoDb, demoUserFor, demoRoomEvents, demoBudget,
+  freshDemoDb, demoUserFor, demoRoomEvents, demoBudget, demoCourseProfile,
+  demoCourseSetup, demoCourseSheetRaw,
   DEMO_ORG_GROUPS, DEMO_STAFF_ROWS, DEMO_HKSA_COUNCIL, DEMO_HKSA_DEPTS,
   DEMO_TOKEN, type DemoDb, type DemoUser,
 } from './seed.ts';
@@ -624,6 +625,132 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const r = requireUser(token, 2); if (isErr(r)) return r;
       d.courseLinks = d.courseLinks.filter(x => x.courseId !== payload.courseId);
       persistDb(); return ok({ deleted: true });
+    }
+    case 'pullCourseProfile': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const execUrl = String(payload.scriptExecUrl || payload.apiBase || '').trim();
+      if (!execUrl && !payload.courseId) return fail('缺少訓練班 Script 網址（scriptExecUrl）');
+      return ok(demoCourseProfile());
+    }
+    // ── 新制直入（v4.14.0） ──
+    case 'createCourseSheet': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const setup = (payload.setup || {}) as AnyObj;
+      const link = (payload.link || {}) as AnyObj;
+      const title = String(setup.courseName || link.title || '').trim();
+      if (!title) return fail('課程名稱（courseName）必填');
+      const id = String(link.courseId || setup.courseId || '').trim() || genId('cl');
+      const sheetId = 'demo-sheet-' + id;
+      const row: AnyObj = {
+        ...link, courseId: id, title: link.title || title, sheetId,
+        setupJson: JSON.stringify(setup), active: 'TRUE', createdAt: nowIso(),
+      };
+      const ix = d.courseLinks.findIndex(x => x.courseId === id);
+      if (ix >= 0) d.courseLinks[ix] = { ...d.courseLinks[ix], ...row };
+      else d.courseLinks.unshift(row);
+      persistDb();
+      return ok({
+        created: true, courseId: id, sheetId,
+        sheetUrl: 'https://docs.google.com/spreadsheets/d/' + sheetId,
+        cellsApplied: Array.isArray(payload.cells) ? payload.cells.length : 0,
+        skippedTabs: [], sharedTo: String(payload.clEmail || setup.clEmail || ''), shareWarning: '',
+      });
+    }
+    case 'pushCourseSetup': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const row = d.courseLinks.find(x => x.courseId === payload.courseId);
+      if (!row) return fail('找不到此訓練班（courseId）');
+      if (!row.sheetId) return fail('呢班係人手建表，冇後端 Sheet ID（新制推送只限區系統自動建嘅班）');
+      if (payload.setup) row.setupJson = JSON.stringify(payload.setup);
+      persistDb();
+      return ok({
+        pushed: true, courseId: row.courseId, sheetId: row.sheetId,
+        cellsApplied: Array.isArray(payload.cells) ? payload.cells.length : 0, skippedTabs: [],
+      });
+    }
+    case 'pullCourseSheetRaw': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const execUrl = String(payload.scriptExecUrl || payload.apiBase || '').trim();
+      if (!execUrl && !payload.courseId) return fail('缺少訓練班 Script 網址（scriptExecUrl）');
+      return ok(demoCourseSheetRaw());
+    }
+    case 'getCourseSetup': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const row = d.courseLinks.find(x => x.courseId === payload.courseId);
+      if (!row) return fail('找不到此訓練班（courseId）');
+      let setup: AnyObj | null = null;
+      try { setup = row.setupJson ? JSON.parse(row.setupJson) : null; } catch { setup = null; }
+      return ok({ courseId: row.courseId, sheetId: row.sheetId || '', setup });
+    }
+
+    // ── 區通告 ──
+    case 'getCirculars': {
+      const r = requireUser(token); if (isErr(r)) return r;
+      const list = d.circulars.filter(n => n.id).map((n): AnyObj => {
+        const link = n.courseId ? d.courseLinks.find(x => x.courseId === n.courseId) : undefined;
+        const dl = String(n.deadline || '').trim();
+        return {
+          ...n,
+          isOpen: n.status === 'published' && (!dl || dl >= today()),
+          course: link ? {
+            courseId: link.courseId, title: link.title, fee: link.fee ?? '', deadline: link.deadline ?? '',
+            quota: link.quota ?? '', filled: link.filled ?? '', noticeUrl: link.noticeUrl || '',
+          } : null,
+        };
+      }).sort((a, b) => String(b.issueDate || '').localeCompare(String(a.issueDate || '')));
+      let maxNo = 0;
+      d.circulars.forEach(n => {
+        const m = String(n.circularNo || '').trim().match(/^(\d{1,6})$/);
+        if (m) maxNo = Math.max(maxNo, Number(m[1]));
+      });
+      return ok({ items: list, suggestedNo: maxNo > 0 ? String(maxNo + 1) : '' });
+    }
+    case 'saveCircular': {
+      const r = requireUser(token, 3); if (isErr(r)) return r;
+      const c = (payload.circular || {}) as AnyObj;
+      const no = String(c.circularNo || '').trim();
+      const title = String(c.title || '').trim();
+      if (!no) return fail('通告編號必填');
+      if (!title) return fail('標題必填');
+      const dup = d.circulars.find(x => String(x.circularNo) === no && x.id !== c.id);
+      if (dup) return fail(`通告編號「${no}」已經用咗（${dup.title || dup.id}）`);
+      const row = c.id ? d.circulars.find(x => x.id === c.id) : undefined;
+      if (row) {
+        Object.assign(row, c, { id: row.id, districtCode: row.districtCode, createdAt: row.createdAt, updatedAt: nowIso() });
+        if ((row.status === 'published' || row.status === 'closed') && !row.publishedAt) {
+          row.publishedAt = nowIso(); row.publishedBy = (r as DemoUser).displayName;
+        }
+        persistDb(); return ok({ saved: true, id: row.id, created: false });
+      }
+      const id = genId('cr');
+      const now = nowIso();
+      const st = c.status || 'draft';
+      d.circulars.unshift({
+        id, districtCode: 'DEMO', ...c, circularNo: no, title, status: st,
+        publishedAt: (st === 'published' || st === 'closed') ? now : '',
+        publishedBy: (st === 'published' || st === 'closed') ? (r as DemoUser).displayName : '',
+        updatedAt: now, createdAt: now,
+      });
+      persistDb(); return ok({ saved: true, id, created: true });
+    }
+    case 'deleteCircular': {
+      const r = requireUser(token, 3); if (isErr(r)) return r;
+      const row = d.circulars.find(x => x.id === payload.id);
+      if (!row) return fail('找不到該通告');
+      d.circulars = d.circulars.filter(x => x.id !== payload.id);
+      persistDb(); return ok({ deleted: true, id: payload.id });
+    }
+    case 'setCircularStatus': {
+      const r = requireUser(token, 3); if (isErr(r)) return r;
+      const st = String(payload.status || '').toLowerCase();
+      if (['draft', 'published', 'closed', 'archived'].indexOf(st) < 0) return fail('狀態不正確');
+      const row = d.circulars.find(x => x.id === payload.id);
+      if (!row) return fail('找不到該通告');
+      row.status = st; row.updatedAt = nowIso();
+      if ((st === 'published' || st === 'closed') && !row.publishedAt) {
+        row.publishedAt = nowIso(); row.publishedBy = (r as DemoUser).displayName;
+      }
+      persistDb(); return ok({ saved: true, id: payload.id, status: st });
     }
 
     // ── 外掛 ──

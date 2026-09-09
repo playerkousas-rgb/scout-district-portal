@@ -31,11 +31,12 @@ check('login：任何電郵密碼都入到同一個 ADC 示範身份（權限全
 });
 
 // ── 2. 卡片 ──
-check('getCards：權限全開 — 13 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
+check('getCards：權限全開 — 14 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
   const r = demoCall('getCards', { token: T.adc }, 'GET');
   assert.ok(r.ok);
   const ids = r.data.map((c: any) => c.cardId);
-  assert.strictEqual(ids.length, 13);
+  assert.strictEqual(ids.length, 14);
+  assert.ok(ids.indexOf('circulars') >= 0, '區通告卡要喺示範版出現');
   assert.ok(r.data.every((c: any) => c.access === 'edit'));
   assert.strictEqual(ids.indexOf('awards'), -1, '成人獎勵提名唔喺示範範圍');
   assert.strictEqual(ids.indexOf('news'), -1, 'news 卡已移除（消息喺主控台頂）');
@@ -167,7 +168,94 @@ check('extBudget：rows＋summary', () => {
   assert.ok(b.data.rows.length >= 5 && b.data.summary.length >= 3);
 });
 
-// ── 9. 重設 ──
+// ── 9. 區通告＋開班自動帶入 ──
+check('通告：3 張種子＋suggestedNo＝最大編號＋1；published 未過期＝接受報名中＋掛接班 snapshot', () => {
+  const b = demoCall('getCirculars', { token: T.adc }, 'GET');
+  assert.ok(b.ok);
+  assert.strictEqual(b.data.items.length, 3);
+  assert.strictEqual(b.data.suggestedNo, '2613');
+  const pub = b.data.items.find((n: any) => n.id === 'cr-01');
+  assert.ok(pub && pub.isOpen === true);
+  assert.ok(pub.course && pub.course.courseId === 'cl-01', '掛接訓練班 snapshot');
+  assert.strictEqual(typeof pub.url, 'undefined', 'PDF-only：唔再有公開 url 欄');
+  const bad = demoCall('getCirculars', { token: T.bad }, 'GET');
+  assert.strictEqual(bad.ok, false);
+});
+check('通告：編號重複被擋；開草稿→發佈（publishedAt 只設一次）→截止→封存→刪除', () => {
+  const dup = demoCall('saveCircular', { token: T.adc, circular: { circularNo: '2607', title: '撞號' } }, 'POST');
+  assert.strictEqual(dup.ok, false);
+  const created = demoCall('saveCircular', { token: T.adc, circular: { circularNo: '2613', title: '測試通告', category: '訓練班', sessions: [{ date: 'd', time: 't', venue: 'v' }], feeNote: '費用說明', signupNote: '報名辦法', status: 'draft' } }, 'POST');
+  assert.ok(created.ok && created.data.created);
+  const id = created.data.id;
+  const gotNew = demoCall('getCirculars', { token: T.adc }, 'GET').data.items.find((n: any) => n.id === id);
+  assert.strictEqual(gotNew.feeNote, '費用說明');
+  assert.strictEqual(gotNew.signupNote, '報名辦法');
+  const p1 = demoCall('setCircularStatus', { token: T.adc, id, status: 'published' }, 'POST');
+  assert.ok(p1.ok);
+  const at1 = demoCall('getCirculars', { token: T.adc }, 'GET').data.items.find((n: any) => n.id === id).publishedAt;
+  assert.ok(at1, '首次發佈要設 publishedAt');
+  demoCall('setCircularStatus', { token: T.adc, id, status: 'closed' }, 'POST');
+  const at2 = demoCall('getCirculars', { token: T.adc }, 'GET').data.items.find((n: any) => n.id === id).publishedAt;
+  assert.strictEqual(at2, at1, '之後轉 status 唔可以再郁 publishedAt');
+  assert.ok(demoCall('setCircularStatus', { token: T.adc, id, status: 'archived' }, 'POST').ok);
+  assert.strictEqual(demoCall('setCircularStatus', { token: T.adc, id, status: 'bogus' }, 'POST').ok, false);
+  assert.ok(demoCall('deleteCircular', { token: T.adc, id }, 'POST').ok);
+  assert.strictEqual(demoCall('deleteCircular', { token: T.adc, id }, 'POST').ok, false, '刪咗再刪要報錯');
+});
+check('pullCourseProfile：冇 URL 被擋；有 URL 回示範 profile（Input02 結構：節次顯示＋班領導人）', () => {
+  assert.strictEqual(demoCall('pullCourseProfile', { token: T.adc }, 'POST').ok, false);
+  const r = demoCall('pullCourseProfile', { token: T.adc, scriptExecUrl: 'https://script.google.com/x/exec', scriptApiKey: 'k' }, 'POST');
+  assert.ok(r.ok);
+  assert.ok(r.data.courseName && r.data.deadline && r.data.quota && r.data.fee);
+  assert.ok(Array.isArray(r.data.sessions) && r.data.sessions.length >= 2);
+  assert.ok(r.data.sessions.some((x: any) => x.showOnCircular && x.displayDate), '至少一節上通告');
+  assert.ok(r.data.leader && /班領導人/.test(r.data.leader.role), '要有班領導人');
+  assert.ok(r.data.circular && r.data.circular.feeText && r.data.circular.signupText, '要有 Print_通告內文');
+  assert.ok(Array.isArray(r.data.circular.remarks) && r.data.circular.remarks.length >= 1);
+});
+
+check('新制直入：createCourseSheet 冇班名被擋；成功回 sheetId＋開班登記', () => {
+  assert.strictEqual(demoCall('createCourseSheet', { token: T.adc, setup: {}, cells: [] }, 'POST').ok, false);
+  const r = demoCall('createCourseSheet', {
+    token: T.adc, link: { courseId: 'cl-n1', title: '示範新班' },
+    setup: { courseName: '示範新班', clEmail: 'cl@demo' }, cells: [{ tab: 'Input01 訓練班預算', row: 1, col: 2, value: '示範新班' }],
+  }, 'POST');
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.courseId, 'cl-n1');
+  assert.ok(String(r.data.sheetId).startsWith('demo-sheet-'));
+  assert.strictEqual(r.data.cellsApplied, 1);
+  assert.strictEqual(r.data.sharedTo, 'cl@demo');
+  const g = demoCall('getCourseSetup', { token: T.adc, courseId: 'cl-n1' }, 'POST');
+  assert.ok(g.ok);
+  assert.strictEqual(g.data.setup.courseName, '示範新班');
+});
+
+check('新制直入：push 要有 sheetId；成功更新 setupJson', () => {
+  const noSheet = demoCall('pushCourseSetup', { token: T.adc, courseId: 'cl-02', setup: {}, cells: [] }, 'POST');
+  assert.strictEqual(noSheet.ok, false);
+  assert.ok(/人手建表/.test(noSheet.error || ''));
+  const r = demoCall('pushCourseSetup', { token: T.adc, courseId: 'cl-01', setup: { courseName: '改咗' }, cells: [] }, 'POST');
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.pushed, true);
+  const g = demoCall('getCourseSetup', { token: T.adc, courseId: 'cl-01' }, 'POST');
+  assert.strictEqual(g.data.setup.courseName, '改咗');
+});
+
+check('新制直入：pullCourseSheetRaw 回 12 tabs；getCourseSetup 冇 setup 回 null', () => {
+  assert.strictEqual(demoCall('pullCourseSheetRaw', { token: T.adc }, 'POST').ok, false);
+  const r = demoCall('pullCourseSheetRaw', { token: T.adc, courseId: 'cl-01' }, 'POST');
+  assert.ok(r.ok, JSON.stringify(r));
+  ['input01', 'input02', 'input03', 'input04', 'resp', 'paramsWX', 'notice', 'accept',
+    'finance', 'completion', 'cert', 'subsidy', 'pulledAt'].forEach(k => assert.ok(k in r.data, '缺 ' + k));
+  assert.ok(r.data.input02.length > 40 && r.data.input01.length > 100);
+  const g = demoCall('getCourseSetup', { token: T.adc, courseId: 'cl-02' }, 'POST');
+  assert.ok(g.ok);
+  assert.strictEqual(g.data.setup, null);
+  const bad = demoCall('getCourseSetup', { token: T.bad, courseId: 'cl-01' }, 'POST');
+  assert.strictEqual(bad.ok, false);
+});
+
+// ── 10. 重設 ──
 check('resetDemoData：加完消息重設返 4 條示範消息', () => {
   demoCall('saveAnnouncement', { token: T.adc, announcement: { title: '臨時消息', body: '' } }, 'POST');
   resetDemoData();

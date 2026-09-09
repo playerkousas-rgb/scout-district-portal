@@ -341,9 +341,9 @@ check('舊 Visits 表（未升級）跑 ensureSheetColumns_ 自動補四欄，�
   sheets.Visits = makeSheet('Visits', [VISIT_HEAD]);   // 還原，等其他測試環境乾淨
 });
 
-check('健康檢查版本 4.10.0', () => {
+check('健康檢查版本 4.14.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.10.0');
+  assert.strictEqual(parsed.data.version, '4.15.0');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

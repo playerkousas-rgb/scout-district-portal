@@ -5,6 +5,50 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.15.0 — 🛡 寫入防呆：rev 樂觀鎖＋一次過儲存</h3>
+        <ul>
+          <li>🛡 <b>十個職員同時改都唔撞爛</b>：班 Sheet 加隱藏 <code>_Sync</code> 版本號；讀全文帶 <code>rev</code>，儲存帶返 <code>baseRev</code>——有人快咗一步就唔寫，直接話你邊個幾時改過，叫你重讀再存</li>
+          <li>💾 <b>改完一次過存</b>：新 <code>saveCourseBatch</code> 一個 call 存晒（設定格＋完成報告＋證書＋支出）；成批驗證，有錯就乜都唔寫。唔好逐格 auto-save，每格打一次後端</li>
+          <li>🔒 全部寫入加鎖排隊，唔會交錯寫爛；支出係 append-only（唔同職員自動唔同行）；區系統推送都會 bump rev</li>
+          <li>⚠️ 要換新 <code>Code.gs</code>（v4.15.0）→ 重新部署（唔使跑 setupSheets，冇新表）；訓練班模版覆蓋貼上（新開班用新模版一鍵建表，舊班覆蓋唔好重跑 setup）。member-portal <b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
+        <h3>📝 訓練班模版更新 — ✍️ 寫入 API（職員前端基本合約）</h3>
+        <ul>
+          <li>✍️ <b>每班 Script 加 4 個寫入 API</b>（全部要該班 API Key）：<code>setCourseCells</code> 通用寫格（上限 1000 格，唔識嘅頁自動 skip）／<code>setCompletionRow</code> 完成報告學員列（D 證書／E 合格與否／F 原因）／<code>setCertRow</code> 領取證書（E 證書編號／F 領取日期／G 簽收）／<code>addExpenseRow</code> 實際支出（自動搵下一個空收據行）。對位用學員編號優先、中文姓名後備</li>
+          <li>🔄 <b>讀寫合約齊晒</b>：<code>getCourseSheetRaw</code> 讀全文 → 改 → 寫返班 Sheet。將來職員前端（每班獨立，唔入區系統）就係靠呢套；職員以後唔使再開 Google Sheet，班 Sheet 純做每班獨立數據庫</li>
+          <li>ℹ️ 純訓練班模版更新，<b>唔使換主後台 Code.gs</b>（health check 維持 v4.14.0）。<b>新開班</b>用新模版一鍵建表；<b>舊班</b>要寫入功能先將新模版覆蓋貼上（千祈唔好重跑 setup，會清空）。member-portal <b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
+        <h3>v4.14.0 — 🆕 新制直入試驗：區系統填設定＋自動建班 Sheet＋12 張網頁列印</h3>
+        <ul>
+          <li>🆕 <b>訓練班管理加「新制直入」分頁</b>（同舊制並存）：成份開班設定（Input01／02／03＋通告人手格）喺區系統填，撳掣即由<b>總模版自動複製</b>班 Sheet＋寫入＋開班登記，仲可以自動分享畀班領導人——<b>連建表都慳返</b></li>
+          <li>🔄 <b>雙向同步</b>：呢邊改 → 寫入返班 Sheet；職員喺 Sheet 改（名單／實支／證書）→ 呢邊「由班 Sheet 重讀」即時睇返。舊制人手班睇得＋印得（只讀）</li>
+          <li>🖨 <b>12 張列印全部網頁版</b>：通告（複用傳統版式＋FPS QR）／取錄／合格／學員／出席／接納通知書／班職員／收支／財政預算／總會資助／完成報告／領取證書——直接列印 PDF，唔使開 Sheet</li>
+          <li>⚠️ 要換新 <code>Code.gs</code>（v4.14.0）→ <code>setupSheets()</code>（自動補 CourseLinks 兩欄＋總模版 Config）→ 重新部署；另開一張空白 Sheet 跑訓練班模版 <code>setupCourseSheet()</code> 做<b>總模版</b>，ID 填入 Config <code>COURSE_TEMPLATE_ID</code>。收報名：CL 喺班 Sheet 用 🎓 選單「🔑 產生 API Key」→ 部署 → 貼返 <code>/exec</code>＋key（唔好跑一鍵建表，會清空）。member-portal <b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
+        <h3>v4.13.0 — 📘 訓練班工作簿跟足開班文件格式＋ CL 填一次</h3>
+        <ul>
+          <li>📘 <b>收表 Script 模版重寫做足全本工作簿</b>：Input01 預算（8 大開支分類＋公式）、Input02 資料（黃格自動帶入＋✓上通告剔格＋20 個預設職位）、Input03 時間表、Input04 支出表、12 張 Print（通告／取錄／合格／學員／出席／接納／收支／班職員／資助／完成報告／財政預算／領取證書，全部自動由 Input／報名數據帶入）、表格回應 36 欄、參數 22 欄（110 項專章＋區會＋地域＋職位等）—— 分頁名／欄位／行位跟足實物，日後其他系統接入都認得</li>
+          <li>✍️ <b>CL 填一次流程</b>：ADC 下載模版交 CL → CL 填 Input＋執 Print_通告（標題／節數／名額／截止／報名辦法／查詢自動帶入，只補參加資格／費用／服裝／備註）→ 交區總監審批 → PDF 交網頁管理員上載 ＋ ADC 喺平台開班登記，收費／名額／截止<b>唔使重打</b></li>
+          <li>📜 <b>「從訓練班帶入資料」升級</b>：即時由該班 Sheet pull 通告內文（參加資格／費用說明／服裝／備註／查詢／報名辦法／署名代行／檔案編號／發出日期），只填空欄；報名辦法預設成員系統（唔用 Google Form）。通告加兩個欄 <code>feeNote</code>／<code>signupNote</code></li>
+          <li>⚠️ 要換新 <code>Code.gs</code>（v4.13.0）→ <code>setupSheets()</code>（自動補兩欄）→ 重新部署；訓練班模版要更新：<b>新開班</b>用新模版一鍵建表，<b>舊班</b>將新模版覆蓋貼上就得（千祈唔好重跑 setup，會清空）。member-portal <b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
+        <h3>v4.12.0 — 📥 開班自動讀 Sheet + 📜 區通告列印 PDF</h3>
+        <ul>
+          <li>📥 <b>「🎓 訓練班管理」新增「由訓練班 Sheet 讀取」</b>：貼上該班收表 Script <code>/exec</code>＋API Key 一撳，名稱／名額／收費／日期場地／截止／班領導人聯絡等由 <code>Input01</code>／<code>Input02</code> 自動帶入，ADC 唔使再人手重打；已開班都可以用 <code>courseId</code> 重讀。主後台 <code>pullCourseProfile</code> → 該班 Script <code>getCourseProfile</code>（label 對位，容忍實填版同模版版行號差異）</li>
+          <li>📜 <b>新卡片「區通告」</b>（職員專用，PDF only）：開新通告 → 掛接訓練班 →「⬇ 從訓練班帶入資料」預填節數／收費／名額／截止 → 補參加資格／備註 →「🖨 列印 PDF」出傳統通告格式（節數表／費用＋FPS QR／報名辦法／署名）→ 上載區網／交總會（圖書館自動收錄）→「↗ 回填訓練班」將區網 PDF 連結寫入 <code>noticeUrl</code>，成員系統該班即跳轉睇真通告</li>
+          <li>🔢 <b>通告編號人手輸入</b>（跨類別共用，區內唔重複；只係建議下一個號碼）；報名辦法預設成員系統訓練班頁（Config <code>MEMBER_PORTAL_URL</code>），成員用內置報名表報名，唔再用 Google Form</li>
+          <li>⚠️ 要換新 <code>Code.gs</code>（v4.12.0）→ <code>setupSheets()</code>（自動補 <code>Circulars</code> 表＋卡片＋權限）→ 重新部署；舊訓練班要將新收表模版覆蓋貼上先用到自動讀取（唔使重跑 setup）。member-portal <b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.11.0 — 🎓 訓練班開班教學 + 收表 Script 模版下載</h3>
         <ul>
           <li>📥 <b>「🎓 訓練班管理」頁頂新增「開班前：下載收表 Script 模版 + 教學」</b>：一撳下載該班專用收表 Script（<code>Code.gs.course.js</code>），照住 7 步做 — 下載 → 開空白 Sheet → 貼上 → RUN SETUP（<code>setupCourseSheet()</code>）→ 部署 → 返嚟貼上 <code>/exec</code> 網址 + API Key + Drive 資料夾 ID → 儲存即完成</li>
@@ -207,7 +251,7 @@ export default function UpdatesPage() {
       </div>
       <div className="info-card">
         <h3>後台程式碼</h3>
-        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.4.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
+        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.15.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
       </div>
     </>
   );
