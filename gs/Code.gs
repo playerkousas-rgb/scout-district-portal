@@ -2356,7 +2356,7 @@ function awardTypeSeed_() {
     ['GDL',    '金獅勳章',                '金獅',  '獅勳章',   'SVL',   '',   'rally',   'Gold Lion；制服成年成員最高功績獎勵，冇固定年期規定', 'TRUE'],
     ['FIVE',   '五年長期服務獎狀',        '五年',  '長期服務', '',      5,    'other',   '會務委員（LAY）階梯第一級；由服務開始年份起計 5 年', 'TRUE'],
     ['TEN',    '十年長期服務獎狀',        '十年',  '長期服務', 'FIVE',  5,    'other',   '會務委員（LAY）；五年獎狀後 5 年（共 10 年）', 'TRUE'],
-    ['LSM',    '長期服務獎章',            'LSM',   '長期服務', '',      15,   'other',   '服務滿 15 年（由服務開始年份起計；會務委員 五年→十年→十五年 自動接上）', 'TRUE'],
+    ['LSM',    '長期服務獎章',            'LSM',   '長期服務', '',      15,   'other',   '服務滿 15 年（由服務開始年份起計；會務委員 LAY 五年→十年→十五年 自動接上，十年獎狀後 5 年可獲）', 'TRUE'],
     ['LSM1',   '長期服務一星獎章',        'LSM*',  '長期服務', 'LSM',   10,   'other',   '再服務滿 10 年（共 25 年）', 'TRUE'],
     ['LSM2',   '長期服務二星獎章',        'LSM**', '長期服務', 'LSM1',  10,   'other',   '共 35 年', 'TRUE'],
     ['LSM3',   '長期服務三星獎章',        'LSM***','長期服務', 'LSM2',  10,   'other',   '共 45 年', 'TRUE'],
@@ -2371,6 +2371,7 @@ function awardTypeSeed_() {
 /**
  * v4.9.0 年期修訂 — AwardTypes 舊值自動升級（只改仍然同舊預設一樣嘅格，
  * 用戶自行改過嘅設定絕對唔掂）。同一 philosophy 同 patchCardRows_。
+ * v4.9.1 / v4.10.0：LSM 備註補上十年獎狀後 5 年可獲（LAY 階梯）
  */
 function patchAwardTypes_(ss) {
   var sh = ss.getSheetByName(SHEET.AWARD_TYPES);
@@ -2389,26 +2390,46 @@ function patchAwardTypes_(ss) {
     THANKS: ['',  '',      '',  '',   'founder', 'other', '表格 DA2；頒予配偶／家長／支持童軍運動人士', '表格 DA2；自行申請，唔會自動推算'],
     HAB:    ['',  '',      '',  '',   'other', 'hab',   '前稱民政事務局局長嘉許計劃；義務領袖須服務滿 10 年（限提名名額，預設唔自動推算；想自動列出就喺年期設定填 10）', '自行申請＋有提名期：總會每年初發通告收集（2026 年度 2/3 前交民青局）；死線可喺年期設定改'],
   };
+  // v4.9.1→v4.17.0 追加：LSM 舊備註自動升級到新版（含 TEN+5）
+  var notePatches = {
+    LSM: [
+      ['服務滿 15 年（由服務開始年份起計；會務委員 五年→十年→十五年 自動接上）', '服務滿 15 年（由服務開始年份起計；會務委員 LAY 五年→十年→十五年 自動接上，十年獎狀後 5 年可獲）'],
+    ],
+  };
   for (var i = 1; i < v.length; i++) {
     var code = String(v[i][c.code] || '').trim().toUpperCase();
     var p = patches[code];
-    if (!p) continue;
     var curPrev = String(v[i][c.prevCode] || '').trim().toUpperCase();
     var curMin = String(v[i][c.minYears] == null ? '' : v[i][c.minYears]).trim();
     var curRound = String(v[i][c.round] || '').trim().toLowerCase();
+    var curNote = c.note >= 0 ? String(v[i][c.note] || '').trim() : '';
     var changed = false;
-    if (curPrev === String(p[0]).toUpperCase() && curMin === p[1] && (curMin !== String(p[3]))) {
-      sh.getRange(i + 1, c.prevCode + 1).setValue(p[2]);
-      sh.getRange(i + 1, c.minYears + 1).setValue(p[3]);
-      changed = true;
+    if (p) {
+      if (curPrev === String(p[0]).toUpperCase() && curMin === p[1] && (curMin !== String(p[3]))) {
+        sh.getRange(i + 1, c.prevCode + 1).setValue(p[2]);
+        sh.getRange(i + 1, c.minYears + 1).setValue(p[3]);
+        changed = true;
+      }
+      if (curRound === p[4] && curRound !== p[5]) {
+        sh.getRange(i + 1, c.round + 1).setValue(p[5]);
+        changed = true;
+      }
+      if (c.note >= 0 && p[6] && curNote === p[6]) {
+        sh.getRange(i + 1, c.note + 1).setValue(p[7]);
+        curNote = p[7];
+        changed = true;
+      }
     }
-    if (curRound === p[4] && curRound !== p[5]) {
-      sh.getRange(i + 1, c.round + 1).setValue(p[5]);
-      changed = true;
-    }
-    if (c.note >= 0 && p[6] && String(v[i][c.note] || '').trim() === p[6]) {
-      sh.getRange(i + 1, c.note + 1).setValue(p[7]);
-      changed = true;
+    // 追加備註升級（LSM TEN+5）
+    var np = notePatches[code];
+    if (np && c.note >= 0) {
+      for (var k = 0; k < np.length; k++) {
+        if (curNote === np[k][0]) {
+          sh.getRange(i + 1, c.note + 1).setValue(np[k][1]);
+          changed = true;
+          break;
+        }
+      }
     }
     if (changed) v[i] = sh.getRange(i + 1, 1, 1, head.length).getValues()[0]; // refresh
   }

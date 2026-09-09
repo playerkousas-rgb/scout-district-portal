@@ -1,5 +1,5 @@
 /**
- * 🎖 獎勵提名推算（v4.7.2）— 純函數，唔掂網絡，方便測試。
+ * 🎖 獎勵提名推算（v4.9.1）— 純函數，唔掂網絡，方便測試。
  *
  * 規則來源：AwardTypes 表（可喺 /awards「年期設定」改），每個獎項有
  *   prevCode  上一級獎（空 = 入門級）
@@ -9,6 +9,11 @@
  * 提名截止（香港童軍總會 ACR 20/2024）：
  *   創辦人紀念日獎勵（優良／優異服務獎章、感謝狀）：區部 10/31 → 總會 11/30（頒獎年之前一年）
  *   童軍獎勵（功績榮譽獎章／十字章、龍獅勳章）：區部 4/30 → 總會 5/31（同年）
+ *
+ * LAY 長期服務階梯特別規則（v4.9.1 新增）：
+ *   五年獎狀(5) → 十年獎狀(+5) → 長期服務獎章(共15年，TEN+5) → 一二三星(每10年)
+ *   即：已獲十年獎狀(TEN)嘅 LAY，5年後有資格獲長期服務獎章(LSM)，
+ *   即使未填服務開始年份，或服務開始年份計未夠15年，都會自動推算。
  */
 import type { AwardMember, AwardRound, AwardType } from './types';
 
@@ -88,6 +93,10 @@ export function serviceStartYear(member: AwardMember): number | null {
  * ② 入門級（冇 prevCode）但有 minYears → 由**服務開始年份** + minYears 計
  *    （例如優良服務獎章 7 年、長期服務獎章 15 年）；未填服務開始年份就計唔到，會被略過
  * ③ 入門級又冇 minYears（例如感謝狀）→ 唔自動推算
+ * ④ 特別規則：長期服務獎章 LSM — 會務委員 LAY 階梯
+ *    · 由服務開始年份起計 15 年（原有規則）
+ *    · 或由十年獎狀 TEN 獲獎年份起計 +5 年（v4.9.1 新增：LAY 拿完十年獎狀 5 年後有資格拿長期服務獎）
+ *    兩條路徑取最早可提名年份；即使未填服務開始年份，只要有 TEN 都計到。
  */
 export function eligibilityFor(member: AwardMember, types: AwardType[], targetYear: number): Eligibility[] {
   const out: Eligibility[] = [];
@@ -96,6 +105,61 @@ export function eligibilityFor(member: AwardMember, types: AwardType[], targetYe
     if (type.enabled === false) continue;
     if (hasAward(member, type.code)) continue;          // 已經有
     const min = type.minYears == null ? null : (Number(type.minYears) || 0);
+
+    // ── 特別規則：長期服務獎章 LSM ──
+    // LAY 階梯：五年(5) → 十年(+5) → 長期服務獎章(15) → 一二三星(每10年)
+    // 原有：服務開始 +15 年；新增：十年獎狀 TEN +5 年（LAY 拿完十年獎狀 5 年後有資格拿長期服務獎）
+    // 兩條路徑取最早年份；即使未填服務開始年份，只要有 TEN 都計到
+    if (type.code === 'LSM') {
+      type Candidate = { eligibleYear: number; prevYear: number | null; prevType?: AwardType; fromService: boolean; uncertain: boolean };
+      const candidates: Candidate[] = [];
+
+      // 路徑 A：由服務開始年份起計（原有規則，預設 15 年）
+      if (start !== null) {
+        const serviceMin = min !== null ? min : 15;
+        candidates.push({
+          eligibleYear: start + serviceMin,
+          prevYear: start,
+          prevType: undefined,
+          fromService: true,
+          uncertain: isUncertain(member.serviceStart),
+        });
+      }
+
+      // 路徑 B：由十年獎狀 TEN 起計 +5 年（v4.9.1 新增，針對 LAY）
+      const tenCell = member.awards?.['TEN'];
+      const tenYear = awardYear(tenCell);
+      if (tenYear !== null) {
+        const tenType = typeByCode(types, 'TEN');
+        candidates.push({
+          eligibleYear: tenYear + 5,
+          prevYear: tenYear,
+          prevType: tenType,
+          fromService: false,
+          uncertain: isUncertain(tenCell),
+        });
+      }
+
+      if (candidates.length === 0) continue; // 兩條路都計唔到
+
+      // 取最早可提名年份（任一條件滿足即有資格）
+      candidates.sort((a, b) => a.eligibleYear - b.eligibleYear);
+      const chosen = candidates[0];
+
+      out.push({
+        member,
+        type,
+        prevType: chosen.prevType,
+        prevYear: chosen.prevYear,
+        eligibleYear: chosen.eligibleYear,
+        waited: targetYear - chosen.eligibleYear,
+        ready: chosen.eligibleYear <= targetYear,
+        uncertain: chosen.uncertain,
+        fromService: chosen.fromService,
+        noRule: false,
+      });
+      continue;
+    }
 
     if (!type.prevCode) {
       if (min === null) continue;                        // 感謝狀之類：人手判斷
@@ -134,7 +198,14 @@ export function missingServiceStart(members: AwardMember[], types: AwardType[]):
   return members.filter(m => {
     if (m.status && m.status !== 'active' && m.status !== 'applying') return false;
     if (serviceStartYear(m) !== null) return false;
-    return entryCodes.some(code => !hasAward(m, code));   // 仲有入門級未攞
+    // 仲有入門級未攞；但 LSM 有特別路徑：有 TEN 就算冇服務開始年份都計到，唔算 missing
+    // 同理，TEN 持有者已過 FIVE 階段，FIVE 亦唔算 missing
+    return entryCodes.some(code => {
+      if (hasAward(m, code)) return false;
+      if (code === 'LSM' && hasAward(m, 'TEN')) return false; // LAY  via TEN → LSM 唔使服務年份
+      if (code === 'FIVE' && hasAward(m, 'TEN')) return false; // 有 TEN 即已有 FIVE
+      return true;
+    });
   });
 }
 

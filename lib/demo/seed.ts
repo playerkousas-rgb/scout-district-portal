@@ -120,7 +120,7 @@ export const DEMO_AWARD_TYPES: Record<string, any>[] = [
   { code: 'GDL', label: '金獅勳章', short: '金獅', category: '獅勳章', prevCode: 'SVL', minYears: null, round: 'rally', note: 'Gold Lion；制服成年成員最高功績獎勵', enabled: true },
   { code: 'FIVE', label: '五年長期服務獎狀', short: '五年', category: '長期服務', prevCode: '', minYears: 5, round: 'other', note: '會務委員（LAY）階梯第一級；由服務開始年份起計 5 年', enabled: true },
   { code: 'TEN', label: '十年長期服務獎狀', short: '十年', category: '長期服務', prevCode: 'FIVE', minYears: 5, round: 'other', note: '會務委員（LAY）；五年獎狀後 5 年（共 10 年）', enabled: true },
-  { code: 'LSM', label: '長期服務獎章', short: 'LSM', category: '長期服務', prevCode: '', minYears: 15, round: 'other', note: '服務滿 15 年（由服務開始年份起計）', enabled: true },
+  { code: 'LSM', label: '長期服務獎章', short: 'LSM', category: '長期服務', prevCode: '', minYears: 15, round: 'other', note: '服務滿 15 年（由服務開始年份起計；會務委員 LAY 五年→十年→十五年 自動接上，十年獎狀後 5 年可獲）', enabled: true },
   { code: 'LSM1', label: '長期服務一星獎章', short: 'LSM*', category: '長期服務', prevCode: 'LSM', minYears: 10, round: 'other', note: '再服務滿 10 年（共 25 年）', enabled: true },
   { code: 'LSM2', label: '長期服務二星獎章', short: 'LSM**', category: '長期服務', prevCode: 'LSM1', minYears: 10, round: 'other', note: '共 35 年', enabled: true },
   { code: 'LSM3', label: '長期服務三星獎章', short: 'LSM***', category: '長期服務', prevCode: 'LSM2', minYears: 10, round: 'other', note: '共 45 年', enabled: true },
