@@ -614,6 +614,55 @@ export interface CircularsBoard {
   suggestedNo: string;
 }
 
+// ===================== 通告 URL 自動讀料（舊制開班登記） =====================
+// ADC 貼上區網通告 PDF 連結 → 伺服器抽文字 → lib/notice-parse.ts 按 label 讀出報班必備欄位。
+
+/** 通告節次（display = 日期＋時間＋地點一行，拆唔開都保證有料） */
+export interface NoticeSession {
+  date: string;      // 中文：2026年7月20日（星期一）
+  dateISO: string;   // 2026-07-20
+  weekday: string;   // 星期一
+  time: string;      // 下午七時至十時
+  venue: string;     // 香港童軍百周年紀念大樓
+  display: string;   // 上面砌埋一行
+}
+
+/** 通告查詢聯絡 */
+export interface NoticeContact {
+  name: string;
+  role: string;
+  phone: string;     // 4-4：5721 1100
+  email: string;
+}
+
+/** 通告讀出嚟嘅報班必備欄位（warnings = 邊啲讀唔到，叫職員人手補） */
+export interface NoticeFields {
+  title: string;
+  fee: string;            // 銀碼數字字串（冇就空字串）
+  originalFee: string;    // 原價（有資助先有）
+  feeText: string;        // 費用段全文
+  freeFee: boolean;       // 免費／全免
+  quota: string;
+  deadline: string;       // yyyy-MM-dd
+  eligibility: string;    // 參加資格全文
+  sessions: NoticeSession[];
+  sessionsText: string;   // display 以「；」串起（直入 CourseLink.sessionsText）
+  venue: string;          // 去重以「、」串起
+  leader: string;         // 班領導人
+  contact: string;        // 聯絡一行（直入 CourseLink.contact）
+  contactDetail: NoticeContact;
+  uniform: string;
+  remarks: string;        // 備註全文
+  enquiry: string;        // 查詢段全文
+  signupText: string;     // 報名辦法全文
+  fileNo: string;         // 通告編號（text＝內文讀到，url＝由檔名估）
+  fileNoFrom: '' | 'text' | 'url';
+  issueDate: string;
+  signer: string;         // 區總監署名
+  deputy: string;         // 代行
+  warnings: string[];
+}
+
 // ===================== 新制：區系統直入＋網頁列印（v4.14.0） =====================
 // ADC 喺區系統填晒成份開班設定 → 區後台自動複製班 Sheet＋寫入 → 12 張列印喺網頁出。
 // 寫入座標跟足 v4.13.0 工作簿模版（人手舊班唔保證啱位，只讀唔寫）。

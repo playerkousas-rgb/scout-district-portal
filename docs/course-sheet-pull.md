@@ -31,7 +31,7 @@ API（全部需 `canCourse`）：`createCourseSheet {link, setup, cells, clEmail
 | 2. 開工作簿 | CL（或 ADC 代勞） | 開全新空白 Sheet → 貼模版 → 執行 `setupCourseSheet()`（起出同開班文件一樣嘅分頁＋API Key＋入數紙資料夾）→ 部署，攞 `/exec` |
 | 3. 填一次＋做通告 | CL（工作簿） | 填 Input01→Input02→Input03（大半自動帶入）→ 檢查 `Print_通告`（標題／節數／名額／截止／報名辦法／查詢自動帶入，補參加資格／費用／服裝／備註）→ 交**區總監審批** |
 | 4a. 上載 | CL／網頁管理員 | 列印 `Print_通告` 做 PDF 上載區網（或交總會／地域；圖書館自動收錄） |
-| 4b. 開班登記 | ADC（管理系統 `/training`） | 貼上 `/exec`＋API Key＋資料夾 ID →「📥 由訓練班 Sheet 讀取」→ 名稱／名額／收費／日期場地／截止／聯絡自動帶入 → 儲存（啟用）→ 即時掛上成員系統（內置報名表，唔用 Google Form） |
+| 4b. 開班登記 | ADC（管理系統 `/training`） | 貼上 `/exec`＋API Key（兩行一次過貼都識分）＋資料夾 ID＋區網通告 PDF 連結 →「📥 由訓練班 Sheet 讀取」＋「📥 由通告網址讀取」（伺服器抓 PDF 抽字，通告名／收費／名額／截止／對象／節次自動填）→ 名稱／名額／收費／日期場地／截止／聯絡自動帶入 → 儲存（啟用）→ 即時掛上成員系統（內置報名表，唔用 Google Form） |
 | 5. 通告記錄 | ADC（管理系統 `/circulars`） | 開新通告 → 掛接訓練班 →「⬇ 從訓練班帶入資料」即時 pull 通告內文預填（資格／費用說明／服裝／備註／查詢／報名辦法／署名／編號／發出日期，只填空欄）→ 補通告編號（人手，跨類別共用）→ 發佈 |
 | 6. 回填 | ADC（`/circulars`） | 區網 PDF 連結「↗ 回填訓練班」寫入 `noticeUrl` → 成員系統該班即跳轉睇真通告 |
 
@@ -293,4 +293,6 @@ v4.13.0 新增 `feeNote`／`signupNote` 欄，舊表自動補）／
 | `node scripts/test-course-setup-gs.js` | 主後台：新制 create／push／pull-raw／getSetup＋欄位保留（16 項） |
 | `node --experimental-strip-types scripts/test-course-setup-parse.ts` | 解析：parse／cells 座標／預算公式／列印數據（12 項） |
 | `node --experimental-strip-types scripts/test-demo-engine.ts` | 示範引擎：14 卡＋通告＋pull mock＋新制 4 action（22 項） |
+| `node --experimental-strip-types scripts/test-notice-parse.ts` | 通告讀料：真通告 2607 兩種排版＋收費／截止／節次／聯絡／HTML 帖文（13 項） |
+| `node --experimental-strip-types scripts/test-course-publish.ts` | 開班登記對應：profile→CourseLink＋智能貼上（7 項） |
 | `./node_modules/.bin/tsc --noEmit` | 前端 type-check |

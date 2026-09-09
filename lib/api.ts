@@ -9,12 +9,13 @@ import type {
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
   CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
-  Circular, CircularsBoard, CircularStatus, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell,
+  Circular, CircularsBoard, CircularStatus, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
 } from './types.ts';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers.ts';
 import type { IcsEvent } from './ics.ts';
 import { isDemoMode } from './demo/session.ts';
 import { demoCall, demoExternal } from './demo/engine.ts';
+import { demoNoticeFields } from './notice-parse.ts';
 
 function getDistrictCode(): string {
   if (typeof window === 'undefined') return '';
@@ -156,6 +157,23 @@ export const api = {
     callPost('deleteCourseLink', { token, courseId }),
   pullCourseProfile: (token: string, req: { courseId?: string; scriptExecUrl?: string; scriptApiKey?: string }): Promise<ApiResult<CourseProfile>> =>
     callPost('pullCourseProfile', { token, ...req }),
+  /** 📥 通告 URL 自動讀料（舊制開班登記）：伺服器抓 PDF 抽字解析，唔經 /api/proxy */
+  parseNotice: (url: string): Promise<ApiResult<{ fields: NoticeFields; source: { url: string; kind: string; pages?: number; via?: string }; text: string }>> => {
+    if (isDemoMode()) {
+      return Promise.resolve({
+        ok: true,
+        data: { fields: demoNoticeFields(), source: { url, kind: 'pdf', pages: 1 }, text: '' },
+      });
+    }
+    try {
+      const u = new URL('/api/notice', window.location.origin);
+      u.searchParams.set('url', url);
+      return fetch(u.toString(), { cache: 'no-store' }).then(r => r.json());
+    } catch (error) {
+      console.error('Notice Error:', error);
+      return Promise.resolve({ ok: false, error: '連線失敗：暫時未能讀取通告。' });
+    }
+  },
   // ── 新制直入（v4.14.0）：自動建班 Sheet＋雙向同步＋全文讀取 ──
   createCourseSheet: (token: string, req: { link: Partial<CourseLink>; setup: CourseSetup; cells: SetupCell[]; clEmail?: string }): Promise<ApiResult<{ created: boolean; courseId: string; sheetId: string; sheetUrl: string; cellsApplied: number; skippedTabs: string[]; sharedTo: string; shareWarning: string }>> =>
     callPost('createCourseSheet', { token, ...req }),

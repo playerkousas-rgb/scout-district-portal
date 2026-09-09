@@ -8,6 +8,7 @@ import type { CourseLink, CourseProfile, UserSession } from '@/lib/types';
 import CourseFpsBlock, { type CourseFpsResult } from '@/components/CourseFpsBlock';
 import CourseSetupTab from '@/components/CourseSetupTab';
 import { DEFAULT_FPS_ACCOUNT, normalizeFpsId } from '@/lib/fps';
+import { parseQuickPaste, profileToLink } from '@/lib/course-publish';
 import BackLink, { BackBar } from '@/components/BackLink';
 
 const EMPTY: CourseLink = {
@@ -31,6 +32,7 @@ export default function TrainingPage() {
   const [fpsCourseId, setFpsCourseId] = useState('');   // 正在生成 QR 嘅班
   const [fpsSaving, setFpsSaving] = useState(false);
   const [pulling, setPulling] = useState(false);
+  const [noticing, setNoticing] = useState(false);
   const [account, setAccount] = useState({ name: DEFAULT_FPS_ACCOUNT.name, id: DEFAULT_FPS_ACCOUNT.id, loaded: false });
   const [tab, setTab] = useState<'links' | 'setup'>('links');
   const [cfg, setCfg] = useState({ districtName: '', memberPortalUrl: '', courseTemplateSet: false });
@@ -100,25 +102,59 @@ export default function TrainingPage() {
     setPulling(false);
     if (!r.ok || !r.data) { setError(r.error || '讀取失敗'); return; }
     const p: CourseProfile = r.data;
-    const shown = (p.sessions || []).filter(s => s.showOnCircular);
-    const sess = shown.length ? shown : (p.sessions || []);
-    const sessionsText = sess.map(s => [s.displayDate || s.date, s.displayTime || s.time, s.displayVenue || s.venue].filter(Boolean).join(' ').trim()).filter(Boolean).join('；');
-    const venues = Array.from(new Set(sess.map(s => (s.displayVenue || s.venue || '').trim()).filter(Boolean))).join('、');
-    const leader = p.leader || (p.staff || [])[0];
-    const contact = leader ? [((leader.name || '') + (leader.title || '')).trim() + (leader.role ? `（${leader.role}）` : ''), leader.phone || '', leader.email || ''].filter(x => x.trim()).join(' ') : '';
+    const link = profileToLink(p, { scriptExecUrl: '', scriptApiKey: '' });
     setDraft(d => ({
       ...d,
-      title: p.courseName || d.title,
-      badgeName: p.badge || d.badgeName,
-      section: p.section || d.section,
-      fee: p.fee !== undefined && String(p.fee) !== '' ? String(p.fee) : d.fee,
-      quota: p.quota !== undefined && String(p.quota) !== '' ? String(p.quota) : d.quota,
-      deadline: p.deadline || d.deadline,
-      venue: venues || d.venue,
-      sessionsText: sessionsText || d.sessionsText,
-      contact: contact || d.contact,
+      title: link.title || d.title,
+      badgeName: link.badgeName || d.badgeName,
+      section: link.section || d.section,
+      fee: link.fee || d.fee,
+      quota: link.quota || d.quota,
+      deadline: link.deadline || d.deadline,
+      venue: link.venue || d.venue,
+      sessionsText: link.sessionsText || d.sessionsText,
+      contact: link.contact || d.contact,
+      eligibility: link.eligibility || d.eligibility,
     }));
     setMsg(`已由訓練班 Sheet 帶入「${p.courseName || ''}」資料 ✓（請檢查後儲存）`);
+  }
+
+  /** 📥 由通告網址讀取：區網通告 PDF → 通告名／收費／名額／截止／對象／節次自動填表 */
+  async function readFromNotice() {
+    if (!session) return;
+    setError(''); setMsg('');
+    const url = (draft.noticeUrl || '').trim();
+    if (!url) { setError('請先喺「通告連結 noticeUrl」貼上區網通告 PDF 連結'); return; }
+    setNoticing(true);
+    const r = await api.parseNotice(url);
+    setNoticing(false);
+    if (!r.ok || !r.data) { setError(r.error || '讀取通告失敗'); return; }
+    const f = r.data.fields;
+    if (!f.title && !f.fee && !f.deadline && !f.quota && !f.eligibility) {
+      setError(`通告讀唔到料（${f.warnings[0] || '睇下連結啱唔啱、PDF 係唔係掃瞄圖'}）`);
+      return;
+    }
+    setDraft(d => ({
+      ...d,
+      title: f.title || d.title,
+      fee: f.fee || d.fee,
+      originalFee: f.originalFee || d.originalFee,
+      quota: f.quota || d.quota,
+      deadline: f.deadline || d.deadline,
+      sessionsText: f.sessionsText || d.sessionsText,
+      venue: f.venue || d.venue,
+      contact: f.contact || d.contact,
+      eligibility: f.eligibility || d.eligibility,
+    }));
+    const bits = [`「${f.title || '（冇標題）'}」`];
+    if (f.fee) bits.push(`收費 $${f.fee}`);
+    else if (f.freeFee) bits.push('免費');
+    if (f.quota) bits.push(`名額 ${f.quota}`);
+    if (f.deadline) bits.push(`截止 ${f.deadline}`);
+    if (f.sessions.length) bits.push(`${f.sessions.length} 節`);
+    let summary = `已由通告讀出${bits.join('・')} ✓（請檢查後儲存）`;
+    if (f.warnings.length) summary += ` ⚠ ${f.warnings.join('；')}`;
+    setMsg(summary);
   }
 
   async function save() {
@@ -183,13 +219,16 @@ export default function TrainingPage() {
             會自動建立齊同開班文件一樣嘅分頁、產生該班 <b>API Key</b>（只顯示一次，即刻複製）、並喺 Drive 建立「入數紙」資料夾（彈窗會顯示<b>網址 + ID</b>）。⚠️ 只限全新空白表，重跑會清空！</li>
           <li><b>🚀 部署</b>：部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：任何人）→ 複製 <code>/exec</code> 網址 → 將 <b>/exec＋API Key＋資料夾 ID</b> 交返 ADC。</li>
           <li><b>✍️ CL 填一次</b>：CL 照工作簿「使用說明」填 Input01→Input02→Input03（大半自動帶入，✓上通告剔要出通告嘅節次）→ 檢查 <b>Print_通告</b>（標題／節數／名額／截止／報名辦法／查詢已自動帶入，補參加資格／費用／服裝／備註）→ 交<b>區總監審批</b> → 列印 PDF 交網頁管理員上載區網。</li>
-          <li><b>📝 返嚟開班登記</b>：喺下面表單貼上：
+          <li><b>📝 返嚟開班登記</b>：喺下面表單貼上三條 URL／ID（唔使打其他嘢）：
             <ul style={{ margin: '4px 0', paddingLeft: 22 }}>
-              <li><b>收表 Script /exec 網址</b> → 「收表 Script /exec 網址」欄</li>
+              <li><b>收表 Script /exec 網址</b> → 「收表 Script /exec 網址」欄（CL 交嚟兩行一次過貼都得，會自動分開 Key）</li>
               <li><b>該班 API Key</b> → 「該班 API Key」欄</li>
               <li><b>入數紙 Drive 資料夾 ID</b> → 「入數紙 Drive 資料夾 ID」欄</li>
+              <li><b>區網通告 PDF 連結</b> → 「通告連結 noticeUrl」欄</li>
             </ul>
-            然後撳「📥 由訓練班 Sheet 讀取」—— 名稱／名額／收費／日期場地／截止／聯絡等會由 Input01／Input02 自動帶入，唔使再人手重打。
+            然後撳「📥 由訓練班 Sheet 讀取」—— 名稱／名額／收費／日期場地／截止／聯絡等會由 Input01／Input02 自動帶入；
+            再撳「📥 由通告網址讀取」—— 通告名／收費／名額／截止／對象／節次會由區網通告 PDF 自動讀出。
+            兩邊讀完先撳儲存，唔使再人手重打。
           </li>
           <li><b>📢 掛班上成員系統</b>：確認「啟用」✔ → 撳「＋ 開班登記」儲存。
             儲存後，<b>成員系統會即時顯示呢個班，成員即可用內置報名表報名</b>；截止日一過會自動收埋。
@@ -223,7 +262,17 @@ export default function TrainingPage() {
           <input placeholder="資助說明 subsidyNote" value={draft.subsidyNote || ''} onChange={e => set('subsidyNote', e.target.value)} style={{ width: 220 }} />
         </div>
         <div className="account-form" style={{ flexWrap: 'wrap', display: 'flex', gap: 8, marginTop: 8 }}>
-          <input placeholder="收表 Script /exec 網址 *" value={draft.scriptExecUrl || ''} onChange={e => set('scriptExecUrl', e.target.value)} style={{ width: 360 }} />
+          <input placeholder="收表 Script /exec 網址 *（CL 交嚟兩行一次過貼都得）" value={draft.scriptExecUrl || ''} onChange={e => {
+            const v = e.target.value;
+            if (/[\n\t]/.test(v) || v.trim().split(/\s+/).length > 1) {
+              const q = parseQuickPaste(v);
+              if (q.exec || q.key) {
+                setDraft(d => ({ ...d, scriptExecUrl: q.exec || d.scriptExecUrl, scriptApiKey: q.key || d.scriptApiKey }));
+                return;
+              }
+            }
+            set('scriptExecUrl', v);
+          }} style={{ width: 360 }} />
           <input placeholder="該班 API Key（開班時顯示一次）" value={draft.scriptApiKey || ''} onChange={e => set('scriptApiKey', e.target.value)} style={{ width: 220 }} />
           <input placeholder="入數紙 Drive 資料夾 ID" value={draft.driveFolderId || ''} onChange={e => set('driveFolderId', e.target.value)} style={{ width: 220 }} />
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
