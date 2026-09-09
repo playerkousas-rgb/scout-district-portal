@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.15.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.16.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -129,6 +129,9 @@
  *   saveCircular／deleteCircular／setCircularStatus（circulars 卡 edit 權限）
  *   pullCourseProfile（canCourse）  由訓練班 Script 讀 getCourseProfile，開班自動填表
  * courseId 掛接 CourseLinks：附帶該班名額／已報／截止 snapshot。
+ * v4.16.0 通告全文欄：CourseLinks 加 leader／uniform／remarks／signupText／feeNote
+ * （「📥 由通告網址讀取」由區網 PDF／帖文頁帶入，貼帖文頁會自動跟去 PDF 正本）；
+ * listCourseLinks 公開回傳多呢 5 欄，成員系統顯示晒區通告格式嘅項目。
  * v4.15.0 寫入防呆：班 Sheet _Sync 版本號（rev 樂觀鎖＋儲存確認）＋訓練班 Script
  * saveCourseBatch 一次過儲存；區系統推送都會 bump rev。
  * v4.14.0 新制直入：區系統填設定 → createCourseSheet 自動複製班 Sheet＋寫入 →
@@ -302,7 +305,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.15.0',
+      version: '4.16.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -3153,6 +3156,12 @@ function courseLinkPublic_(r) {
     subsidyNote: r.subsidyNote || '', deadline: r.deadline || '',
     quota: Number(r.quota) || 0, filled: Number(r.filled) || 0,
     venue: r.venue || '', noticeUrl: r.noticeUrl || '', contact: r.contact || '',
+    // v4.16.0 通告全文欄：班領導人／服裝／備註／報名辦法／費用全文（成員系統顯示）
+    leader: String(r.leader || '').trim(),
+    uniform: String(r.uniform || '').trim(),
+    remarks: String(r.remarks || '').trim(),
+    signupText: String(r.signupText || '').trim(),
+    feeNote: String(r.feeNote || '').trim(),
     // 成員系統 proxy 嘅 publicCourse 會讀 active 再過濾，所以公開版都要回（listCourseLinks_ 本身已隔走 FALSE）
     active: String(r.active).toUpperCase() !== 'FALSE',
     // 每班收費 FPS QR（v4.3.0）：成員系統直接畫 QR；冇生成過就全部空字串
@@ -3221,6 +3230,9 @@ function saveCourseLink_(token, link) {
     subsidyNote: link.subsidyNote || '', deadline: link.deadline || '',
     quota: Number(link.quota) || 0,
     venue: link.venue || '', noticeUrl: link.noticeUrl || '', contact: link.contact || '',
+    // v4.16.0 通告全文欄（由「📥 由通告網址讀取」帶入）
+    leader: link.leader || '', uniform: link.uniform || '',
+    remarks: link.remarks || '', signupText: link.signupText || '', feeNote: link.feeNote || '',
     scriptExecUrl: execUrl, scriptApiKey: apiKey,
     apiBase: execUrl, apiKey: apiKey,           // 同步舊欄位，兩邊前端都讀到
     driveFolderId: link.driveFolderId || '',
@@ -4917,6 +4929,8 @@ function blueprint_() {
         'apiBase', 'apiKey',
         'active', 'createdAt',
         'fpsQrPayload', 'fpsAmount', 'fpsReference', 'fpsAccountName', 'fpsAccountNumber', 'fpsUpdatedAt',
+        // v4.16.0 通告全文欄（由通告網址讀取帶入；成員系統直接顯示）
+        'leader', 'uniform', 'remarks', 'signupText', 'feeNote',
         'sheetId', 'setupJson'],
     ] },
 

@@ -151,6 +151,12 @@ export interface CourseLink {
   fpsAccountName?: string;    // 生成當刻嘅收款戶口名（供公開端顯示）
   fpsAccountNumber?: string;  // 生成當刻嘅 FPS ID（供公開端顯示）
   fpsUpdatedAt?: string;      // QR 最後更新時間（ISO）
+  // ── 通告全文欄（v4.16.0）：由「📥 由通告網址讀取」帶入，成員系統直接顯示 ──
+  leader?: string;            // 班領導人（通告「班領導人」段）
+  uniform?: string;           // 服裝（通告「服裝」段）
+  remarks?: string;           // 備註全文（通告「備註」段，可多行）
+  signupText?: string;        // 報名辦法全文（通告原文；成員系統照舊用內置報名表）
+  feeNote?: string;           // 費用全文（含原價／資助／轉數快戶口等付款說明）
   // ── 新制直入（v4.14.0）：區系統建嘅班，後端 Sheet ID＋設定 JSON ──
   sheetId?: string;           // 區後台自動複製嘅班 Sheet ID（人手建表嘅班冇）
   setupJson?: string;         // CourseSetup JSON（list 唔回，要用 getCourseSetup 攞）
@@ -641,6 +647,9 @@ export interface NoticeFields {
   fee: string;            // 銀碼數字字串（冇就空字串）
   originalFee: string;    // 原價（有資助先有）
   feeText: string;        // 費用段全文
+  subsidyNote: string;    // 資助說明（費用段「原價…資助」嗰句；直入 CourseLink.subsidyNote）
+  badges: string[];       // 徽章／章別（標題拆出嚟；網頁帖文標籤會再補）
+  section: string;        // 支部（由參加資格推；網頁帖文標籤會再補）
   freeFee: boolean;       // 免費／全免
   quota: string;
   deadline: string;       // yyyy-MM-dd

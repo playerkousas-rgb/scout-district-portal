@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // 直入內層 lib：pdf-parse v1 嘅 index.js 有 debug 副作用（!module.parent 時讀 ./test/…），打包後會炸
 import pdf from 'pdf-parse/lib/pdf-parse.js';
 import {
-  parseNoticeHtml, parseNoticeText, pickPdfUrl,
+  mergePageExtras, parseNoticeHtml, parseNoticeText, pickPdfUrl,
 } from '@/lib/notice-parse';
 
 export const runtime = 'nodejs';
@@ -149,9 +149,11 @@ export async function GET(request: NextRequest) {
             return bad('帖文條 PDF 讀唔到（可能已加密／已損壞）');
           }
           const fields = parseNoticeText(text, { url: second.finalUrl });
-          if (!fields.title && page.title) fields.title = page.title;
+          // 網頁帖文頁獨有嘅料（標籤 → 徽章／支部；og:title 後備）補入嚟，唔覆蓋 PDF 讀到嘅
+          const merged = mergePageExtras(fields, page);
+          if (!merged.title && page.title) merged.title = page.title;
           return good({
-            fields,
+            fields: merged,
             source: { url: second.finalUrl, kind: 'pdf', pages, via: first.finalUrl },
             text: text.slice(0, 8000),
           });
@@ -159,8 +161,9 @@ export async function GET(request: NextRequest) {
           return bad(e instanceof Error ? e.message : 'PDF 抓取失敗');
         }
       }
-      // 冇 PDF：用可見文字＋標題盡讀
-      const fields = parseNoticeText(page.text, { url: first.finalUrl });
+      // 冇 PDF：用可見文字＋標題盡讀（網頁管理員擇要版——名額／服裝／備註等
+      // 多數被刪咗，warnings 會提；標籤照樣補徽章／支部）
+      const fields = mergePageExtras(parseNoticeText(page.text, { url: first.finalUrl }), page);
       if (!fields.title && page.title) fields.title = page.title;
       return good({
         fields,

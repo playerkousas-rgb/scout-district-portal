@@ -16,6 +16,7 @@ const EMPTY: CourseLink = {
   eligibility: '', fee: '', originalFee: '', subsidyNote: '', deadline: '', quota: '',
   filled: '', venue: '', noticeUrl: '', contact: '', scriptExecUrl: '', scriptApiKey: '',
   driveFolderId: '', active: 'TRUE', createdAt: '',
+  leader: '', uniform: '', remarks: '', signupText: '', feeNote: '',
   fpsQrPayload: '', fpsAmount: '', fpsReference: '', fpsAccountName: '', fpsAccountNumber: '', fpsUpdatedAt: '',
 };
 
@@ -117,17 +118,24 @@ export default function TrainingPage() {
       sessionsText: link.sessionsText || d.sessionsText,
       contact: link.contact || d.contact,
       eligibility: link.eligibility || d.eligibility,
+      // Print_通告內文（CL 填咗嗰啲先有）— 同「由通告網址讀取」同一批欄
+      leader: p.circular?.leaderText || d.leader,
+      uniform: p.circular?.uniform || d.uniform,
+      remarks: (p.circular?.remarks || []).join('\n') || d.remarks,
+      signupText: p.circular?.signupText || d.signupText,
+      feeNote: p.circular?.feeText || d.feeNote,
     }));
     setShowAuto(true);   // 讀完自動展開俾你檢查
     setMsg(`已由訓練班 Sheet 帶入「${p.courseName || ''}」資料 ✓（請檢查後儲存）`);
   }
 
-  /** 📥 由通告網址讀取：區網通告 PDF → 通告名／收費／名額／截止／對象／節次自動填表 */
+  /** 📥 由通告網址讀取：貼 PDF 或網頁帖文頁都得（帖文頁會自動跟去 PDF，兼讀埋標籤做徽章／支部）
+   *  → 通告名／收費／資助／名額／截止／資格／節次／場地／班領導人／聯絡／服裝／備註／報名辦法一次過填晒 */
   async function readFromNotice() {
     if (!session) return;
     setError(''); setMsg('');
     const url = (draft.noticeUrl || '').trim();
-    if (!url) { setError('請先喺「通告連結 noticeUrl」貼上區網通告 PDF 連結'); return; }
+    if (!url) { setError('請先喺「通告連結 noticeUrl」貼上區網通告 PDF 或帖文頁連結'); return; }
     setNoticing(true);
     const r = await api.parseNotice(url);
     setNoticing(false);
@@ -142,12 +150,20 @@ export default function TrainingPage() {
       title: f.title || d.title,
       fee: f.fee || d.fee,
       originalFee: f.originalFee || d.originalFee,
+      subsidyNote: f.subsidyNote || d.subsidyNote,
+      feeNote: f.feeText || d.feeNote,
       quota: f.quota || d.quota,
       deadline: f.deadline || d.deadline,
       sessionsText: f.sessionsText || d.sessionsText,
       venue: f.venue || d.venue,
       contact: f.contact || d.contact,
       eligibility: f.eligibility || d.eligibility,
+      leader: f.leader || d.leader,
+      uniform: f.uniform || d.uniform,
+      remarks: f.remarks || d.remarks,
+      signupText: f.signupText || d.signupText,
+      badgeName: (f.badges && f.badges.length) ? f.badges.join('、') : d.badgeName,
+      section: f.section || d.section,
     }));
     const bits = [`「${f.title || '（冇標題）'}」`];
     if (f.fee) bits.push(`收費 $${f.fee}`);
@@ -155,6 +171,15 @@ export default function TrainingPage() {
     if (f.quota) bits.push(`名額 ${f.quota}`);
     if (f.deadline) bits.push(`截止 ${f.deadline}`);
     if (f.sessions.length) bits.push(`${f.sessions.length} 節`);
+    const extras: string[] = [];
+    if (f.leader) extras.push('班領導人');
+    if (f.uniform) extras.push('服裝');
+    if (f.remarks) extras.push('備註');
+    if (f.signupText) extras.push('報名辦法');
+    if (f.feeText) extras.push('費用全文');
+    if (f.badges.length) extras.push(`徽章 ${f.badges.join('、')}`);
+    if (f.section) extras.push(`支部 ${f.section}`);
+    if (extras.length) bits.push(`帶入${extras.join('／')}`);
     let summary = `已由通告讀出${bits.join('・')} ✓（請檢查後儲存）`;
     if (f.warnings.length) summary += ` ⚠ ${f.warnings.join('；')}`;
     setShowAuto(true);   // 讀完自動展開俾你檢查
@@ -233,10 +258,10 @@ export default function TrainingPage() {
               <li><b>收表 Script /exec 網址</b> → 「收表 Script /exec 網址」欄（CL 交嚟兩行一次過貼都得，會自動分開 Key）</li>
               <li><b>該班 API Key</b> → 「該班 API Key」欄</li>
               <li><b>入數紙 Drive 資料夾 ID</b> → 「入數紙 Drive 資料夾 ID」欄</li>
-              <li><b>區網通告 PDF 連結</b> → 「通告連結 noticeUrl」欄</li>
+              <li><b>區網通告 PDF 或帖文頁連結</b> → 「通告連結 noticeUrl」欄（貼邊條都得：貼帖文頁會自動跟去 PDF 正本，兼讀埋網頁標籤填徽章／支部）</li>
             </ul>
             然後撳「📥 由訓練班 Sheet 讀取」—— 名稱／名額／收費／日期場地／截止／聯絡等會由 Input01／Input02 自動帶入；
-            再撳「📥 由通告網址讀取」—— 通告名／收費／名額／截止／對象／節次會由區網通告 PDF 自動讀出。
+            再撳「📥 由通告網址讀取」—— 通告名／收費／資助／名額／截止／對象／節次／場地／<b>班領導人／服裝／備註／報名辦法／費用全文</b>會由區網通告一次過讀晒。
             兩邊讀完先撳儲存，唔使再人手重打。
           </li>
           <li><b>📢 掛班上成員系統</b>：確認「啟用」✔ → 撳「＋ 開班登記」儲存（課程代碼、課程名稱等都<b>唔使填</b>——代碼吉住自動編，名稱讀取自動帶入；想檢查就撳「🔍 自動填好嘅資料」展開）。
@@ -268,7 +293,7 @@ export default function TrainingPage() {
           }} style={{ width: 360 }} />
           <input placeholder="該班 API Key（兩行貼埋會自動帶）" value={draft.scriptApiKey || ''} onChange={e => set('scriptApiKey', e.target.value)} style={{ width: 200 }} />
           <input placeholder="② 入數紙 Drive 資料夾 ID" value={draft.driveFolderId || ''} onChange={e => set('driveFolderId', e.target.value)} style={{ width: 200 }} />
-          <input placeholder="③ 通告連結 noticeUrl（區網 PDF）" value={draft.noticeUrl || ''} onChange={e => set('noticeUrl', e.target.value)} style={{ width: 280 }} />
+          <input placeholder="③ 通告連結 noticeUrl（PDF 或帖文頁都得）" value={draft.noticeUrl || ''} onChange={e => set('noticeUrl', e.target.value)} style={{ width: 280 }} />
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" checked={String(draft.active).toUpperCase() !== 'FALSE'} onChange={e => set('active', e.target.checked ? 'TRUE' : 'FALSE')} />
             啟用
@@ -302,11 +327,17 @@ export default function TrainingPage() {
             <input placeholder="節數 sessionsText（自動帶入，可改）" value={draft.sessionsText || ''} onChange={e => set('sessionsText', e.target.value)} style={{ width: 340 }} />
             <input placeholder="參加資格 eligibility" value={draft.eligibility || ''} onChange={e => set('eligibility', e.target.value)} style={{ width: 220 }} />
             <input placeholder="資助說明 subsidyNote" value={draft.subsidyNote || ''} onChange={e => set('subsidyNote', e.target.value)} style={{ width: 220 }} />
+            <input placeholder="班領導人 leader" value={draft.leader || ''} onChange={e => set('leader', e.target.value)} style={{ width: 160 }} />
+            <input placeholder="服裝 uniform（如：整齊童軍制服）" value={draft.uniform || ''} onChange={e => set('uniform', e.target.value)} style={{ width: 200 }} />
+            <input placeholder="報名辦法 signupText（通告原文）" value={draft.signupText || ''} onChange={e => set('signupText', e.target.value)} style={{ width: 260 }} />
+            <textarea placeholder="費用全文 feeNote（含轉數快戶口／付款說明）" value={draft.feeNote || ''} rows={2} onChange={e => set('feeNote', e.target.value)} style={{ width: 320 }} />
+            <textarea placeholder="備註 remarks（通告備註全文）" value={draft.remarks || ''} rows={4} onChange={e => set('remarks', e.target.value)} style={{ width: 320 }} />
           </div>
         )}
         <p style={{ margin: '10px 0 0', fontSize: 12.5, color: '#666' }}>
           貼上面三樣 → 兩個讀取掣各撳一次 →「🔍 自動填好嘅資料」自動展開俾你檢查 → 儲存。
           課程代碼唔使填（吉住由後台自動編 <code>cl_…</code>）。
+          通告連結貼 PDF 定帖文頁都得——PDF 係正本（名額／服裝／備註齊），帖文頁會自動跟去 PDF 之餘讀埋標籤（徽章／支部）。
         </p>
       </section>
 
