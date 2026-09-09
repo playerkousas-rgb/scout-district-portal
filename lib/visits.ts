@@ -200,3 +200,80 @@ export function toCsv(rows: (string | number)[][]): string {
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   }).join(',')).join('\n');
 }
+
+// ───────────────────────── 🏢 總會季度匯報（v4.10.0） ─────────────────────────
+// 「區職員探訪區內旅團匯報」八欄：旅號／支部／與旅領袖會面／探訪日期／探訪方式／
+// 區職員探訪人數／區已經提供之支援之項目／地域-總會需要跟進之項目。
+// 幹部努力統計（visitorStats）係內部嘢，唔會擺入匯報。
+
+/** 探訪方式常用值（總會表：面談/透過電話/其他） */
+export const HQ_METHODS = ['面談', '電話', 'WhatsApp', 'Email', '其他'];
+/** 與旅領袖會面常用值 */
+export const HQ_LEADERS = ['旅長', '副團長', '支部團長', '旅長及支部領袖'];
+
+/** 匯報「支部」欄寫法：童軍 → 童軍支部；冇填支部 = 全旅 */
+export const SECTION_HQ_LABEL: Record<VisitSection | '', string> = {
+  gh: '小童軍支部', cub: '幼童軍支部', scout: '童軍支部', venture: '深資童軍支部', rover: '樂行童軍支部',
+  '': '全旅',
+};
+
+/** '2026-01-18' → '18.1.2026'（總會表嘅日期寫法） */
+export function hqDate(d: string | undefined | null): string {
+  const m = String(d || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  return m ? `${Number(m[3])}.${Number(m[2])}.${m[1]}` : '';
+}
+
+/** '2026-01-01'～'2026-03-31' → '2026年1月-3月'；跨年 → '2025年12月-2026年1月' */
+export function hqPeriodLabel(from: string | undefined | null, to: string | undefined | null): string {
+  const f = String(from || '').match(/^(\d{4})-(\d{1,2})/);
+  const t = String(to || '').match(/^(\d{4})-(\d{1,2})/);
+  if (!f || !t) return '';
+  const fy = Number(f[1]), fm = Number(f[2]), ty = Number(t[1]), tm = Number(t[2]);
+  return fy === ty ? `${fy}年${fm}月-${tm}月` : `${fy}年${fm}月-${ty}年${tm}月`;
+}
+
+/** 旅團總數（匯報表頭用）— 只計仲運作緊嘅旅 */
+export function troopTotal(units: ScoutUnit[]): number {
+  return units.filter(u => u.active !== false && String(u.troop || '').trim()).length;
+}
+
+function troopNumberOf(troop: string): number {
+  const m = String(troop).match(/\d+/);
+  return m ? Number(m[0]) : Number.MAX_SAFE_INTEGER;
+}
+
+export interface HqRow {
+  troop: string;
+  sectionLabel: string;    // 童軍支部／全旅…
+  leaderMet: string;       // 與旅領袖會面
+  visitDate: string;       // yyyy-MM-dd（排序用）
+  dateText: string;        // 18.1.2026
+  method: string;          // 探訪方式
+  officerCount: number;    // 冇填 = 1
+  support: string;         // 區已經提供之支援之項目
+  followUp: string;        // 地域/總會需要跟進之項目（冇 = NA）
+}
+
+/**
+ * 一筆探訪記錄 = 匯報一行（官方樣本：同旅同日都可以有幾行，例如電話一筆 Email 一筆）。
+ * 排序：旅號細到大，同旅就舊到新。
+ */
+export function officialReport(visits: Visit[]): HqRow[] {
+  return visits
+    .filter(v => String(v.troop || '').trim() && String(v.visitDate || '').trim())
+    .map(v => ({
+      troop: String(v.troop).trim(),
+      sectionLabel: SECTION_HQ_LABEL[(v.section || '') as VisitSection | ''] || '全旅',
+      leaderMet: String(v.leaderMet || '').trim(),
+      visitDate: String(v.visitDate),
+      dateText: hqDate(v.visitDate),
+      method: String(v.method || '').trim(),
+      officerCount: Number(v.officerCount) > 0 ? Math.floor(Number(v.officerCount)) : 1,
+      support: String(v.support || '').trim(),
+      followUp: String(v.followUp || '').trim() || 'NA',
+    }))
+    .sort((a, b) =>
+      troopNumberOf(a.troop) - troopNumberOf(b.troop) ||
+      a.visitDate.localeCompare(b.visitDate) ||
+      a.troop.localeCompare(b.troop));
+}

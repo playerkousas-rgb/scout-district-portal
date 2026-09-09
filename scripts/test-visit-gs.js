@@ -42,11 +42,12 @@ function makeSheet(name, rows) {
 }
 
 const VISIT_HEAD = ['id', 'districtCode', 'troop', 'section', 'visitDate', 'quarter', 'kind',
-  'visitorName', 'visitorEmail', 'note', 'followUp', 'createdAt', 'updatedAt'];
+  'visitorName', 'visitorEmail', 'note', 'followUp', 'createdAt', 'updatedAt',
+  'leaderMet', 'method', 'officerCount', 'support'];
 const UNIT_HEAD = ['troop', 'label', 'org', 'gh', 'cub', 'scout', 'venture', 'rover', 'active', 'note'];
 
 const sheets = {
-  Config: makeSheet('Config', [['key', 'value', '說明'], ['districtCode', 'SKW', ''], ['TROOP_LIST', '', '']]),
+  Config: makeSheet('Config', [['key', 'value', '說明'], ['districtCode', 'SKW', ''], ['districtName', '筲箕灣區', ''], ['TROOP_LIST', '', '']]),
   Perms: makeSheet('Perms', [['cardId', 'DC', 'ADC_GH', 'AL'], ['visit', 'edit', 'edit', 'view']]),
   Users: makeSheet('Users', [['email', 'role', 'active', 'displayName'],
     ['dc@x.org', 'DC', 'TRUE', '陳區總監'],
@@ -269,9 +270,80 @@ check('doGet / doPost 路由通', () => {
   assert.strictEqual(del.ok, true);
 });
 
-check('健康檢查版本 4.9.0', () => {
+// ───────────────────────── 🏢 總會匯報（v4.10.0） ─────────────────────────
+
+check('Visits 藍圖表頭有總會匯報四欄（leaderMet/method/officerCount/support）', () => {
+  const bp = ctx.blueprint_().filter(b => b.name === 'Visits')[0];
+  const header = bp.rows[0];
+  ['leaderMet', 'method', 'officerCount', 'support'].forEach(h => assert.ok(header.includes(h), '缺 ' + h));
+});
+
+check('getVisitBoard 回傳區會名（districtName）做匯報表頭', () => {
+  const b = ctx.getVisitBoard_(dcToken).data;
+  assert.strictEqual(b.districtName, '筲箕灣區');
+});
+
+check('登記時帶總會匯報欄：面見領袖／方式／人數／支援全部存到、讀返出嚟一樣', () => {
+  const r = ctx.saveVisit_(dcToken, {
+    troop: '180', section: 'cub', visitDate: `${thisYear}-01-18`,
+    leaderMet: '副團長', method: '電話', officerCount: 3, support: 'Census',
+    followUp: '支部領袖人數未達最低要求', note: '內部備註',
+  });
+  assert.strictEqual(r.ok, true);
+  const v = ctx.getVisitBoard_(dcToken).data.visits.filter(x => x.troop === '180')[0];
+  assert.strictEqual(v.leaderMet, '副團長');
+  assert.strictEqual(v.method, '電話');
+  assert.strictEqual(v.officerCount, 3);
+  assert.strictEqual(v.support, 'Census');
+  assert.strictEqual(v.followUp, '支部領袖人數未達最低要求');
+  assert.strictEqual(v.note, '內部備註');
+  ctx.deleteVisit_(dcToken, v.id);
+});
+
+check('人數填 0／負數／唔係數字 → 當空（匯報時當 1）', () => {
+  [0, -2, 'abc'].forEach(bad => {
+    const r = ctx.saveVisit_(dcToken, { troop: '242', visitDate: `${thisYear}-02-01`, officerCount: bad });
+    assert.strictEqual(r.ok, true);
+    const v = ctx.getVisitBoard_(dcToken).data.visits.filter(x => x.troop === '242')[0];
+    assert.strictEqual(v.officerCount, '', `officerCount=${bad} 應該存空`);
+    ctx.deleteVisit_(dcToken, v.id);
+  });
+});
+
+check('舊 Visits 表（未升級）跑 ensureSheetColumns_ 自動補四欄，舊資料唔會爛', () => {
+  // 整返一張「舊版」Visits 表：得 13 欄，已有一行舊資料
+  const oldHead = ['id', 'districtCode', 'troop', 'section', 'visitDate', 'quarter', 'kind',
+    'visitorName', 'visitorEmail', 'note', 'followUp', 'createdAt', 'updatedAt'];
+  sheets.Visits = makeSheet('Visits', [
+    oldHead,
+    ['vs-old', 'SKW', '255', 'scout', `${thisYear}-01-15`, 1, 'general', '陳區總監', 'dc@x.org', '舊備註', '', '', ''],
+  ]);
+  const bp = ctx.blueprint_().filter(b => b.name === 'Visits')[0];
+  const added = [...ctx.ensureSheetColumns_(bp)];   // vm realm 陣列 → copy 做主 realm
+  assert.deepStrictEqual(added, ['leaderMet', 'method', 'officerCount', 'support']);
+
+  // 舊資料照讀到，新欄係空字串
+  const v = ctx.getVisitBoard_(dcToken).data.visits.filter(x => x.troop === '255')[0];
+  assert.strictEqual(v.note, '舊備註');
+  assert.strictEqual(v.leaderMet, '');
+  assert.strictEqual(v.officerCount, '');
+
+  // 補完欄即刻可以寫新資料
+  const r = ctx.saveVisit_(dcToken, { id: 'vs-old', troop: '255', visitDate: `${thisYear}-01-15`, method: '面談', officerCount: 2, support: '增長人數' });
+  assert.strictEqual(r.ok, true);
+  const after = ctx.getVisitBoard_(dcToken).data.visits.filter(x => x.id === 'vs-old')[0];
+  assert.strictEqual(after.method, '面談');
+  assert.strictEqual(after.officerCount, 2);
+  assert.strictEqual(after.note, '舊備註');     // 舊資料仲喺度
+
+  // 已經齊欄：再跑一次唔會重複補
+  assert.deepStrictEqual([...ctx.ensureSheetColumns_(bp)], []);
+  sheets.Visits = makeSheet('Visits', [VISIT_HEAD]);   // 還原，等其他測試環境乾淨
+});
+
+check('健康檢查版本 4.10.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.9.0');
+  assert.strictEqual(parsed.data.version, '4.10.0');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

@@ -286,7 +286,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.9.0',
+      version: '4.10.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -2385,10 +2385,13 @@ function saveAwardTypes_(token, types) {
 }
 
 
-// ===================== 旅團探訪 Visits（v4.8.1） =====================
+// ===================== 旅團探訪 Visits（v4.8.1 → v4.10.0） =====================
 // 區幹部落旅團探訪，喺 /visit 撳一下嗰個旅團格仔就登記低「邊個、幾時、探邊一旅邊個支部」。
 // 幹部一入去預設只睇自己支部（跟角色：小童軍／幼童軍／童軍 ADC），要睇其他支部隨時切換。
 // DC 出報告：揀「幾月到幾月」即刻有探訪 list，仲有邊個幹部探咗幾多次、探過邊啲旅。
+// v4.10.0：Visits 表加咗總會匯報四欄（leaderMet 與旅領袖會面／method 探訪方式／
+//          officerCount 區職員探訪人數／support 區已提供支援），前端可以直接生成
+//          「區職員探訪區內旅團匯報」Excel 交總會；幹部努力統計照舊淨係內部睇。
 //
 // Units 表 = 全區旅團名單（旅號、主辦機構、各支部團數），預設跟港島地域官網筲箕灣區一覽表；
 // 名單可以喺 app 內改（saveUnits），改完會順手同步 Config TROOP_LIST 畀「活動知會／聯結簿」用。
@@ -2509,13 +2512,18 @@ function visitRow_(r) {
     visitorEmail: String(r.visitorEmail || '').trim(),
     note: String(r.note == null ? '' : r.note).trim(),
     followUp: String(r.followUp == null ? '' : r.followUp).trim(),
+    // ── 總會匯報欄（v4.10.0）；舊表未補欄時 r 冧呢啟 key，會係空字串 ──
+    leaderMet: String(r.leaderMet == null ? '' : r.leaderMet).trim(),
+    method: String(r.method == null ? '' : r.method).trim(),
+    officerCount: Number(r.officerCount) > 0 ? Math.floor(Number(r.officerCount)) : '',
+    support: String(r.support == null ? '' : r.support).trim(),
     createdAt: String(r.createdAt || ''),
     updatedAt: String(r.updatedAt || r.createdAt || ''),
   };
 }
 
 /**
- * 一次過攞：旅團名單（連支部）＋ 探訪記錄。
+ * 一次過攢：旅團名單（連支部）＋ 探訪記錄。
  * from / to = yyyy-MM-dd（留空 = 今年 1 月 1 日至 12 月 31 日）。
  */
 function getVisitBoard_(token, from, to) {
@@ -2538,6 +2546,7 @@ function getVisitBoard_(token, from, to) {
   var role = String(t.role || '').trim();
   return ok({
     from: f, to: tt, today: today,
+    districtName: getConfigValue_('districtName') || '',
     units: visitUnits_(),
     visits: visits,
     years: Object.keys(years).map(Number).sort(function (a, b) { return b - a; }),
@@ -2596,6 +2605,14 @@ function saveVisit_(token, v) {
   if (has('kind')) setCellByHeader_(sh, idx, 'kind', visitKind_(v.kind));
   if (has('note')) setCellByHeader_(sh, idx, 'note', String(v.note == null ? '' : v.note).trim());
   if (has('followUp')) setCellByHeader_(sh, idx, 'followUp', String(v.followUp == null ? '' : v.followUp).trim());
+  // ── 總會匯報欄（v4.10.0）；舊後台冇呢啲欄會自動跳過，唔會報錯 ──
+  if (has('leaderMet')) setCellByHeader_(sh, idx, 'leaderMet', String(v.leaderMet == null ? '' : v.leaderMet).trim());
+  if (has('method')) setCellByHeader_(sh, idx, 'method', String(v.method == null ? '' : v.method).trim());
+  if (has('officerCount')) {
+    var oc = Number(v.officerCount);
+    setCellByHeader_(sh, idx, 'officerCount', oc > 0 ? Math.floor(oc) : '');
+  }
+  if (has('support')) setCellByHeader_(sh, idx, 'support', String(v.support == null ? '' : v.support).trim());
   if (has('visitorName') && String(v.visitorName || '').trim()) {
     setCellByHeader_(sh, idx, 'visitorName', String(v.visitorName).trim());
   }
@@ -4259,7 +4276,9 @@ function blueprint_() {
     ].concat(unitSeed_().map(function (a) { return a.concat(['TRUE', '']); })) },
 
     { name: SHEET.VISITS, rows: [
-      ['id', 'districtCode', 'troop', 'section', 'visitDate', 'quarter', 'kind', 'visitorName', 'visitorEmail', 'note', 'followUp', 'createdAt', 'updatedAt'],
+      // v4.10.0 加咗總會匯報四欄（leaderMet/method/officerCount/support）喺尾，舊表跑 setupSheets 自動補
+      ['id', 'districtCode', 'troop', 'section', 'visitDate', 'quarter', 'kind', 'visitorName', 'visitorEmail', 'note', 'followUp', 'createdAt', 'updatedAt',
+        'leaderMet', 'method', 'officerCount', 'support'],
     ] },
 
     { name: SHEET.PERMS, headerColor: '#ede9fe', frozenCols: 1, rows: permRows },
@@ -4373,12 +4392,8 @@ function setupSheets() {
       patched.push(bp.name + '（補表頭）');
       return;
     }
-    var missing = want.filter(function (h) { return have.indexOf(h) < 0; });
-    if (missing.length) {
-      sh.getRange(1, have.length + 1, 1, missing.length).setValues([missing]);
-      sh.getRange(1, 1, 1, have.length + missing.length).setFontWeight('bold');
-      patched.push(bp.name + '（+' + missing.join('/') + '）');
-    }
+    var added = ensureSheetColumns_(bp);
+    if (added.length) patched.push(bp.name + '（+' + added.join('/') + '）');
   });
 
   // Config 必備行（逐條補，唔覆蓋已填值）
@@ -4413,6 +4428,24 @@ function setupSheets() {
 
   if (key) showKeyDialog_('🔑 你的 API Key（只顯示一次）', key,
     '⚠️ 兩個前端都用呢一個 Key。而家就複製。');
+}
+
+/**
+ * 舊表補返藍圖有但表上冇嘅欄（加喺最尾，唔郁已有資料）— v4.10.0 由 setupSheets 抽出嚟，
+ * Visits 加總會匯報四欄（leaderMet/method/officerCount/support）就係行呢條路。回傳補咗嘅欄名。
+ */
+function ensureSheetColumns_(bp) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(bp.name);
+  if (!sh) return [];
+  var want = bp.rows[0].map(function (h) { return String(h).trim(); });
+  var have = sheetHeadersBySheet_(sh);
+  if (!have.length) return [];
+  var missing = want.filter(function (h) { return have.indexOf(h) < 0; });
+  if (!missing.length) return [];
+  sh.getRange(1, have.length + 1, 1, missing.length).setValues([missing]);
+  sh.getRange(1, 1, 1, have.length + missing.length).setFontWeight('bold');
+  return missing;
 }
 
 /** 補建缺失卡片（Cards 表）：新版本新增咗卡片時，重跑 setup 就會自動補上，唔會掂已有行 */

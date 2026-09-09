@@ -371,6 +371,7 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const y = new Date().getFullYear();
       return ok({
         from, to, today: today(),
+        districtName: '筲箕灣區',
         units: d.units, visits: d.visits,
         years: [y - 2, y - 1, y, y + 1],
         sections: [
@@ -398,8 +399,13 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
           id = genId('vs');
           d.visits.push(newVisit(id, v, u, visitDate));
         } else {
-          dup.note = v.note !== undefined ? v.note : dup.note;
-          dup.section = v.section !== undefined ? v.section : dup.section;
+          ['note', 'section', 'followUp', 'leaderMet', 'method', 'support'].forEach(k => {
+            if (v[k] !== undefined) dup[k] = v[k];
+          });
+          if (v.officerCount !== undefined) {
+            const oc = Number(v.officerCount);
+            dup.officerCount = oc > 0 ? Math.floor(oc) : 1;
+          }
           dup.updatedAt = nowIso();
           id = dup.id;
         }
@@ -667,7 +673,12 @@ function newVisit(id: string, v: AnyObj, u: DemoUser, visitDate: string): AnyObj
     id, districtCode: 'DEMO', troop: String(v.troop || ''), section: v.section || '',
     visitDate, year: dt.getFullYear(), quarter: Math.floor(dt.getMonth() / 3) + 1,
     kind: v.kind || 'general', visitorName: u.displayName, visitorEmail: u.email,
-    note: v.note || '', followUp: v.followUp || '', createdAt: nowIso(), updatedAt: nowIso(),
+    note: v.note || '', followUp: v.followUp || '',
+    // 總會匯報欄（v4.10.0）
+    leaderMet: v.leaderMet || '', method: v.method || '面談',
+    officerCount: Number(v.officerCount) > 0 ? Math.floor(Number(v.officerCount)) : 1,
+    support: v.support || '',
+    createdAt: nowIso(), updatedAt: nowIso(),
   };
 }
 
