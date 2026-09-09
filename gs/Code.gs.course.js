@@ -1341,6 +1341,10 @@ function doPost(e) {
     case 'setRegStatus':  return json(setRegStatus_(body));
     case 'getCourseProfile': return json(getCourseProfile_(body));
     case 'getCourseSheetRaw': return json(getCourseSheetRaw_(body));
+    case 'setCourseCells':   return json(setCourseCells_(body));
+    case 'setCompletionRow': return json(setCompletionRow_(body));
+    case 'setCertRow':       return json(setCertRow_(body));
+    case 'addExpenseRow':    return json(addExpenseRow_(body));
     default:              return json(err('未知的 action: ' + action));
   }
 }
@@ -1375,6 +1379,105 @@ function getCourseSheetRaw_(b) {
     cert: dump('Print_領取證書紀錄'), subsidy: dump('Print_總會資助計劃'),
     pulledAt: new Date().toISOString(),
   });
+}
+
+// ===================== 寫入 API（職員前端用：改設定／合格／證書／實支） =====================
+// 同 getCourseSheetRaw 一齊組成職員前端契約：讀全文 → 改 → 寫返格。
+// 全部要 apiKey；座標跟 v4.13.0 模版（人手舊表唔保證啱位）。
+
+var COURSE_WRITABLE_TABS = [IN1, IN2, IN3, IN4, RESP_SHEET, PARAM_SHEET,
+  'Print_通告', 'Print_接納通知書', 'Print_財政預算', 'Print_訓練班完成報告',
+  'Print_領取證書紀錄', 'Print_總會資助計劃',
+  'Print_取錄名單', 'Print_合格名單', 'Print_學員名單', 'Print_學員出席紀錄',
+  'Print_收支紀錄', 'Print_班職員名單'];
+
+/** 通用寫格：{cells:[{tab,row,col,value}]}（上限 1000 格；冇嗰頁／唔識嗰頁 skip） */
+function setCourseCells_(b) {
+  if (!authKey_(b.apiKey)) return err('Unauthorized: invalid or missing apiKey');
+  var cells = b.cells;
+  if (!Array.isArray(cells) || !cells.length) return err('cells 必填（陣列）');
+  if (cells.length > 1000) return err('一次最多寫 1000 格');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var updated = 0, skipped = [];
+  for (var i = 0; i < cells.length; i++) {
+    var c = cells[i] || {};
+    var tab = String(c.tab || '');
+    var row = Number(c.row), col = Number(c.col);
+    if (COURSE_WRITABLE_TABS.indexOf(tab) < 0) { if (tab && skipped.indexOf(tab) < 0) skipped.push(tab); continue; }
+    if (!row || !col || row < 1 || col < 1 || row > 500 || col > 30) return err('格座標不正確（第 ' + (i + 1) + ' 格）');
+    var sh = ss.getSheetByName(tab);
+    if (!sh) { if (skipped.indexOf(tab) < 0) skipped.push(tab); continue; }
+    sh.getRange(row, col).setValue(c.value === undefined ? '' : c.value);
+    updated++;
+  }
+  return ok({ updated: updated, skippedTabs: skipped });
+}
+
+/** 完成報告學員列：by 學員編號／中文姓名，寫 D 證書／E 合格與否／F 不合格原因（淨寫有帶嘅欄） */
+function setCompletionRow_(b) {
+  if (!authKey_(b.apiKey)) return err('Unauthorized: invalid or missing apiKey');
+  var code = String(b.code || '').trim(), name = String(b.name || '').trim();
+  if (!code && !name) return err('code（學員編號）或 name（中文姓名）二揀一必填');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Print_訓練班完成報告');
+  if (!sh) return err('找不到「Print_訓練班完成報告」分頁');
+  var v = sh.getDataRange().getValues();
+  for (var r = 9; r <= 30 && r < v.length; r++) { // rows 10–31
+    var a = String(v[r][0] == null ? '' : v[r][0]).trim();
+    var n = String(v[r][1] == null ? '' : v[r][1]).trim();
+    if ((code && a === code) || (!code && name && n === name)) {
+      if (b.certNo !== undefined) sh.getRange(r + 1, 4).setValue(b.certNo);
+      if (b.pass !== undefined) sh.getRange(r + 1, 5).setValue(b.pass);
+      if (b.failReason !== undefined) sh.getRange(r + 1, 6).setValue(b.failReason);
+      return ok({ updated: true, row: r + 1 });
+    }
+  }
+  return err('完成報告搵唔到呢位學員（先確認已取錄）');
+}
+
+/** 領取證書：by 學員編號／中文姓名，寫 E 證書編號／F 領取日期／G 簽收（淨寫有帶嘅欄） */
+function setCertRow_(b) {
+  if (!authKey_(b.apiKey)) return err('Unauthorized: invalid or missing apiKey');
+  var code = String(b.code || '').trim(), name = String(b.name || '').trim();
+  if (!code && !name) return err('code（學員編號）或 name（中文姓名）二揀一必填');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Print_領取證書紀錄');
+  if (!sh) return err('找不到「Print_領取證書紀錄」分頁');
+  var v = sh.getDataRange().getValues();
+  for (var r = 6; r <= 28 && r < v.length; r++) { // rows 7–29，B–G
+    var a = String((v[r][1] == null ? '' : v[r][1])).trim();
+    var n = String((v[r][2] == null ? '' : v[r][2])).trim();
+    if ((code && a === code) || (!code && name && n === name)) {
+      if (b.certNo !== undefined) sh.getRange(r + 1, 5).setValue(b.certNo);
+      if (b.pickupDate !== undefined) sh.getRange(r + 1, 6).setValue(b.pickupDate);
+      if (b.signed !== undefined) sh.getRange(r + 1, 7).setValue(b.signed);
+      return ok({ updated: true, row: r + 1 });
+    }
+  }
+  return err('領取證書紀錄搵唔到呢位學員（先確認已取錄）');
+}
+
+/** 實際支出：搵 Input04 第一個空收據行（8–42）寫入；amounts={B:v,C:v,…,J:v}／note→K 欄 */
+function addExpenseRow_(b) {
+  if (!authKey_(b.apiKey)) return err('Unauthorized: invalid or missing apiKey');
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(IN4);
+  if (!sh) return err('找不到「' + IN4 + '」分頁');
+  var amounts = b.amounts || {};
+  var hasNote = b.note !== undefined && String(b.note).trim() !== '';
+  var keys = ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].filter(function (L) {
+    return amounts[L] !== undefined && String(amounts[L]).trim() !== '';
+  });
+  if (!keys.length && !hasNote) return err('amounts／note 至少填一樣');
+  var v = sh.getDataRange().getValues();
+  for (var r = 7; r <= 41; r++) { // rows 8–42
+    var empty = true;
+    for (var c = 1; c <= 9; c++) {
+      if (String(((v[r] || [])[c] == null ? '' : v[r][c])).trim() !== '') { empty = false; break; }
+    }
+    if (!empty) continue;
+    keys.forEach(function (L) { sh.getRange(r + 1, L.charCodeAt(0) - 64).setValue(amounts[L]); });
+    if (hasNote) sh.getRange(r + 1, 11).setValue(b.note);
+    return ok({ added: true, receiptNo: String(((v[r] || [])[0] == null ? '' : v[r][0])).trim(), row: r + 1 });
+  }
+  return err('支出表已滿（35 行收據用晒）');
 }
 
 // ===================== Course Profile（開班自動填表＋通告預填） =====================

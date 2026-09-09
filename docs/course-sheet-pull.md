@@ -128,6 +128,40 @@ API（全部需 `canCourse`）：`createCourseSheet {link, setup, cells, clEmail
 `uniform`／`remarks`／`enquiry`／`fileNo`／`fileNoRaw`／`issueDate`／`issueDateISO`／
 `signer`（署名＋職銜）／`deputy`／`deputyRaw`。
 
+### 訓練班 Script：寫入 API（職員前端基本合約，跟班 Sheet 寫）
+
+全部 POST 去該班 `/exec`，要 `apiKey`；座標跟 v4.13.0 模版（人手舊表唔保證啱位）。
+同 `getCourseSheetRaw` 一齊組成職員前端契約：**讀全文 → 改 → 寫返班 Sheet**。
+將來職員只用前端，唔再開 Google Sheet；班務三件套（記帳／事工／簽到）到時都做埋班 Sheet 分頁＋Script API——**唔放區系統，兩者唔混**。
+
+```json
+// 通用寫格（上限 1000 格；唔識／冇嗰頁 skip，列喺 skippedTabs；座標錯即報錯）
+{ "action": "setCourseCells", "apiKey": "ck_...",
+  "cells": [{ "tab": "Input02 訓練班資料", "row": 18, "col": 2, "value": "2026-10-01" }] }
+// → { "ok": true, "data": { "updated": 1, "skippedTabs": [] } }
+
+// 完成報告學員列：code（學員編號）優先，冇先用 name（中文姓名）；淨寫有帶嘅欄
+{ "action": "setCompletionRow", "apiKey": "ck_...", "code": "S01",
+  "certNo": "C-001", "pass": "合格", "failReason": "" }
+// → { "ok": true, "data": { "updated": true, "row": 10 } }
+// （寫 Print_訓練班完成報告 rows 10–31：D 證書／E 合格與否／F 不合格原因）
+
+// 領取證書：同上對位
+{ "action": "setCertRow", "apiKey": "ck_...", "name": "陳小文",
+  "certNo": "C-001", "pickupDate": "2026-11-01", "signed": "已簽收" }
+// （寫 Print_領取證書紀錄 rows 7–29：E 證書編號／F 領取日期／G 簽收）
+
+// 實際支出：自動搵 Input04 第一個空收據行（rows 8–42）寫入
+{ "action": "addExpenseRow", "apiKey": "ck_...",
+  "amounts": { "B": "500", "D": "120" }, "note": "營費＋車費" }
+// → { "ok": true, "data": { "added": true, "receiptNo": "3", "row": 10 } }
+// （amounts key = B–J 開支類別欄，note → K 欄；乜都冇填／35 行爆滿會報錯）
+```
+
+可寫分頁白名單（`COURSE_WRITABLE_TABS`）：Input01／02／03／04、表格回應、參數、
+Print_通告／接納通知書／財政預算／訓練班完成報告／領取證書紀錄／總會資助計劃／
+取錄名單／合格名單／學員名單／學員出席紀錄／收支紀錄／班職員名單。座標範圍：行 1–500、欄 1–30。
+
 ### 主後台：`pullCourseProfile`（POST，需 `canCourse`）
 
 ```json

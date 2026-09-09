@@ -15,10 +15,20 @@ const code = fs.readFileSync(path.join(__dirname, '..', 'gs', 'Code.gs.course.js
 
 function makeSheet(name, rows) {
   const data = rows.map(r => r.slice());
+  const at = (row, col) => {
+    while (data.length < row) data.push([]);
+    while ((data[row - 1] || []).length < col) data[row - 1].push('');
+    return data[row - 1][col - 1];
+  };
   return {
     name,
     getDataRange: () => ({ getValues: () => data.map(r => r.slice()) }),
     getLastRow: () => data.length,
+    getRange: (row, col) => ({
+      getValue: () => at(row, col),
+      setValue: (v) => { at(row, col); data[row - 1][col - 1] = v; },
+    }),
+    _data: data,
   };
 }
 
@@ -372,6 +382,107 @@ check('rotate 後舊 key 即時作廢（唔影響已收資料）', () => {
   assert.ok(/Unauthorized/.test(bad.error));
   // 還原 key，等之後測試環境乾淨（之後冇測試，純保險）
   props.API_KEY_HASH = ctx.sha256_(KEY);
+});
+
+// ── 寫入 API（職員前端契約） ──
+function realCompletion() {
+  const g = Array.from({ length: 32 }, () => ['', '', '', '', '', '']);
+  g[9] = ['SFA-01', '陳小文', '123', '', '', ''];
+  g[10] = ['SFA-02', '黃小玲', '45', '', '', ''];
+  return g;
+}
+function realCert() {
+  const g = Array.from({ length: 30 }, () => ['', '', '', '', '', '', '']);
+  g[6] = ['', 'SFA-01', '陳小文', '123', '', '', ''];
+  return g;
+}
+function realInput04() {
+  const g = Array.from({ length: 46 }, () => ['', '', '', '', '', '', '', '', '', '', '']);
+  g.forEach((r, i) => { if (i >= 7 && i <= 41) r[0] = String(i - 6); }); // 收據 1–35
+  g[7][1] = '500'; // 第一行已用
+  return g;
+}
+sheets['Print_訓練班完成報告'] = makeSheet('Print_訓練班完成報告', realCompletion());
+sheets['Print_領取證書紀錄'] = makeSheet('Print_領取證書紀錄', realCert());
+sheets['Input04_Print支出表'] = makeSheet('Input04_Print支出表', realInput04());
+
+check('寫入 API：錯 key 全部被擋（經 doPost router）', () => {
+  ['setCourseCells', 'setCompletionRow', 'setCertRow', 'addExpenseRow'].forEach(a => {
+    const r = JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action: a, apiKey: 'wrong' }) } }));
+    assert.strictEqual(r.ok, false);
+    assert.ok(/Unauthorized/.test(r.error), a);
+  });
+});
+
+check('setCourseCells：寫入指定格＋skip 唔識嘅頁', () => {
+  const r = ctx.setCourseCells_({ apiKey: KEY, cells: [
+    { tab: 'Input02 訓練班資料', row: 4, col: 2, value: '30' },
+    { tab: 'Print_通告', row: 23, col: 3, value: '新資格' },
+    { tab: '亂入頁', row: 1, col: 1, value: 'x' },
+  ] });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.updated, 2);
+  assert.deepStrictEqual(plain(r.data.skippedTabs), ['亂入頁']);
+  assert.strictEqual(sheets['Input02 訓練班資料']._data[3][1], '30');
+  assert.strictEqual(sheets['Print_通告']._data[22][2], '新資格');
+});
+
+check('setCourseCells：空陣列／超上限／錯座標 → 報錯', () => {
+  assert.strictEqual(ctx.setCourseCells_({ apiKey: KEY, cells: [] }).ok, false);
+  assert.strictEqual(ctx.setCourseCells_({ apiKey: KEY, cells: Array.from({ length: 1001 }, () => ({})) }).ok, false);
+  const bad = ctx.setCourseCells_({ apiKey: KEY, cells: [{ tab: 'Input02 訓練班資料', row: 999, col: 1, value: 'x' }] });
+  assert.strictEqual(bad.ok, false);
+  assert.ok(/座標/.test(bad.error));
+});
+
+check('setCompletionRow：by 學員編號寫證書＋合格（淨寫有帶欄）', () => {
+  const r = ctx.setCompletionRow_({ apiKey: KEY, code: 'SFA-01', certNo: 'CERT-1', pass: '合格' });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.row, 10);
+  const row = sheets['Print_訓練班完成報告']._data[9];
+  assert.strictEqual(row[3], 'CERT-1');
+  assert.strictEqual(row[4], '合格');
+  assert.strictEqual(row[5], '', '冇帶 failReason 唔郁');
+});
+
+check('setCompletionRow：by 姓名都得；搵唔到／冇 key 報錯', () => {
+  const r = ctx.setCompletionRow_({ apiKey: KEY, name: '黃小玲', pass: '缺席', failReason: '缺席第二節' });
+  assert.ok(r.ok);
+  assert.strictEqual(sheets['Print_訓練班完成報告']._data[10][5], '缺席第二節');
+  assert.strictEqual(ctx.setCompletionRow_({ apiKey: KEY, code: '冇呢個' }).ok, false);
+  assert.strictEqual(ctx.setCompletionRow_({ apiKey: KEY }).ok, false);
+});
+
+check('setCertRow：by 學員編號寫領取（E／F／G）', () => {
+  const r = ctx.setCertRow_({ apiKey: KEY, code: 'SFA-01', certNo: 'CERT-1', pickupDate: '2026-09-14', signed: '陳小文' });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.row, 7);
+  const row = sheets['Print_領取證書紀錄']._data[6];
+  assert.deepStrictEqual(row.slice(4, 7), ['CERT-1', '2026-09-14', '陳小文']);
+  assert.strictEqual(ctx.setCertRow_({ apiKey: KEY, name: '冇呢個' }).ok, false);
+});
+
+check('addExpenseRow：寫入第一個空收據行（skip 已用行）', () => {
+  const r = ctx.addExpenseRow_({ apiKey: KEY, amounts: { B: '120', F: '300' }, note: '茶點＋車費' });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.strictEqual(r.data.row, 9, 'row 8 已用，寫 row 9');
+  assert.strictEqual(r.data.receiptNo, '2');
+  const row = sheets['Input04_Print支出表']._data[8];
+  assert.strictEqual(row[1], '120');
+  assert.strictEqual(row[5], '300');
+  assert.strictEqual(row[10], '茶點＋車費');
+});
+
+check('addExpenseRow：乜都冇填／爆滿 → 報錯', () => {
+  assert.strictEqual(ctx.addExpenseRow_({ apiKey: KEY, amounts: {} }).ok, false);
+  const full = realInput04();
+  for (let i = 7; i <= 41; i++) full[i][1] = '1';
+  const keep = sheets['Input04_Print支出表'];
+  sheets['Input04_Print支出表'] = makeSheet('Input04_Print支出表', full);
+  const r = ctx.addExpenseRow_({ apiKey: KEY, amounts: { B: '5' } });
+  assert.strictEqual(r.ok, false);
+  assert.ok(/已滿/.test(r.error));
+  sheets['Input04_Print支出表'] = keep;
 });
 
 console.log(pass ? `\n全部通過（${pass} 項）✓` : '\n冇跑到任何測試');

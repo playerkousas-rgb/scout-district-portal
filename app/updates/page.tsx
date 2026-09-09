@@ -5,6 +5,14 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>📝 訓練班模版更新 — ✍️ 寫入 API（職員前端基本合約）</h3>
+        <ul>
+          <li>✍️ <b>每班 Script 加 4 個寫入 API</b>（全部要該班 API Key）：<code>setCourseCells</code> 通用寫格（上限 1000 格，唔識嘅頁自動 skip）／<code>setCompletionRow</code> 完成報告學員列（D 證書／E 合格與否／F 原因）／<code>setCertRow</code> 領取證書（E 證書編號／F 領取日期／G 簽收）／<code>addExpenseRow</code> 實際支出（自動搵下一個空收據行）。對位用學員編號優先、中文姓名後備</li>
+          <li>🔄 <b>讀寫合約齊晒</b>：<code>getCourseSheetRaw</code> 讀全文 → 改 → 寫返班 Sheet。將來職員前端（每班獨立，唔入區系統）就係靠呢套；職員以後唔使再開 Google Sheet，班 Sheet 純做每班獨立數據庫</li>
+          <li>ℹ️ 純訓練班模版更新，<b>唔使換主後台 Code.gs</b>（health check 維持 v4.14.0）。<b>新開班</b>用新模版一鍵建表；<b>舊班</b>要寫入功能先將新模版覆蓋貼上（千祈唔好重跑 setup，會清空）。member-portal <b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.14.0 — 🆕 新制直入試驗：區系統填設定＋自動建班 Sheet＋12 張網頁列印</h3>
         <ul>
           <li>🆕 <b>訓練班管理加「新制直入」分頁</b>（同舊制並存）：成份開班設定（Input01／02／03＋通告人手格）喺區系統填，撳掣即由<b>總模版自動複製</b>班 Sheet＋寫入＋開班登記，仲可以自動分享畀班領導人——<b>連建表都慳返</b></li>
