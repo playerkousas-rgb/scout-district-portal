@@ -15,16 +15,19 @@ import type { AwardMember, AwardRound, AwardType } from './types';
 export const ROUND_LABEL: Record<AwardRound, string> = {
   founder: '創辦人紀念日獎勵',
   rally: '童軍獎勵（大會操）',
+  hab: '民青局局長嘉許',
   other: '自行申請／其他',
 };
 export const ROUND_HINT: Record<AwardRound, string> = {
-  founder: '優良服務獎章 · 優異服務獎章 · 感謝狀（表格 DA1／DA2）',
+  founder: '優良服務獎章 · 優異服務獎章（表格 DA1／DA2）',
   rally: '功績榮譽獎章 · 功績榮譽十字章 · 龍獅勳章（獎勵委員會批准）',
-  other: '長期服務獎章、總監嘉許、民青局嘉許等，唔跟上面兩個提名期',
+  hab: '民政及青年事務局局長嘉許 — 自行申請＋有提名期（總會每年初收集，2 月初交民青局）',
+  other: '長期服務獎章／獎狀、總監嘉許／高級嘉許、感謝狀等 — 自行申請，唔會自動推算',
 };
 
 export const STATUS_LABEL: Record<string, string> = {
   active: '現役',
+  noNomination: '沒有提名資格',
   noAppointment: '沒有委任',
   notInDistrict: '不在本區任期內',
   applying: '申請中',
@@ -141,16 +144,28 @@ export type RoundBucket = {
   soon: Eligibility[];       // 未夠期，但 2 年內會夠
 };
 
+/**
+ * 提名建議篩選（v4.9.0）：
+ * · 狀態 = noNomination「沒有提名資格」→ 無論如何都唔會出現喺提名建議
+ * · 其他非現役狀態（沒有委任／已離任…）→ 預設唔計，剔「連沒有委任都計埋」先計
+ */
+export function isNominationBlocked(m: AwardMember, includeInactive?: boolean): boolean {
+  if (m.status === 'noNomination') return true;
+  if (!includeInactive && m.status && m.status !== 'active' && m.status !== 'applying') return true;
+  return false;
+}
+
 /** 全區推算，按提名期分組；ready 由「等得最耐」排先 */
 export function nominationBoard(members: AwardMember[], types: AwardType[], targetYear: number, opts?: { includeInactive?: boolean }): RoundBucket[] {
-  const rounds: AwardRound[] = ['founder', 'rally', 'other'];
+  const rounds: AwardRound[] = ['founder', 'rally', 'hab', 'other'];
   const buckets: Record<AwardRound, RoundBucket> = {
     founder: { round: 'founder', ready: [], soon: [] },
     rally: { round: 'rally', ready: [], soon: [] },
+    hab: { round: 'hab', ready: [], soon: [] },
     other: { round: 'other', ready: [], soon: [] },
   };
   for (const m of members) {
-    if (!opts?.includeInactive && m.status && m.status !== 'active' && m.status !== 'applying') continue;
+    if (isNominationBlocked(m, opts?.includeInactive)) continue;
     for (const e of eligibilityFor(m, types, targetYear)) {
       const b = buckets[e.type.round] || buckets.other;
       if (e.ready) b.ready.push(e);
@@ -163,8 +178,11 @@ export function nominationBoard(members: AwardMember[], types: AwardType[], targ
   return rounds.map(r => buckets[r]);
 }
 
+/** 民青局嘉許死線設定（MM-DD；由 AwardsBoard.deadlineCfg 帶入） */
+export type DeadlineCfg = { habDistrict?: string; habHq?: string };
+
 /** 提名截止日：頒獎年份 targetYear → 區部 / 總會 死線 */
-export function deadlines(round: AwardRound, targetYear: number): { district: string; hq: string; note: string } | null {
+export function deadlines(round: AwardRound, targetYear: number, cfg?: DeadlineCfg): { district: string; hq: string; note: string } | null {
   if (round === 'founder') {
     return {
       district: `${targetYear - 1}-10-31`,
@@ -179,6 +197,19 @@ export function deadlines(round: AwardRound, targetYear: number): { district: st
       note: '區部提名須於同年 4 月 30 日前送地域，總會截止 5 月 31 日',
     };
   }
+  if (round === 'hab') {
+    // 民青局局長嘉許：總會每年初發通告收集（例：2026 年度須於 2026-02-03 前交民青局）。
+    // 死線可在「年期設定」改（Config AWARD_HAB_DL_*）；日期以總會當年通告為準。
+    const mmdd = (v?: string, fallback = '') => (/^\d{2}-\d{2}$/.test(String(v || '').trim()) ? String(v).trim() : fallback);
+    const d = mmdd(cfg?.habDistrict, '01-15');
+    const h = mmdd(cfg?.habHq, '02-03');
+    return {
+      district: `${targetYear}-${d}`,
+      hq: `${targetYear}-${h}`,
+      note: `${targetYear} 年度：區部提名須於 ${targetYear}-${d} 前送總會，總會 ${targetYear}-${h} 前交民青局。` +
+        '總會每年底／年初另行通告；死線可喺「⚙️ 年期設定」按當年通告更新。',
+    };
+  }
   return null;
 }
 
@@ -191,7 +222,7 @@ export function daysUntil(dateStr: string, today = new Date()): number {
 /**
  * 而家最應該處理緊嘅提名期：
  * 由今日計，搵返每個提名期「區部死線仲未過」嘅最近一屆頒獎年份。
- * other（自行申請）冇死線，用今年。
+ * other（自行申請）冇死線，用今年；hab 用 deadlineCfg（民青局嘉許）。
  */
 export type UpcomingRound = {
   round: AwardRound;
@@ -200,18 +231,19 @@ export type UpcomingRound = {
   hq: string | null;         // 總會死線
   days: number | null;       // 距區部死線幾多日
 };
-export function upcomingRounds(today = new Date()): UpcomingRound[] {
+export function upcomingRounds(cfg?: DeadlineCfg, today = new Date()): UpcomingRound[] {
   const y = today.getFullYear();
   const pick = (round: AwardRound): UpcomingRound => {
     for (let target = y; target <= y + 3; target++) {
-      const dl = deadlines(round, target);
+      const dl = deadlines(round, target, cfg);
       if (!dl) break;
       const days = daysUntil(dl.district, today);
       if (days >= 0) return { round, year: target, district: dl.district, hq: dl.hq, days };
     }
-    return { round, year: y + 1, district: null, hq: null, days: null };
+    const nextDl = deadlines(round, y + 1, cfg);
+    return { round, year: y + 1, district: nextDl?.district || null, hq: nextDl?.hq || null, days: null };
   };
-  return [pick('founder'), pick('rally'), { round: 'other', year: y, district: null, hq: null, days: null }];
+  return [pick('founder'), pick('rally'), pick('hab'), { round: 'other', year: y, district: null, hq: null, days: null }];
 }
 
 /** 逐個人喺 targetYear 夠期可提名嘅獎（畀名冊標亮用）；key = member.id */
@@ -220,7 +252,7 @@ export function readyByMember(
 ): Record<string, Eligibility[]> {
   const map: Record<string, Eligibility[]> = {};
   for (const m of members) {
-    if (!opts?.includeInactive && m.status && m.status !== 'active' && m.status !== 'applying') continue;
+    if (isNominationBlocked(m, opts?.includeInactive)) continue;
     const ready = eligibilityFor(m, types, targetYear).filter(e => e.ready);
     if (ready.length) map[m.id] = ready;
   }

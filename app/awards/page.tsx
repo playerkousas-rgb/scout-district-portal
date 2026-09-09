@@ -26,7 +26,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'import', label: '⬆️ 首次匯入' },
 ];
 
-const STATUS_OPTIONS = ['active', 'applying', 'noAppointment', 'notInDistrict', 'left'];
+const STATUS_OPTIONS = ['active', 'applying', 'noNomination', 'noAppointment', 'notInDistrict', 'left'];
 
 function emptyMember(): Partial<AwardMember> {
   return { id: '', name: '', troop: '', position: '', serviceStart: '', status: 'active', note: '', awards: {} };
@@ -142,57 +142,78 @@ export default function AwardsPage() {
 function AlertBanner({ board, onGo, onRoster }: {
   board: AwardsBoard; onGo: (year: number) => void; onRoster: (year: number) => void;
 }) {
-  const rows = useMemo(() => upcomingRounds().map(u => {
+  const cfg = board.deadlineCfg;
+  const rows = useMemo(() => upcomingRounds(cfg).map(u => {
     const bucket = nominationBoard(board.members, board.types, u.year).find(x => x.round === u.round);
     const ready = bucket ? bucket.ready : [];
     const people: AwardMember[] = [];
     const seen = new Set<string>();
     ready.forEach(e => { if (!seen.has(e.member.id)) { seen.add(e.member.id); people.push(e.member); } });
-    return { ...u, ready, people };
-  }), [board]);
+    const dl = deadlines(u.round, u.year, cfg);
+    return { ...u, ready, people, dl };
+  }), [board, cfg]);
 
   const totalPeople = new Set(rows.flatMap(r => r.people.map(m => m.id))).size;
-
-  if (totalPeople === 0) {
-    return (
-      <div className="info-card aw-alert calm">
-        <b>✅ 暫時冇人夠期可以提名</b>
-        <p>年期規則喺「⚙️ 年期設定」，名冊喺「📋 獎勵名冊」。有新人／新獎項入咗，呢度會即刻話你知。</p>
-      </div>
-    );
-  }
+  const habRow = rows.find(r => r.round === 'hab');
 
   return (
-    <div className="info-card aw-alert">
-      <div className="aw-alert-head">
-        <b>🔔 而家有 {totalPeople} 位領袖夠期，可以提名</b>
-        <button className="mini-btn" onClick={() => onRoster(rows[0]?.year || new Date().getFullYear() + 1)}>
-          喺名冊標亮佢哋 →
-        </button>
-      </div>
-      {rows.filter(r => r.people.length > 0).map(r => (
-        <div key={r.round} className="aw-alert-row">
+    <div className={`info-card aw-alert${totalPeople === 0 ? ' calm' : ''}`}>
+      {totalPeople === 0 ? (
+        <>
+          <b>✅ 暫時冇人夠期可以提名</b>
+          <p>年期規則喺「⚙️ 年期設定」，名冊喺「📋 獎勵名冊」。有新人／新獎項入咗，呢度會即刻話你知。</p>
+        </>
+      ) : (
+        <>
+          <div className="aw-alert-head">
+            <b>🔔 而家有 {totalPeople} 位領袖夠期，可以提名</b>
+            <button className="mini-btn" onClick={() => onRoster(rows[0]?.year || new Date().getFullYear() + 1)}>
+              喺名冊標亮佢哋 →
+            </button>
+          </div>
+          {rows.filter(r => r.round !== 'hab' && r.people.length > 0).map(r => (
+            <div key={r.round} className="aw-alert-row">
+              <div className="aw-alert-title">
+                <span className="aw-hot-badge">{r.people.length} 人</span>
+                <b>{ROUND_LABEL[r.round]}</b>
+                <span className="aw-alert-year">{r.year} 年頒獎</span>
+                {r.district && (
+                  <span className={`aw-alert-dl${(r.days ?? 99) < 45 ? ' soon' : ''}`}>
+                    區部死線 {r.district}（仲有 {r.days} 日）
+                  </span>
+                )}
+                <button className="mini-btn" onClick={() => onGo(r.year)}>睇名單 →</button>
+              </div>
+              <div className="aw-chips">
+                {r.ready.slice(0, 12).map(e => (
+                  <span key={e.member.id + e.type.code} className="aw-chip hot" title={`${e.member.name}｜建議提名 ${e.type.label}`}>
+                    🔥 {e.member.name} → {shortLabel(e.type)}
+                  </span>
+                ))}
+                {r.ready.length > 12 && <span className="aw-none">…另外 {r.ready.length - 12} 項</span>}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {/* 民青局局長嘉許：自行申請唔推算人選，但有提名期死線要留意 */}
+      {habRow && habRow.dl && (
+        <div className="aw-alert-row" style={{ marginTop: totalPeople === 0 ? 0 : 10 }}>
           <div className="aw-alert-title">
-            <span className="aw-hot-badge">{r.people.length} 人</span>
-            <b>{ROUND_LABEL[r.round]}</b>
-            <span className="aw-alert-year">{r.year} 年頒獎</span>
-            {r.district && (
-              <span className={`aw-alert-dl${(r.days ?? 99) < 45 ? ' soon' : ''}`}>
-                區部死線 {r.district}（仲有 {r.days} 日）
-              </span>
-            )}
-            <button className="mini-btn" onClick={() => onGo(r.year)}>睇名單 →</button>
+            <span className="aw-hot-badge hab">提名期</span>
+            <b>{ROUND_LABEL.hab}</b>
+            <span className="aw-alert-year">{habRow.year} 年度</span>
+            <span className={`aw-alert-dl${(habRow.days ?? 99) < 45 ? ' soon' : ''}`}>
+              交總會死線 {habRow.dl.district}{habRow.days != null ? `（仲有 ${habRow.days} 日）` : ''}
+            </span>
+            <button className="mini-btn" onClick={() => onGo(habRow.year)}>睇詳情 →</button>
           </div>
-          <div className="aw-chips">
-            {r.ready.slice(0, 12).map(e => (
-              <span key={e.member.id + e.type.code} className="aw-chip hot" title={`${e.member.name}｜建議提名 ${e.type.label}`}>
-                🔥 {e.member.name} → {shortLabel(e.type)}
-              </span>
-            ))}
-            {r.ready.length > 12 && <span className="aw-none">…另外 {r.ready.length - 12} 項</span>}
-          </div>
+          <p className="aw-none" style={{ fontSize: 12.5 }}>
+            自行申請，唔會自動推算人選；總會每年初發通告收集（{habRow.dl.hq} 前交民青局）。死線可喺「⚙️ 年期設定」更新。
+          </p>
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -299,8 +320,7 @@ function NominateTab({ board, year, setYear, canEdit, token, reload, flash, setE
           <p>
             {entryLabels || '入門級獎項'} 係由<b>服務開始（首次委任）年份</b>起計。
             呢個係「由無到有」嗰級，未填年份就計唔到 —— 所以呢一級<b>暫時未通</b>，
-            要慢慢儲返全區領袖嘅委任年份先會準。去「📋 獎勵名冊」逐個補返年份，補到邊就計到邊。<br />
-            （<b>長期服務獎章第一個</b>預設唔自動推算，由你自己入紀錄；<b>一星之後</b>就會自動每 10 年提你。）
+            要慢慢儲返全區領袖嘅委任年份先會準。去「📋 獎勵名冊」逐個補返年份，補到邊就計到邊。
           </p>
           <div className="aw-chips">
             {missing.slice(0, 20).map(m => (
@@ -312,7 +332,7 @@ function NominateTab({ board, year, setYear, canEdit, token, reload, flash, setE
       )}
 
       {buckets.map(b => {
-        const dl = deadlines(b.round, year);
+        const dl = deadlines(b.round, year, board.deadlineCfg);
         const dDistrict = dl ? daysUntil(dl.district) : 0;
         return (
           <div key={b.round} className="info-card">
@@ -329,15 +349,21 @@ function NominateTab({ board, year, setYear, canEdit, token, reload, flash, setE
             {dl && (
               <div className={`aw-deadline${dDistrict < 0 ? ' past' : dDistrict < 45 ? ' soon' : ''}`}>
                 <b>提名截止</b>
-                <span>區部 → 地域：{dl.district}</span>
-                <span>總會：{dl.hq}</span>
+                <span>{b.round === 'hab' ? '區 → 總會：' : '區部 → 地域：'}{dl.district}</span>
+                <span>{b.round === 'hab' ? '總會 → 民青局：' : '總會：'}{dl.hq}</span>
                 <span className="aw-dl-count">
                   {dDistrict < 0 ? `區部死線已過 ${-dDistrict} 日` : `距區部死線 ${dDistrict} 日`}
                 </span>
+                {b.round === 'hab' && <small style={{ width: '100%', fontSize: 12, color: '#64748b' }}>{dl.note}</small>}
               </div>
             )}
 
-            {b.ready.length === 0 ? (
+            {b.round === 'hab' && b.ready.length === 0 ? (
+              <p className="empty">
+                自行申請 — 唔會自動推算人選。請喺提名期內自行揀人、填民青局表格；
+                想留紀錄就去「📋 獎勵名冊」記低獲獎年份。
+              </p>
+            ) : b.ready.length === 0 ? (
               <p className="empty">冇人喺 {year} 年夠期（可改上面年份睇下一年）</p>
             ) : (
               <div className="mtx-scroll">
@@ -419,9 +445,11 @@ function NominateTab({ board, year, setYear, canEdit, token, reload, flash, setE
       <div className="info-card aw-note">
         <b>點計出嚟？</b><br />
         ① 有上一級嘅獎：上一級獲獎年份 ＋ 設定年期 ≤ 頒獎年份（年期留空 = 冇規定，有上一級就列出）。<br />
-        ② 入門級（例如優良服務獎章 7 年）：<b>服務開始年份</b> ＋ 設定年期 ≤ 頒獎年份。<br />
-        ③ 冇年期規定又冇上一級嘅（感謝狀、<b>第一個長期服務獎章</b>）：唔自動推算，自己入紀錄；
-        長期服務<b>一星之後</b>就會自動每 10 年提你。<br />
+        ② 入門級（優良服務獎章 7 年、五年獎狀 5 年、長期服務獎章 15 年）：<b>服務開始年份</b> ＋ 設定年期 ≤ 頒獎年份。<br />
+        ③ <b>長期服務階梯（LAY／會務委員）</b>：五年獎狀（5 年）→ 十年獎狀（＋5）→ 長期服務獎章（共 15 年）→ 一／二／三星（每 10 年）。<br />
+        ④ 香港總監嘉許、高級嘉許、民青局局長嘉許、感謝狀 ＝ <b>自行申請，一律唔自動推算</b>
+        （民青局嘉許另有提名期死線，喺上面顯示）。<br />
+        名冊狀態揀「沒有提名資格」嘅人唔會出現喺任何提名建議。<br />
         年期全部喺「⚙️ 年期設定」改，改完即刻重算。
       </div>
     </>
@@ -664,7 +692,8 @@ function MemberModal({ draft, types, token, ready, year, onClose, onSaved, setEr
 
         <p className="aw-hint">
           獲獎年份直接填四位數字；未確定可以喺後面加「?」，冇獲過就留空。
-          <b>服務開始年份</b>＝ 首次委任嗰年，優良服務獎章（7 年）同長期服務獎章（15 年）靠佢計。
+          <b>服務開始年份</b>＝ 首次委任嗰年，優良服務獎章（7 年）、五年獎狀（5 年）、十年獎狀、長期服務獎章（15 年）呢條長期服務階梯靠佢計。
+          狀態揀「沒有提名資格」＝ 唔會出現喺提名建議。
         </p>
 
         {cats.map(cat => (
@@ -701,7 +730,10 @@ function RulesTab({ board, canEdit, token, reload, flash, setError }: {
 }) {
   const [rows, setRows] = useState<AwardType[]>(board.types.map(t => ({ ...t })));
   const [saving, setSaving] = useState(false);
+  const [hab, setHab] = useState({ habDistrict: board.deadlineCfg?.habDistrict || '01-15', habHq: board.deadlineCfg?.habHq || '02-03' });
+  const [habBusy, setHabBusy] = useState(false);
   useEffect(() => { setRows(board.types.map(t => ({ ...t }))); }, [board.types]);
+  useEffect(() => { setHab({ habDistrict: board.deadlineCfg?.habDistrict || '01-15', habHq: board.deadlineCfg?.habHq || '02-03' }); }, [board.deadlineCfg]);
 
   function patch(i: number, key: keyof AwardType, value: unknown) {
     setRows(prev => prev.map((r, idx) => (idx === i ? { ...r, [key]: value } as AwardType : r)));
@@ -723,13 +755,45 @@ function RulesTab({ board, canEdit, token, reload, flash, setError }: {
     } else setError(r.error || '儲存失敗');
   }
 
+  /** 民青局嘉許提名期死線（MM-DD） */
+  async function saveHab() {
+    setHabBusy(true);
+    const r = await api.saveAwardDeadlines(token, hab);
+    setHabBusy(false);
+    if (r.ok) { flash(`已更新民青局嘉許死線：區→總會 ${r.data?.deadlineCfg.habDistrict}、總會→民青局 ${r.data?.deadlineCfg.habHq}`); await reload(); }
+    else setError(r.error || '儲存失敗');
+  }
+
   return (
     <>
       <div className="info-card aw-note">
         <b>年期點用？</b>「上一級」＋「相隔年數」＝ 最快可提名年份。
         例如優異服務獎章上一級係優良服務獎章、相隔 5 年 → 2015 年攞咗優良，2020 年就夠期。
-        「上一級」留空 + 有年數 ＝ 由成員嘅<b>服務開始年份</b>起計（優良服務獎章 7 年、長期服務獎章 15 年就係咁）。
+        「上一級」留空 + 有年數 ＝ 由成員嘅<b>服務開始年份</b>起計（優良服務獎章 7 年、五年獎狀 5 年、長期服務獎章 15 年就係咁；
+        會務委員 LAY 行 五年→十年→十五年→一星→二星→三星 自動階梯）。
         年數留空 ＝ 冇固定年期規定（例如獅勳章），只要有上一級就會列出嚟畀你考慮。改完撳最底「儲存設定」即刻生效。
+      </div>
+
+      <div className="info-card" style={{ borderColor: '#fbbf24' }}>
+        <div className="section-head">
+          <div>
+            <h3>🗓 民青局局長嘉許 — 提名期死線</h3>
+            <p>總會每年底／年初另行通告（例：2026 年度須於 2/3 前交民青局）。呢度填嘅係「月-日」，跨年都啱；填完即刻喺提名頁同提示橫額顯示。</p>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <label className="aw-field">
+            <span>區 → 總會死線（MM-DD）</span>
+            <input value={hab.habDistrict} placeholder="01-15" maxLength={5} disabled={!canEdit}
+              onChange={e => setHab(h => ({ ...h, habDistrict: e.target.value }))} style={{ width: 110 }} />
+          </label>
+          <label className="aw-field">
+            <span>總會 → 民青局死線（MM-DD）</span>
+            <input value={hab.habHq} placeholder="02-03" maxLength={5} disabled={!canEdit}
+              onChange={e => setHab(h => ({ ...h, habHq: e.target.value }))} style={{ width: 110 }} />
+          </label>
+          {canEdit && <button className="btn-sm" disabled={habBusy} onClick={saveHab}>{habBusy ? '儲存中…' : '💾 儲存死線'}</button>}
+        </div>
       </div>
 
       <div className="mtx-scroll">
@@ -764,6 +828,7 @@ function RulesTab({ board, canEdit, token, reload, flash, setError }: {
                   <select className="aw-in" value={t.round} disabled={!canEdit} onChange={e => patch(i, 'round', e.target.value as AwardRound)}>
                     <option value="founder">創辦人紀念日</option>
                     <option value="rally">大會操（童軍獎勵）</option>
+                    <option value="hab">民青局嘉許（提名期）</option>
                     <option value="other">自行申請／其他</option>
                   </select>
                 </td>

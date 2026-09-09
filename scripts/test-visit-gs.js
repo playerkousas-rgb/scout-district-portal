@@ -269,9 +269,9 @@ check('doGet / doPost 路由通', () => {
   assert.strictEqual(del.ok, true);
 });
 
-check('健康檢查版本 4.8.1', () => {
+check('健康檢查版本 4.9.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.8.1');
+  assert.strictEqual(parsed.data.version, '4.9.0');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

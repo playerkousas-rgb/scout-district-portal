@@ -45,6 +45,7 @@ export interface UserSession {
   levelLabel?: string;
   isSuper?: boolean;           // level 0：隱藏卡片仍然可見
   mustChangePassword?: boolean; // 首次登入（預設密碼）必須先改密碼
+  mockAdmin?: boolean;          // 🎭 模擬示範版：權限全開（僅本地沙盒，後台永遠唔會設）
 }
 
 export interface PortalUser {
@@ -333,6 +334,10 @@ export interface Announcement {
   expired?: boolean;
   scheduled?: boolean;
   live?: boolean;
+  // v4.9.0 軟刪除留底：刪咗仍喺 Sheet 紀錄，成員端一律見唔到
+  deleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
 }
 
 /**
@@ -340,8 +345,8 @@ export interface Announcement {
  * 一人一行，每個獎項存獲獎年份（字串，可以係 "2015"、"2015?" 未確定、"無"）。
  * 年期規則（邊個獎跟邊個、要相隔幾多年、屬邊個提名期）全部喺 AwardTypes 表，可喺 /awards 改。
  */
-export type AwardRound = 'founder' | 'rally' | 'other';
-export type AwardMemberStatus = 'active' | 'noAppointment' | 'notInDistrict' | 'applying' | 'left';
+export type AwardRound = 'founder' | 'rally' | 'hab' | 'other';
+export type AwardMemberStatus = 'active' | 'noNomination' | 'noAppointment' | 'notInDistrict' | 'applying' | 'left';
 
 export interface AwardType {
   code: string;            // 代號（同時係 Awards 表嘅欄名），例如 GSA
@@ -377,6 +382,8 @@ export interface AwardsBoard {
   total: number;
   /** 後台內建建議年期（「↺ 套用建議」用，唔會自動覆蓋你改過嘅設定） */
   defaults?: AwardType[];
+  /** 提名期死線（v4.9.0）：民青局嘉許（MM-DD；可喺年期設定改） */
+  deadlineCfg?: { habDistrict?: string; habHq?: string };
 }
 
 export interface ActivityNotice {

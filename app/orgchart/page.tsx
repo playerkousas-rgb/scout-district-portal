@@ -5,7 +5,7 @@
  * 港島地域總監架構 + 總會（香港總監諮議會／執行委員會）。
  * 名單由 /api/external 即時讀官方網頁（hkirscout.org.hk 總監架構、scout.org.hk 香港總監諮議會），
  * 職位改人自動反映；讀唔到就用 lib/orgDirectory.ts 靜態備援（會標明）。
- * 只列架構，唔放電話——要搵人解決問題請用「聯結簿」。
+ * 只列架構，唔放電話——要搵人解決問題請用「聯絡簿」。
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -49,15 +49,31 @@ function Person({ p, big = false }: { p: OrgMember; big?: boolean }) {
   );
 }
 
-/** 一組職位：同一 rank 內以「範疇」分行；姓名直接跟住 */
+/**
+ * 一組職位：同一 rank 內以「範疇」分行；姓名直接跟住。
+ * v4.9.0：「區總監」7 區合併做一個大格（標明 xx 區），一眼睇晒全部區總監。
+ */
 function RankBlock({ g, q }: { g: OrgGroup; q: string }) {
   const rows = g.members.filter(x => hit(x, q));
   if (!rows.length) return null;
   const single = g.members.length === 1;
+  const isDCs = g.title === '區總監';
   return (
     <section className="info-card org-block">
       <div className="section-head"><div><h3>{GROUP_ICON[g.title] || '•'} {g.title} <small>({rows.length})</small></h3></div></div>
-      {single ? <Person p={rows[0]} big /> : (
+      {isDCs ? (
+        <div className="org-dc-cell">
+          <div className="org-dc-cell-head"><span className="org-avatar big">🧭</span><b>港島地域 7 區區總監</b></div>
+          <div className="org-dc-grid">
+            {rows.map((p, i) => (
+              <div key={`${p.name}-${p.scope}-${i}`} className="org-dc-item">
+                <small>{p.scope || p.post}</small>
+                <b>{p.name}</b>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : single ? <Person p={rows[0]} big /> : (
         <div className="org-grid">
           {rows.map((p, i) => <Person key={`${p.name}-${p.scope}-${i}`} p={p} />)}
         </div>
@@ -117,7 +133,7 @@ export default function OrgChartPage() {
     <>
       <BackLink />
       <h1 className="page-title">🏛 地域及總會架構</h1>
-      <p className="page-sub">邊個職位而家係邊個——名單自動跟官方網頁更新。要聯絡地域職員請用 <Link href={withDistrict('/contacts?tab=region')} style={{ textDecoration: 'underline' }}>聯結簿</Link>。</p>
+      <p className="page-sub">邊個職位而家係邊個——名單自動跟官方網頁更新。要聯絡地域職員請用 <Link href={withDistrict('/contacts?tab=region')} style={{ textDecoration: 'underline' }}>聯絡簿</Link>。</p>
 
       <div className="inc-tabs" role="tablist">
         {TABS.map(t => (

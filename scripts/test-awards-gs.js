@@ -108,7 +108,7 @@ check('AwardTypes 空表時用內建預設（18 個獎項）', () => {
   assert.strictEqual(dsa.minYears, 5);
 });
 
-check('v4.7.1 預設年期：GSA 7（由服務年資計）、DSM→DSC 5、獅勳章冇年期、LSM 15', () => {
+check('v4.9.0 預設年期：GSA 7、FIVE 5→TEN +5→LSM 15（LAY 階梯）、CCH 冇得推算、HAB=hab 提名期', () => {
   const by = {};
   ctx.awardTypes_().forEach(t => { by[t.code] = t; });
   assert.strictEqual(by.GSA.prevCode, '');
@@ -117,9 +117,23 @@ check('v4.7.1 預設年期：GSA 7（由服務年資計）、DSM→DSC 5、獅�
   assert.strictEqual(by.DSC.minYears, 5);
   assert.strictEqual(by.BRL.minYears, null);
   assert.strictEqual(by.SVL.minYears, null);
+  // LAY／會務委員長期服務階梯：五年(5) → 十年(+5) → 長期服務獎章(15) → 一二三星(每 10 年)
+  assert.strictEqual(by.FIVE.prevCode, '');
+  assert.strictEqual(by.FIVE.minYears, 5);
+  assert.strictEqual(by.TEN.prevCode, 'FIVE');
+  assert.strictEqual(by.TEN.minYears, 5);
   assert.strictEqual(by.LSM.prevCode, '');
-  assert.strictEqual(by.LSM.minYears, null);   // 第一個長期服務獎章自己入，唔自動推算
+  assert.strictEqual(by.LSM.minYears, 15);
+  assert.strictEqual(by.LSM1.prevCode, 'LSM');
   assert.strictEqual(by.LSM1.minYears, 10);
+  // 自行申請四寶：全部唔可以推算（CCM/CCH/HAB/THANKS 冇 prev、冇年期）
+  ['CCM', 'CCH', 'HAB', 'THANKS'].forEach(c => {
+    assert.strictEqual(by[c].prevCode, '', c + ' prevCode');
+    assert.strictEqual(by[c].minYears, null, c + ' minYears');
+  });
+  assert.strictEqual(by.CCH.round, 'other');
+  assert.strictEqual(by.HAB.round, 'hab');
+  assert.strictEqual(by.THANKS.round, 'other');
 });
 
 check('服務開始年份：2004 / 2004-01-15 / 「86th since 2004/01/15」都讀到年份', () => {
@@ -302,9 +316,9 @@ check('getAwardsBoard 有回內建建議年期（畀「套用建議」用）', (
   assert.strictEqual(d.filter(t => t.code === 'BRL')[0].minYears, null);
 });
 
-check('健康檢查版本 4.8.1', () => {
+check('健康檢查版本 4.9.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.8.1');
+  assert.strictEqual(parsed.data.version, '4.9.0');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

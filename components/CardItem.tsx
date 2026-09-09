@@ -7,12 +7,21 @@ const typeLabel: Record<string, string> = { builtin: '內建', jump: '跳轉', r
 
 export default function CardItem({
   card, role, canToggle = false, toggling = false, onToggle,
+  canReorder = false, first = false, last = false,
+  onMoveUp, onMoveDown, dragProps,
 }: {
   card: CardDef; role: string;
   /** 超管：顯示「開啟／隱藏」開關 */
   canToggle?: boolean;
   toggling?: boolean;
   onToggle?: () => void;
+  /** v4.9.0：自行排列卡片次序（存瀏覽器，各用戶各自記住） */
+  canReorder?: boolean;
+  first?: boolean;
+  last?: boolean;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  dragProps?: React.HTMLAttributes<HTMLDivElement> & { draggable?: boolean; onDragStart?: (e: React.DragEvent) => void; onDragOver?: (e: React.DragEvent) => void; onDrop?: (e: React.DragEvent) => void; onDragEnd?: (e: React.DragEvent) => void };
 }) {
   const router = useRouter();
   const { withDistrict, districtCode } = useDistrict();
@@ -50,6 +59,7 @@ export default function CardItem({
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(); } }}
       title={title}
+      {...(canReorder ? (dragProps || {}) : {})}
     >
       <span className={`pill ${card.type}`}>{typeLabel[card.type] || card.type}</span>
       {card.category === 'todo' && <span className="plugin-tag">🚧 加入中</span>}
@@ -57,9 +67,17 @@ export default function CardItem({
       {card.source === 'plugin' && <span className="plugin-tag">🧩 外掛</span>}
       <h3>{card.title}</h3>
       <div className="desc">{card.description}</div>
-      <span className={`access ${isView ? 'view' : 'edit'}`}>
-        {isView ? '👁 可看' : '✏️ 可管理'}{card.embed && card.type !== 'builtin' ? ' · 無感' : ''}
-      </span>
+      <div className="card-foot">
+        <span className={`access ${isView ? 'view' : 'edit'}`}>
+          {isView ? '👁 可看' : '✏️ 可管理'}{card.embed && card.type !== 'builtin' ? ' · 無感' : ''}
+        </span>
+        {canReorder && (
+          <span className="card-move" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="move-btn" disabled={first} aria-label="上移" title="上移" onClick={onMoveUp}>▲</button>
+            <button type="button" className="move-btn" disabled={last} aria-label="下移" title="下移" onClick={onMoveDown}>▼</button>
+          </span>
+        )}
+      </div>
       {hidden && <span className="hidden-tag">🙈 已隱藏</span>}
       {canToggle && (
         <button

@@ -1,7 +1,8 @@
 /**
- * 聯結簿 — 港島地域 / 總會 聯絡資料（v4.5.0）
+ * 聯絡簿 — 港島地域 / 總會 聯絡資料（v4.5.0；v4.9.0 改名＋姓名區方可編輯）
  * ─────────────────────────────────────────────────────────────────────
  * v4.5.0 起：港島地域分頁只放「職員直線電話」（搵人解決問題用），總監架構搬去 /orgchart。
+ * v4.9.0：電話唔變但人會轉 — 地域職員姓名可以由區方自行改（存後台 ContactNames 表，全區同步）。
  * 職員表及總會各署電話會由 /api/external 即時讀官方網頁；呢份係讀唔到時嘅備援（會標明）。
  * 來源（2026-09 查閱）：
  *   港島地域：https://www.hkirscout.org.hk/tc/about_us/organization/prof/index.html（專業領袖及受薪職員，2026-07-16 更新）
@@ -17,6 +18,9 @@ export interface ContactRow {
   fax?: string;
   email?: string;
   note?: string;
+  // v4.9.0 姓名自訂（套用 applyContactNames 之後先有）
+  nameKey?: string;    // 存後台用嘅 key：「職位|電話|第幾個」
+  nameCustom?: boolean; // TRUE = 而家顯示緊區方自訂名
 }
 export interface ContactGroup {
   id: string;
@@ -24,6 +28,28 @@ export interface ContactGroup {
   icon: string;
   intro?: string;
   rows: ContactRow[];
+}
+
+/** 姓名自訂 key：同一個「職位+電話」出現幾多次就第幾個（重複職位都用唔同 key） */
+export function contactNameKey(post: string, tel: string | undefined, occurrence: number): string {
+  return `${post}|${tel || ''}|${occurrence}`;
+}
+
+/**
+ * 將區方自訂姓名蓋上同步／備援名單（電話唔變、人會轉 — 蓋完電話仍然跟官方同步）。
+ * 每行都會攞返自己嘅 nameKey（冇自訂都有，方便直接儲存）。
+ */
+export function applyContactNames<T extends ContactRow>(rows: T[], names: Record<string, string>): (T & { nameKey: string; nameCustom: boolean })[] {
+  const seen: Record<string, number> = {};
+  return rows.map((r) => {
+    const base = `${r.post}|${r.tel || ''}`;
+    const n = seen[base] || 0;
+    seen[base] = n + 1;
+    const key = contactNameKey(r.post, r.tel, n);
+    const override = names[key];
+    if (override) return { ...r, name: override, nameKey: key, nameCustom: true };
+    return { ...r, nameKey: key, nameCustom: false };
+  });
 }
 
 export const REGION_OFFICE = {

@@ -45,7 +45,9 @@ const sheets = {
     ['dc@x.org', 'DC', 'TRUE', 1], ['staff@x.org', 'STAFF', 'TRUE', 4], ['al@x.org', 'AL', 'TRUE', 5]]),
   Roles: makeSheet('Roles', [['role', 'label', 'protected', 'level'], ['DC', '區總監', 'TRUE', 1], ['STAFF', '區職員', 'TRUE', 4], ['AL', '助理區領袖', 'TRUE', 5]]),
   News: makeSheet('News', [['id', 'districtCode', 'title', 'body', 'date', 'pinned', 'level', 'link', 'linkLabel',
-    'notify', 'active', 'expiresAt', 'publishedAt', 'publishedBy', 'updatedAt', 'createdAt']]),
+    'notify', 'active', 'expiresAt', 'publishedAt', 'publishedBy', 'updatedAt', 'createdAt',
+    'deleted', 'deletedAt', 'deletedBy']]),
+  ContactNames: makeSheet('ContactNames', [['key', 'name', 'updatedAt', 'updatedBy']]),
   System: makeSheet('System', [['key', 'value'], ['locked', 'FALSE'], ['lockMessage', '維護中']]),
   Items: makeSheet('Items', [
     ['itemId', 'districtCode', 'category', 'name', 'totalQty', 'availableQty', 'unit', 'note', 'location', 'active'],
@@ -190,15 +192,28 @@ check('公開版唔會漏 active / publishedBy', () => {
   assert.ok(n.updatedAt);
 });
 
-check('下架 → 成員端即刻唔見，但管理系統仍見到', () => {
+check('下架 → 成員端即刻唔見，但管理系統仍見到（連軟刪除留底都回）', () => {
   assert.ok(ctx.setAnnouncementActive_(dcToken, plainId, false).ok);
   assert.strictEqual(ctx.listAnnouncements_({}).length, 1);
   const admin = ctx.getAnnouncements_(dcToken);
   assert.ok(admin.ok);
-  assert.strictEqual(admin.data.length, 2);
+  // 3 = pinnedId + plainId + 之前軟刪除留底嘅 content 測試行
+  assert.strictEqual(admin.data.length, 3);
   const off = admin.data.filter(n => n.id === plainId)[0];
   assert.strictEqual(off.active, false);
   assert.strictEqual(off.live, false);
+});
+
+check('v4.9.0：ADC（層級 3）可以直接發佈；STAFF（層級 4）唔可以', () => {
+  const adcToken = tokenFor('adc@x.org', 'ADC_SCOUT');
+  const staffToken = tokenFor('staff@x.org', 'STAFF');
+  // harness Users 表冇 ADC 帳戶 → level 由 Roles 推斷；ADC_SCOUT → 層級 3
+  const rAdc = ctx.saveAnnouncement_(adcToken, { title: 'ADC 發佈', body: '掂' });
+  assert.ok(rAdc.ok, JSON.stringify(rAdc));
+  assert.strictEqual(ctx.listAnnouncements_({}).filter(n => n.title === 'ADC 發佈').length, 1);
+  const rStaff = ctx.saveAnnouncement_(staffToken, { title: 'STAFF 發佈', body: '唔應該得' });
+  assert.strictEqual(rStaff.ok, false);
+  ctx.deleteAnnouncement_(adcToken, rAdc.data.id);   // 清場（軟刪除，成員端睇唔到）
 });
 
 check('重新上架', () => {
@@ -244,11 +259,42 @@ check('更新內容唔會改 id / publishedAt / publishedBy', () => {
   assert.strictEqual(after.publishedBy, before.publishedBy);
 });
 
-check('刪除 → 兩邊都冇', () => {
+check('v4.9.0 刪除 = 軟刪除：成員端即刻冇，Sheet 留底（deleted=TRUE），可以還原', () => {
   assert.ok(ctx.deleteAnnouncement_(dcToken, plainId).ok);
   assert.strictEqual(ctx.listAnnouncements_({}).filter(n => n.id === plainId).length, 0);
-  assert.strictEqual(ctx.getAnnouncements_(dcToken).data.filter(n => n.id === plainId).length, 0);
-  assert.strictEqual(ctx.deleteAnnouncement_(dcToken, plainId).ok, false);
+  const kept = ctx.getAnnouncements_(dcToken).data.filter(n => n.id === plainId)[0];
+  assert.ok(kept, 'Sheet 應該留底');
+  assert.strictEqual(kept.deleted, true);
+  assert.ok(kept.deletedAt);
+  assert.strictEqual(kept.live, false);
+  // 再刪一次 = 冇事發生（冇嘢好刪，照樣 ok）
+  assert.ok(ctx.deleteAnnouncement_(dcToken, plainId).ok);
+  // 還原 → 留底返返出嚟，係「已下架」狀態
+  assert.ok(ctx.restoreAnnouncement_(dcToken, plainId).ok);
+  const back = ctx.getAnnouncements_(dcToken).data.filter(n => n.id === plainId)[0];
+  assert.strictEqual(back.deleted, false);
+  assert.strictEqual(back.active, false);
+  assert.strictEqual(ctx.listAnnouncements_({}).filter(n => n.id === plainId).length, 0);
+});
+
+check('已刪除嘅消息唔可以置頂／上架（只可以還原）', () => {
+  assert.ok(ctx.deleteAnnouncement_(dcToken, plainId).ok);
+  assert.strictEqual(ctx.setAnnouncementPinned_(dcToken, plainId, true).ok, false);
+  assert.strictEqual(ctx.setAnnouncementActive_(dcToken, plainId, true).ok, false);
+  assert.ok(ctx.restoreAnnouncement_(dcToken, plainId).ok);
+});
+
+check('v4.9.0 聯絡簿姓名：ADC+ 可以改／還原，AL（層級 5）唔可以', () => {
+  const r1 = ctx.saveContactName_(dcToken, '執行幹事|2835 7711|0', '陳大文先生（新）');
+  assert.ok(r1.ok, JSON.stringify(r1));
+  let names = ctx.getContactNames_(dcToken).data.names;
+  assert.strictEqual(names['執行幹事|2835 7711|0'], '陳大文先生（新）');
+  // 留空 = 還原（刪走自訂）
+  assert.ok(ctx.saveContactName_(dcToken, '執行幹事|2835 7711|0', '').ok);
+  names = ctx.getContactNames_(dcToken).data.names;
+  assert.strictEqual(names['執行幹事|2835 7711|0'], undefined);
+  const rAl = ctx.saveContactName_(alToken, '執行幹事|2835 7711|0', '唔應該改到');
+  assert.strictEqual(rAl.ok, false);
 });
 
 check('limit 上限 50、預設 20', () => {
@@ -262,9 +308,9 @@ check('doGet 公開路由 listAnnouncements 通', () => {
   assert.ok(parsed.data.length >= 0);
 });
 
-check('健康檢查版本 4.8.1', () => {
+check('健康檢查版本 4.9.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.8.1');
+  assert.strictEqual(parsed.data.version, '4.9.0');
 });
 
 // ───────────────────────────────────────────────────────────

@@ -1,9 +1,10 @@
 'use client';
 /**
- * 📇 聯結簿 — 三個分頁：旅團 / 港島地域 / 總會
+ * 📇 聯絡簿 — 三個分頁：旅團 / 港島地域 / 總會（v4.9.0 由「聯結簿」改名）
  * 旅團資料由區方稍後提供（先保留結構 + Config TROOP_LIST 旅號清單）；
  * 港島地域分頁只放「職員直線電話」（v4.5.0：總監架構搬去 /orgchart），
  * 職員表及總會各署電話由 /api/external 即時讀官方網頁，讀唔到先用 lib/contactsDirectory.ts 備援。
+ * v4.9.0：電話唔變但人會轉 — 地域職員姓名可以由 ADC+ 直接改（存後台，全區同步）。
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -11,10 +12,11 @@ import Link from 'next/link';
 import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
+import { levelOf, LEVEL_ADC } from '@/lib/levels';
 import BackLink, { BackBar } from '@/components/BackLink';
 import { SOURCES } from '@/lib/externalSources';
 import {
-  HQ_GROUPS, HQ_OFFICE, REGION_GROUPS, REGION_OFFICE, TROOP_ROWS, staffEmailFor, type ContactGroup, type ContactRow,
+  HQ_GROUPS, HQ_OFFICE, REGION_GROUPS, REGION_OFFICE, TROOP_ROWS, applyContactNames, staffEmailFor, type ContactGroup, type ContactRow,
 } from '@/lib/contactsDirectory';
 
 interface LiveState { live: boolean; updated?: string; fetchedAt?: string; stale?: string }
@@ -46,13 +48,24 @@ function matches(r: ContactRow, q: string) {
   return s.includes(q.toLowerCase());
 }
 
-function GroupTable({ g, q }: { g: ContactGroup; q: string }) {
+function GroupTable({ g, q, canEditNames, onEditName }: {
+  g: ContactGroup; q: string;
+  canEditNames?: boolean;
+  onEditName?: (r: ContactRow & { nameKey?: string; nameCustom?: boolean }) => void;
+}) {
   const rows = g.rows.filter(r => matches(r, q));
   if (!rows.length) return null;
   const hasTel = rows.some(r => r.tel), hasMail = rows.some(r => r.email), hasNote = rows.some(r => r.note || r.fax);
+  const nameEditable = canEditNames && !!onEditName;
   return (
     <section className="info-card">
-      <div className="section-head"><div><h3>{g.icon} {g.title} <small>({rows.length})</small></h3>{g.intro && <p>{g.intro}</p>}</div></div>
+      <div className="section-head">
+        <div>
+          <h3>{g.icon} {g.title} <small>({rows.length})</small></h3>
+          {g.intro && <p>{g.intro}</p>}
+          {nameEditable && <p className="fps-help">✏️ 電話唔變但人會轉：撳姓名旁邊嘅「✎」就可以改姓名（全區同步），電話照跟官方同步。</p>}
+        </div>
+      </div>
       <div className="mtx-scroll">
         <table className="perm-table dir-table">
           <thead>
@@ -68,7 +81,13 @@ function GroupTable({ g, q }: { g: ContactGroup; q: string }) {
             {rows.map((r, i) => (
               <tr key={i}>
                 <td style={{ textAlign: 'left', fontWeight: 700 }}>{r.post}</td>
-                <td style={{ textAlign: 'left' }}>{r.name || <span className="muted">—</span>}</td>
+                <td style={{ textAlign: 'left' }}>
+                  {r.name || <span className="muted">—</span>}
+                  {'nameCustom' in r && (r as { nameCustom?: boolean }).nameCustom && <span className="dir-name-tag" title="區方自訂姓名（官方名可能未更新）">改</span>}
+                  {nameEditable && 'nameKey' in r && (
+                    <button type="button" className="dir-name-edit" title="改姓名（全區同步）" onClick={() => onEditName?.(r)}>✎</button>
+                  )}
+                </td>
                 {hasTel && <td style={{ textAlign: 'left', whiteSpace: 'nowrap' }}>{r.tel ? <a href={telHref(r.tel)}>{r.tel}</a> : <span className="muted">—</span>}</td>}
                 {hasMail && <td style={{ textAlign: 'left' }}>{r.email ? <a href={`mailto:${r.email}`}>{r.email}</a> : <span className="muted">—</span>}</td>}
                 {hasNote && <td style={{ textAlign: 'left', fontSize: 12, color: '#475569' }}>{[r.fax ? `傳真 ${r.fax}` : '', r.note || ''].filter(Boolean).join(' · ')}</td>}
@@ -112,6 +131,11 @@ export default function ContactsPage() {
   const [regionSync, setRegionSync] = useState<LiveState>({ live: false, updated: REGION_OFFICE.updated });
   const [hqGroups, setHqGroups] = useState<ContactGroup[]>(HQ_GROUPS);
   const [hqSync, setHqSync] = useState<LiveState>({ live: false });
+  // v4.9.0：地域職員姓名區方自訂（電話唔變人會轉）
+  const canEditNames = !!session && levelOf(session) <= LEVEL_ADC;
+  const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
+  const [editingName, setEditingName] = useState<{ row: ContactRow & { nameKey?: string; nameCustom?: boolean }; value: string } | null>(null);
+  const [nameBusy, setNameBusy] = useState(false);
 
   // 旅號清單：先讀 Config TROOP_LIST（活動知會表同一份）
   useEffect(() => {
@@ -159,13 +183,45 @@ export default function ContactsPage() {
   const regionCount = useMemo(() => regionGroups.reduce((n, g) => n + g.rows.filter(r => matches(r, q)).length, 0), [regionGroups, q]);
   const hqCount = useMemo(() => hqGroups.reduce((n, g) => n + g.rows.filter(r => matches(r, q)).length, 0), [hqGroups, q]);
 
+  // 載入區方自訂姓名（ADC+ 或一般成員都攞 — 全區睇同一份）
+  useEffect(() => {
+    if (!session) return;
+    (async () => {
+      try {
+        const r = await api.getContactNames(session.token);
+        if (r.ok && r.data?.names) setNameOverrides(r.data.names);
+      } catch { /* ignore */ }
+    })();
+  }, [session]);
+
+  /** 套用自訂姓名落 region staff group（同步同備援都用同一套 key） */
+  const regionGroupsWithNames = useMemo(() => regionGroups.map(g => (
+    g.id === 'staff' ? { ...g, rows: applyContactNames(g.rows, nameOverrides) } : g
+  )), [regionGroups, nameOverrides]);
+
+  async function saveName() {
+    if (!session || !editingName?.row.nameKey) return;
+    setNameBusy(true);
+    const r = await api.saveContactName(session.token, editingName.row.nameKey, editingName.value.trim());
+    setNameBusy(false);
+    if (r.ok) {
+      setNameOverrides(prev => {
+        const next = { ...prev };
+        const v = editingName.value.trim();
+        if (v) next[editingName.row.nameKey!] = v; else delete next[editingName.row.nameKey!];
+        return next;
+      });
+      setEditingName(null);
+    }
+  }
+
   if (!session) return <div className="center"><div className="spinner" /></div>;
 
   return (
     <>
       <BackLink />
-      <h1 className="page-title">📇 聯結簿</h1>
-      <p className="page-sub">旅團 · 港島地域 · 總會 聯絡資料；手機上按電話即可致電、按電郵即可寫信。</p>
+      <h1 className="page-title">📇 聯絡簿</h1>
+      <p className="page-sub">聯絡電話為主：旅團 · 港島地域 · 總會；手機上按電話即可致電、按電郵即可寫信。</p>
 
       <div className="inc-tabs" role="tablist">
         {TABS.map(t => (
@@ -205,7 +261,7 @@ export default function ContactsPage() {
               <div className="placeholder-box" style={{ padding: 22 }}>
                 <div className="big">🏕</div>
                 <p style={{ fontWeight: 700, color: '#003366', marginBottom: 6 }}>等待區方提供旅團資料</p>
-                <p style={{ fontSize: 13, color: '#475569' }}>格式建議：旅號 / 主辦機構 / 支部 / 旅長 / 電話 / 電郵 / 集會時間地點。提供後可匯入 Google Sheet，聯結簿即時顯示。</p>
+                <p style={{ fontSize: 13, color: '#475569' }}>格式建議：旅號 / 主辦機構 / 支部 / 旅長 / 電話 / 電郵 / 集會時間地點。提供後可匯入 Google Sheet，聯絡簿即時顯示。</p>
               </div>
             )}
           </section>
@@ -216,7 +272,9 @@ export default function ContactsPage() {
         <>
           <OfficeCard o={{ ...REGION_OFFICE, updated: regionSync.updated || REGION_OFFICE.updated }} />
           {q && <p className="fps-help">符合「{q}」：{regionCount} 項</p>}
-          {regionGroups.map(g => <GroupTable key={g.id} g={g} q={q} />)}
+          {regionGroupsWithNames.map(g => (
+            <GroupTable key={g.id} g={g} q={q} canEditNames={canEditNames} onEditName={row => setEditingName({ row, value: row.name || '' })} />
+          ))}
           <SyncLine st={regionSync} source={SOURCES.hkirStaff} label="職員表" />
           <p className="fps-help">呢頁只放搵人解決問題用嘅職員直線電話；地域總監／區總監等架構請睇 <Link href={withDistrict('/orgchart')} style={{ textDecoration: 'underline' }}>🏛 地域及總會架構</Link>。地域職員個人電郵未有公開，一律經 hkir@scout.org.hk。</p>
         </>
@@ -230,6 +288,30 @@ export default function ContactsPage() {
           <SyncLine st={hqSync} source={SOURCES.hksaHq} label="總會各署電話" />
           <p className="fps-help">其他總部單位／五個地域辦事處／緊急電話為內建資料（2026-09 查閱）；總會領導層架構請睇 <Link href={withDistrict('/orgchart?tab=hksa')} style={{ textDecoration: 'underline' }}>🏛 地域及總會架構</Link>。</p>
         </>
+      )}
+      {editingName && (
+        <div className="inc-modal" onClick={() => setEditingName(null)}>
+          <div className="inc-modal-box" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <h3 style={{ marginBottom: 8 }}>✏️ 改姓名</h3>
+            <p className="fps-help" style={{ marginTop: 0 }}>
+              {editingName.row.post}{editingName.row.tel ? ` · ${editingName.row.tel}` : ''}
+              <br />電話唔會變（照跟官方同步）；淨係改顯示嘅姓名，全區即刻統一。留空＝還原官方同步名。
+            </p>
+            <label className="aw-field">
+              <span>姓名</span>
+              <input
+                autoFocus value={editingName.value} maxLength={60}
+                placeholder={editingName.row.nameCustom ? '（留空還原官方名）' : '例如：陳大文先生（Peter）'}
+                onChange={e => setEditingName({ ...editingName, value: e.target.value })}
+                onKeyDown={e => { if (e.key === 'Enter') saveName(); }}
+              />
+            </label>
+            <div className="inc-submit-actions" style={{ marginTop: 14 }}>
+              <button className="btn-sm" disabled={nameBusy} onClick={saveName}>{nameBusy ? '儲存中…' : '儲存'}</button>
+              <button className="lock-btn" onClick={() => setEditingName(null)}>取消</button>
+            </div>
+          </div>
+        </div>
       )}
       <BackBar />
     </>

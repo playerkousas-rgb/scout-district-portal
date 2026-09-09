@@ -702,7 +702,7 @@ function UnitsTab({ board, canEdit, token, reload, flash, setError }: {
         <div className="section-head">
           <div>
             <h3>全區旅團名單（{rows.length}）</h3>
-            <p>預設跟港島地域官網「筲箕灣區旅團一覽表」。改咗之後，「活動知會」同「聯結簿」嘅旅號清單都會一齊更新。</p>
+            <p>預設跟港島地域官網「筲箕灣區旅團一覽表」。改咗之後，「活動知會」同「聯絡簿」嘅旅號清單都會一齊更新。</p>
           </div>
           {canEdit && (
             <div style={{ display: 'flex', gap: 8 }}>
