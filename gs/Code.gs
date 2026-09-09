@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.12.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.13.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -298,7 +298,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.12.0',
+      version: '4.13.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -2066,10 +2066,12 @@ function circularRow_(r) {
     fee: String(r.fee == null ? '' : r.fee).trim(),
     originalFee: String(r.originalFee == null ? '' : r.originalFee).trim(),
     subsidyNote: String(r.subsidyNote == null ? '' : r.subsidyNote),
+    feeNote: String(r.feeNote == null ? '' : r.feeNote),
     quota: String(r.quota == null ? '' : r.quota).trim(),
     deadline: circularDate_(r.deadline),
     courseId: String(r.courseId == null ? '' : r.courseId).trim(),
     signupUrl: String(r.signupUrl || r.formUrl || '').trim(),
+    signupNote: String(r.signupNote == null ? '' : r.signupNote),
     uniform: String(r.uniform == null ? '' : r.uniform),
     remarks: String(r.remarks == null ? '' : r.remarks),
     contactName: String(r.contactName == null ? '' : r.contactName).trim(),
@@ -2118,9 +2120,9 @@ function circularStaff_(n, today) {
     id: n.id, districtCode: n.districtCode, circularNo: n.circularNo,
     category: n.category, title: n.title, sections: n.sections, sessions: n.sessions,
     leader: n.leader, eligibility: n.eligibility,
-    fee: n.fee, originalFee: n.originalFee, subsidyNote: n.subsidyNote,
+    fee: n.fee, originalFee: n.originalFee, subsidyNote: n.subsidyNote, feeNote: n.feeNote,
     quota: n.quota, deadline: n.deadline,
-    courseId: n.courseId, course: circularCourse_(n.courseId), signupUrl: n.signupUrl,
+    courseId: n.courseId, course: circularCourse_(n.courseId), signupUrl: n.signupUrl, signupNote: n.signupNote,
     uniform: n.uniform, remarks: n.remarks,
     contactName: n.contactName, contactEmail: n.contactEmail, contactPhone: n.contactPhone,
     enquiryNote: n.enquiryNote, attachments: n.attachments,
@@ -2192,10 +2194,12 @@ function saveCircular_(token, c) {
     fee: str(c.fee, 40),
     originalFee: str(c.originalFee, 40),
     subsidyNote: big(c.subsidyNote),
+    feeNote: big(c.feeNote),
     quota: str(c.quota, 20),
     deadline: circularDate_(c.deadline),
     courseId: str(c.courseId, 60),
     signupUrl: str(c.signupUrl || c.formUrl, 500),
+    signupNote: big(c.signupNote),
     uniform: big(c.uniform),
     remarks: big(c.remarks),
     contactName: str(c.contactName, 120),
@@ -4702,8 +4706,8 @@ function blueprint_() {
 
     { name: SHEET.CIRCULARS, rows: [
       ['id', 'districtCode', 'circularNo', 'category', 'title', 'sections', 'sessions',
-        'leader', 'eligibility', 'fee', 'originalFee', 'subsidyNote', 'quota', 'deadline',
-        'courseId', 'signupUrl', 'uniform', 'remarks', 'contactName', 'contactEmail',
+        'leader', 'eligibility', 'fee', 'originalFee', 'subsidyNote', 'feeNote', 'quota', 'deadline',
+        'courseId', 'signupUrl', 'signupNote', 'uniform', 'remarks', 'contactName', 'contactEmail',
         'contactPhone', 'enquiryNote', 'attachments', 'issueDate', 'issuer', 'signedBy',
         'status', 'publishedAt', 'publishedBy', 'updatedAt', 'createdAt'],
     ] },

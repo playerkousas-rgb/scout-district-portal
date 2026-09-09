@@ -203,6 +203,29 @@ export interface CourseProfile {
   budgetApproved: string;
   subsidyRequired: string;
   pulledAt: string;
+  circular?: CourseProfileCircular | null;  // Print_通告內文（冇呢頁就 null）
+}
+
+/** Print_通告讀出嚟嘅內文（B 欄 label 對位；供通告記錄一鍵預填） */
+export interface CourseProfileCircular {
+  title: string;
+  fileNo: string;         // 檔案編號（純數字先會代入通告編號）
+  fileNoRaw: string;
+  issueDate: string;      // 發出日期原文（中文寫法）
+  issueDateISO: string;   // 發出日期 yyyy-MM-dd（解唔到就空字串）
+  leaderText: string;
+  eligibility: string;
+  feeText: string;        // C24 費用說明
+  payText: string;        // C25 FPS 段（portal 自己印 QR，呢段只作參考）
+  quotaText: string;
+  deadlineText: string;
+  signupText: string;     // C30 報名辦法
+  uniform: string;
+  remarks: string[];
+  enquiry: string;        // C39 查詢句
+  signer: string;         // E43 區總監簽署
+  deputy: string;         // E45 代行（已剔符號）
+  deputyRaw: string;
 }
 
 // ===================== 一次性服務：借場 / 借物資 / 知會 =====================
@@ -513,7 +536,7 @@ export interface VisitBoard {
 }
 
 /**
- * 📜 區通告（v4.12.0）— Circulars 表（職員專用；輸出傳統格式 PDF）。
+ * 📜 區通告（v4.13.0）— Circulars 表（職員專用；輸出傳統格式 PDF）。
  * 訓練班 Sheet → 訓練班目錄 → 通告草稿自動預填 → 列印 PDF 上載區網／交總會。
  * sessions／attachments 喺 Sheet 以 JSON 字串存，API 讀寫都係陣列。
  */
@@ -554,10 +577,12 @@ export interface Circular {
   fee?: string;                   // 費用（字串：100／免費／詳見內文…）
   originalFee?: string;
   subsidyNote?: string;
+  feeNote?: string;               // 費用說明全文（訓練班 Sheet 通告 C24；有就代替組合句列印）
   quota?: string;
   deadline?: string;              // 截止日期 yyyy-MM-dd
   courseId?: string;              // 掛接訓練班（報名直達；留空＝純通告）
   signupUrl?: string;              // 報名連結（成員系統訓練班頁；列印為報名辦法文字）
+  signupNote?: string;            // 報名辦法全文（訓練班 Sheet 通告 C30；列印喺連結上面）
   uniform?: string;               // 服裝
   remarks?: string;               // 備註
   contactName?: string;           // 查詢聯絡人

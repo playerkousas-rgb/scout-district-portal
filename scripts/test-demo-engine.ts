@@ -184,9 +184,12 @@ check('通告：3 張種子＋suggestedNo＝最大編號＋1；published 未過�
 check('通告：編號重複被擋；開草稿→發佈（publishedAt 只設一次）→截止→封存→刪除', () => {
   const dup = demoCall('saveCircular', { token: T.adc, circular: { circularNo: '2607', title: '撞號' } }, 'POST');
   assert.strictEqual(dup.ok, false);
-  const created = demoCall('saveCircular', { token: T.adc, circular: { circularNo: '2613', title: '測試通告', category: '訓練班', sessions: [{ date: 'd', time: 't', venue: 'v' }], status: 'draft' } }, 'POST');
+  const created = demoCall('saveCircular', { token: T.adc, circular: { circularNo: '2613', title: '測試通告', category: '訓練班', sessions: [{ date: 'd', time: 't', venue: 'v' }], feeNote: '費用說明', signupNote: '報名辦法', status: 'draft' } }, 'POST');
   assert.ok(created.ok && created.data.created);
   const id = created.data.id;
+  const gotNew = demoCall('getCirculars', { token: T.adc }, 'GET').data.items.find((n: any) => n.id === id);
+  assert.strictEqual(gotNew.feeNote, '費用說明');
+  assert.strictEqual(gotNew.signupNote, '報名辦法');
   const p1 = demoCall('setCircularStatus', { token: T.adc, id, status: 'published' }, 'POST');
   assert.ok(p1.ok);
   const at1 = demoCall('getCirculars', { token: T.adc }, 'GET').data.items.find((n: any) => n.id === id).publishedAt;
@@ -207,6 +210,8 @@ check('pullCourseProfile：冇 URL 被擋；有 URL 回示範 profile（Input02 
   assert.ok(Array.isArray(r.data.sessions) && r.data.sessions.length >= 2);
   assert.ok(r.data.sessions.some((x: any) => x.showOnCircular && x.displayDate), '至少一節上通告');
   assert.ok(r.data.leader && /班領導人/.test(r.data.leader.role), '要有班領導人');
+  assert.ok(r.data.circular && r.data.circular.feeText && r.data.circular.signupText, '要有 Print_通告內文');
+  assert.ok(Array.isArray(r.data.circular.remarks) && r.data.circular.remarks.length >= 1);
 });
 
 // ── 10. 重設 ──

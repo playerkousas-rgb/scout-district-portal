@@ -1,6 +1,6 @@
 'use client';
 /**
- * 📜 區通告（v4.12.0；職員專用，PDF only）— 開班文件 → 傳統通告 → 列印 PDF 上載區網。
+ * 📜 區通告（v4.13.0；職員專用，PDF only）— 開班文件 → 傳統通告 → 列印 PDF 上載區網。
  * 訓練班 Sheet → 訓練班目錄 → 呢度「從訓練班帶入」預填 → 列印 PDF → 上載區網／交總會。
  * 通告編號人手輸入（跨類別共用區編號順序）；高層可查閱全部狀態。
  */
@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
-import type { Circular, CircularAttachment, CircularSession, CircularStatus, CourseLink, UserSession } from '@/lib/types';
+import type { Circular, CircularAttachment, CircularSession, CircularStatus, CourseLink, CourseProfile, UserSession } from '@/lib/types';
 import { DEFAULT_FPS_ACCOUNT, normalizeFpsId } from '@/lib/fps';
 import CircularView, { CIRCULAR_CATEGORIES, CIRCULAR_SECTIONS, CIRCULAR_STATUS_LABEL } from '@/components/CircularView';
 import BackLink, { BackBar } from '@/components/BackLink';
@@ -16,7 +16,7 @@ import BackLink, { BackBar } from '@/components/BackLink';
 type Draft = {
   id: string; circularNo: string; category: string; title: string; sections: string[];
   sessions: CircularSession[]; leader: string; eligibility: string; fee: string; originalFee: string;
-  subsidyNote: string; quota: string; deadline: string; courseId: string; signupUrl: string;
+  subsidyNote: string; feeNote: string; quota: string; deadline: string; courseId: string; signupUrl: string; signupNote: string;
   uniform: string; remarks: string; contactName: string; contactEmail: string; contactPhone: string;
   enquiryNote: string; attachments: CircularAttachment[]; issueDate: string; issuer: string; signedBy: string;
 };
@@ -25,8 +25,8 @@ function today() { return new Date().toISOString().slice(0, 10); }
 function emptyDraft(suggestedNo = ''): Draft {
   return {
     id: '', circularNo: suggestedNo, category: '訓練班', title: '', sections: [], sessions: [{ date: '', time: '', venue: '' }],
-    leader: '', eligibility: '', fee: '', originalFee: '', subsidyNote: '', quota: '', deadline: '',
-    courseId: '', signupUrl: '', uniform: '', remarks: '', contactName: '', contactEmail: '', contactPhone: '',
+    leader: '', eligibility: '', fee: '', originalFee: '', subsidyNote: '', feeNote: '', quota: '', deadline: '',
+    courseId: '', signupUrl: '', signupNote: '', uniform: '', remarks: '', contactName: '', contactEmail: '', contactPhone: '',
     enquiryNote: '', attachments: [], issueDate: today(), issuer: '', signedBy: '',
   };
 }
@@ -37,8 +37,8 @@ function toDraft(c: Circular): Draft {
     sessions: (Array.isArray(c.sessions) && c.sessions.length ? c.sessions : [{ date: '', time: '', venue: '' }])
       .map(r => ({ date: r.date || '', time: r.time || '', venue: r.venue || '' })),
     leader: c.leader || '', eligibility: c.eligibility || '', fee: c.fee || '', originalFee: c.originalFee || '',
-    subsidyNote: c.subsidyNote || '', quota: c.quota || '', deadline: c.deadline || '',
-    courseId: c.courseId || '', signupUrl: c.signupUrl || '', uniform: c.uniform || '', remarks: c.remarks || '',
+    subsidyNote: c.subsidyNote || '', feeNote: c.feeNote || '', quota: c.quota || '', deadline: c.deadline || '',
+    courseId: c.courseId || '', signupUrl: c.signupUrl || '', signupNote: c.signupNote || '', uniform: c.uniform || '', remarks: c.remarks || '',
     contactName: c.contactName || '', contactEmail: c.contactEmail || '', contactPhone: c.contactPhone || '',
     enquiryNote: c.enquiryNote || '',
     attachments: (Array.isArray(c.attachments) ? c.attachments : []).map(a => ({ label: a.label || '', url: a.url || '' })),
@@ -51,8 +51,8 @@ function toPayload(d: Draft, status: CircularStatus): Partial<Circular> {
     sections: d.sections.join('、'),
     sessions: d.sessions.filter(r => r.date.trim() || r.time.trim() || r.venue.trim()),
     leader: d.leader.trim(), eligibility: d.eligibility, fee: d.fee.trim(), originalFee: d.originalFee.trim(),
-    subsidyNote: d.subsidyNote, quota: d.quota.trim(), deadline: d.deadline.trim(),
-    courseId: d.courseId.trim(), signupUrl: d.signupUrl.trim(), uniform: d.uniform, remarks: d.remarks,
+    subsidyNote: d.subsidyNote, feeNote: d.feeNote, quota: d.quota.trim(), deadline: d.deadline.trim(),
+    courseId: d.courseId.trim(), signupUrl: d.signupUrl.trim(), signupNote: d.signupNote, uniform: d.uniform, remarks: d.remarks,
     contactName: d.contactName.trim(), contactEmail: d.contactEmail.trim(), contactPhone: d.contactPhone.trim(),
     enquiryNote: d.enquiryNote,
     attachments: d.attachments.filter(a => a.label.trim() || a.url.trim()),
@@ -159,33 +159,50 @@ export default function CircularsPage() {
     setDraft(d => ({ ...d, sections: d.sections.includes(s) ? d.sections.filter(x => x !== s) : [...d.sections, s] }));
   }
 
-  /** 從已選訓練班帶入節數／收費／名額／截止等（唔會郁標題同編號；有料嘅欄唔會被覆蓋） */
-  function autofillFromCourse() {
+  /** 從訓練班 Sheet 即時 pull 預填（profile＋Print_通告內文；只填空欄，有料唔會被覆蓋） */
+  async function autofillFromCourse() {
+    if (!session) return;
     if (!linkedCourse) { setError('請先喺「掛接訓練班」揀一個班'); return; }
-    setError('');
+    setError(''); setMsg(''); setBusy('pull');
+    const r = await api.pullCourseProfile(session.token, { courseId: linkedCourse.courseId });
+    setBusy('');
+    if (!r.ok || !r.data) { setError(r.error || '讀取訓練班 Sheet 失敗'); return; }
+    const prof: CourseProfile = r.data;
+    const circ = prof.circular || null;
+    const flagged = (prof.sessions || []).filter(x => x.showOnCircular);
+    const useSessions = (flagged.length ? flagged : (prof.sessions || []))
+      .map(x => ({ date: x.displayDate || x.date || '', time: x.displayTime || x.time || '', venue: x.displayVenue || x.venue || '' }))
+      .filter(x => x.date || x.time || x.venue);
+    const leader = prof.leader;
+    const leaderLine = leader ? `${leader.name || ''}${leader.title || ''}${leader.qualification ? `（${leader.qualification}）` : ''}` : '';
     setDraft(d => {
-      let sessions = d.sessions;
-      const curEmpty = d.sessions.every(r => !r.date.trim() && !r.time.trim() && !r.venue.trim());
-      if (curEmpty && linkedCourse.sessionsText) {
-        const parsed = linkedCourse.sessionsText.split('；').map(x => x.trim()).filter(Boolean).map(x => {
-          const parts = x.split(/\s+/);
-          return { date: parts[0] || '', time: parts[1] || '', venue: parts.slice(2).join(' ') || '' };
-        }).filter(r => r.date || r.time || r.venue);
-        if (parsed.length) sessions = parsed;
-      }
+      const curEmpty = d.sessions.every(x => !x.date.trim() && !x.time.trim() && !x.venue.trim());
+      const fileNo = (circ?.fileNo || '').trim();
       return {
         ...d,
-        sessions,
-        eligibility: d.eligibility || linkedCourse.eligibility || '',
-        fee: d.fee || (linkedCourse.fee ? String(linkedCourse.fee) : ''),
+        sessions: curEmpty && useSessions.length ? useSessions : d.sessions,
+        leader: d.leader || leaderLine,
+        eligibility: d.eligibility || circ?.eligibility || linkedCourse.eligibility || '',
+        fee: d.fee || prof.fee || (linkedCourse.fee ? String(linkedCourse.fee) : ''),
+        feeNote: d.feeNote || circ?.feeText || '',
         subsidyNote: d.subsidyNote || linkedCourse.subsidyNote || '',
-        deadline: d.deadline || linkedCourse.deadline || '',
-        quota: d.quota || (linkedCourse.quota ? String(linkedCourse.quota) : ''),
-        contactName: d.contactName || linkedCourse.contact || '',
+        deadline: d.deadline || prof.deadline || linkedCourse.deadline || '',
+        quota: d.quota || prof.quota || (linkedCourse.quota ? String(linkedCourse.quota) : ''),
+        uniform: d.uniform || circ?.uniform || '',
+        remarks: d.remarks || (circ?.remarks || []).join('\n'),
+        contactName: d.contactName || leaderLine || linkedCourse.contact || '',
+        contactEmail: d.contactEmail || leader?.email || '',
+        contactPhone: d.contactPhone || leader?.phone || '',
+        enquiryNote: d.enquiryNote || circ?.enquiry || '',
         signupUrl: d.signupUrl || defaultSignupUrl(),
+        signupNote: d.signupNote || circ?.signupText || '',
+        circularNo: d.circularNo || (/^\d{1,6}$/.test(fileNo) ? fileNo : d.circularNo),
+        issueDate: d.issueDate || circ?.issueDateISO || d.issueDate,
+        issuer: d.issuer || (circ?.signer ? `區總監 ${circ.signer}` : ''),
+        signedBy: d.signedBy || circ?.deputy || '',
       };
     });
-    setMsg(`已從「${linkedCourse.title}」帶入節數／收費／名額／截止 ✓（標題同編號唔會郁）`);
+    setMsg(`已從「${prof.courseName || linkedCourse.title}」帶入節數／收費／名額／截止／通告內文 ✓（有料嘅欄冇郁）`);
   }
 
   async function save(status: CircularStatus) {
@@ -257,9 +274,9 @@ export default function CircularsPage() {
         <div className="info-card" style={{ borderColor: '#fbbf24', background: '#fffbeb' }}>
           <h3>⚠️ 後台未更新</h3>
           <p style={{ fontSize: 13, lineHeight: 1.8 }}>
-            區 Google Sheet 嘅 Apps Script 仲係舊版。請將本 repo <code>gs/Code.gs</code>（v4.12.0）全部覆蓋貼上 →
+            區 Google Sheet 嘅 Apps Script 仲係舊版。請將本 repo <code>gs/Code.gs</code>（v4.13.0）全部覆蓋貼上 →
             執行 <code>setupSheets()</code>（補建唔清空）→ 重新部署 Web App。
-            驗證：<code>?action=getHealthCheck</code> 見到 <code>version: &quot;4.12.0&quot;</code>。
+            驗證：<code>?action=getHealthCheck</code> 見到 <code>version: &quot;4.13.0&quot;</code>。
           </p>
         </div>
       )}
@@ -362,6 +379,10 @@ export default function CircularsPage() {
               <textarea value={draft.subsidyNote} rows={2} placeholder="例如：本活動原價港幣 200 元，因獲資助計劃資助，費用減半。" onChange={e => set('subsidyNote', e.target.value)} />
             </label>
             <label className="news-field">
+              <span>費用說明全文（有就代替組合句）</span>
+              <textarea value={draft.feeNote} rows={2} placeholder="由訓練班 Sheet 通告帶入，例如：活動費用港幣 25 元正（包括行政、茶點等）。" onChange={e => set('feeNote', e.target.value)} />
+            </label>
+            <label className="news-field">
               <span>名額</span>
               <input value={draft.quota} placeholder="例如 30" onChange={e => set('quota', e.target.value)} />
             </label>
@@ -389,6 +410,7 @@ export default function CircularsPage() {
           </div>
           <div className="account-form" style={{ flexWrap: 'wrap', display: 'flex', gap: 8, marginTop: 8 }}>
             <input placeholder="報名連結（成員系統訓練班頁；列印為報名辦法文字）" value={draft.signupUrl} onChange={e => set('signupUrl', e.target.value)} style={{ flex: 1, minWidth: 280 }} />
+            <input placeholder="報名辦法全文（選填；由訓練班 Sheet 通告帶入，列印喺連結上面）" value={draft.signupNote} onChange={e => set('signupNote', e.target.value)} style={{ flex: 1, minWidth: 280 }} />
             {defaultSignupUrl() && !draft.signupUrl && (
               <button className="mini-btn" onClick={() => set('signupUrl', defaultSignupUrl())} title="填入成員系統訓練班頁網址">填入成員系統連結</button>
             )}

@@ -264,8 +264,8 @@ export function demoCirculars(): Record<string, any>[] {
         { date: '2026年7月27日（星期一）', time: '晚上7時至晚上10時', venue: '區總部 1704 室' },
       ],
       leader: '楊德銘先生', eligibility: '1．已宣誓及持有有效紀錄冊之童軍支部成員；\n2．港島地域成員將獲優先取錄。',
-      fee: '100', originalFee: '', subsidyNote: '', quota: '30', deadline: dateOnly(-20), courseId: 'cl-01',
-      signupUrl: '', uniform: '整齊童軍制服',
+      fee: '100', originalFee: '', subsidyNote: '', feeNote: '活動費用港幣100元正（包括行政、茶點及膳食等）。', quota: '30', deadline: dateOnly(-20), courseId: 'cl-01',
+      signupUrl: '', signupNote: '請於筲箕灣區成員系統訓練班版面填妥網上報名表。', uniform: '整齊童軍制服',
       remarks: '1．報名前須獲得家長及旅團領袖同意；\n2．學員必須全期出席，不得遲到或早退。',
       contactName: '楊德銘', contactEmail: 'civics@demo', contactPhone: '5721 1100', enquiryNote: '',
       attachments: [], issueDate: dateOnly(-30), issuer: '區總監 陳大文', signedBy: '',
@@ -315,6 +315,16 @@ export function demoCourseProfile(): Record<string, any> {
       { date: dateOnly(-42), time: '0900 - 1700', venue: '區總部' },
     ],
     budgetApproved: '500', subsidyRequired: '-1100',
+    circular: {
+      title: '第1屆急救工作坊（示範）', fileNo: '2613', fileNoRaw: '檔案編號: 2613',
+      issueDate: '2026年9月1日', issueDateISO: dateOnly(-8),
+      leaderText: '陳大文先生（急救教練員）',
+      eligibility: '已宣誓及持有有效紀錄冊之童軍支部成員。',
+      feeText: '活動費用港幣25元正（包括行政及茶點）。', payText: '',
+      quotaText: '22人', deadlineText: '', signupText: '請於筲箕灣區成員系統訓練班版面填妥網上報名表。',
+      uniform: '整齊童軍制服', remarks: ['1. 學員必須全期出席，不得遲到或早退。'], enquiry: '如有查詢請與班領導人聯絡。',
+      signer: '陳大文', deputy: '', deputyRaw: '',
+    },
     pulledAt: new Date().toISOString(),
   };
 }

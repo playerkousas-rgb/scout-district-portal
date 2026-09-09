@@ -5,6 +5,15 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.13.0 — 📘 訓練班工作簿跟足開班文件格式＋ CL 填一次</h3>
+        <ul>
+          <li>📘 <b>收表 Script 模版重寫做足全本工作簿</b>：Input01 預算（8 大開支分類＋公式）、Input02 資料（黃格自動帶入＋✓上通告剔格＋20 個預設職位）、Input03 時間表、Input04 支出表、12 張 Print（通告／取錄／合格／學員／出席／接納／收支／班職員／資助／完成報告／財政預算／領取證書，全部自動由 Input／報名數據帶入）、表格回應 36 欄、參數 22 欄（110 項專章＋區會＋地域＋職位等）—— 分頁名／欄位／行位跟足實物，日後其他系統接入都認得</li>
+          <li>✍️ <b>CL 填一次流程</b>：ADC 下載模版交 CL → CL 填 Input＋執 Print_通告（標題／節數／名額／截止／報名辦法／查詢自動帶入，只補參加資格／費用／服裝／備註）→ 交區總監審批 → PDF 交網頁管理員上載 ＋ ADC 喺平台開班登記，收費／名額／截止<b>唔使重打</b></li>
+          <li>📜 <b>「從訓練班帶入資料」升級</b>：即時由該班 Sheet pull 通告內文（參加資格／費用說明／服裝／備註／查詢／報名辦法／署名代行／檔案編號／發出日期），只填空欄；報名辦法預設成員系統（唔用 Google Form）。通告加兩個欄 <code>feeNote</code>／<code>signupNote</code></li>
+          <li>⚠️ 要換新 <code>Code.gs</code>（v4.13.0）→ <code>setupSheets()</code>（自動補兩欄）→ 重新部署；訓練班模版要更新：<b>新開班</b>用新模版一鍵建表，<b>舊班</b>將新模版覆蓋貼上就得（千祈唔好重跑 setup，會清空）。member-portal <b>唔使改</b></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.12.0 — 📥 開班自動讀 Sheet + 📜 區通告列印 PDF</h3>
         <ul>
           <li>📥 <b>「🎓 訓練班管理」新增「由訓練班 Sheet 讀取」</b>：貼上該班收表 Script <code>/exec</code>＋API Key 一撳，名稱／名額／收費／日期場地／截止／班領導人聯絡等由 <code>Input01</code>／<code>Input02</code> 自動帶入，ADC 唔使再人手重打；已開班都可以用 <code>courseId</code> 重讀。主後台 <code>pullCourseProfile</code> → 該班 Script <code>getCourseProfile</code>（label 對位，容忍實填版同模版版行號差異）</li>
@@ -216,7 +225,7 @@ export default function UpdatesPage() {
       </div>
       <div className="info-card">
         <h3>後台程式碼</h3>
-        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.12.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
+        <p style={{ fontSize: 13.5 }}>貼上呢份 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.13.0</a> 到 Apps Script，再執行選單「🧱 補建缺失表（不清空資料）」。只補唔洗，已填 Config／申請會保留。</p>
       </div>
     </>
   );

@@ -97,9 +97,31 @@ function templateInput02() {
   ];
 }
 
+function realNotice() {
+  const g = Array.from({ length: 50 }, () => ['', '', '', '', '', '', '']);
+  g[11][6] = '檔案編號: 2607';
+  g[12][6] = '2025年7月1日（星期二）';
+  g[14][0] = '第1屆工作坊';
+  g[21][1] = '班領導人：'; g[21][2] = '陳泳欣小姐（消防教練員）';
+  g[22][1] = '參加資格：'; g[22][2] = '已宣誓及持有有效紀錄冊之支部成員';
+  g[23][1] = '費 用：'; g[23][2] = '活動費用港幣25元正（包括茶點）。';
+  g[24][2] = '報名費用必須以轉數快繳付。帳戶識別碼 102866183。';
+  g[27][1] = '名 額：'; g[27][2] = '22人';
+  g[28][1] = '截止日期：'; g[28][2] = '2025年7月25日（星期五）';
+  g[29][1] = '報名辦法：'; g[29][2] = '請於成員系統訓練班版面填表報名。';
+  g[30][1] = '服 裝：'; g[30][2] = '整齊童軍制服';
+  g[31][1] = '備 註：'; g[31][2] = '1. 報名前須獲得家長同意；';
+  g[32][2] = '2. 學員必須全期出席。';
+  g[38][1] = '查 詢：'; g[38][2] = '如有查詢請與班領導人聯絡。';
+  g[42][4] = '袁可秀';
+  g[44][4] = '（楊德銘  代行）';
+  return g;
+}
+
 const sheets = {
   'Input01 訓練班預算': makeSheet('Input01 訓練班預算', realInput01()),
   'Input02 訓練班資料': makeSheet('Input02 訓練班資料', realInput02()),
+  'Print_通告': makeSheet('Print_通告', realNotice()),
 };
 
 const props = {};
@@ -254,11 +276,50 @@ check('template 版容忍：label 行即表頭＋六欄職員表都讀到', () =
   sheets['Input02 訓練班資料'] = keep;
 });
 
-check('profileDate_ 變體：ISO 原文／兩位年份／垃圾原文', () => {
+check('profileDate_ 變體：ISO 原文／兩位年份／中文日期／垃圾原文', () => {
   assert.strictEqual(ctx.profileDate_('2026-01-02'), '2026-01-02');
   assert.strictEqual(ctx.profileDate_('3/4/26'), '2026-04-03');
+  assert.strictEqual(ctx.profileDate_('2025年7月25日（星期五）'), '2025-07-25');
   assert.strictEqual(ctx.profileDate_('待定'), '待定');
   assert.strictEqual(ctx.profileDate_(''), '');
+});
+
+check('circular：Print_通告 B 欄 label 讀內文＋G12 編號／G13 日期／署名代行', () => {
+  const circ = plain(ctx.getCourseProfile_({ apiKey: KEY }).data.circular);
+  assert.strictEqual(circ.title, '第1屆工作坊');
+  assert.strictEqual(circ.fileNo, '2607');
+  assert.strictEqual(circ.issueDateISO, '2025-07-01');
+  assert.strictEqual(circ.leaderText, '陳泳欣小姐（消防教練員）');
+  assert.strictEqual(circ.eligibility, '已宣誓及持有有效紀錄冊之支部成員');
+  assert.strictEqual(circ.feeText, '活動費用港幣25元正（包括茶點）。');
+  assert.strictEqual(circ.payText, '報名費用必須以轉數快繳付。帳戶識別碼 102866183。');
+  assert.strictEqual(circ.quotaText, '22人');
+  assert.strictEqual(circ.signupText, '請於成員系統訓練班版面填表報名。');
+  assert.strictEqual(circ.uniform, '整齊童軍制服');
+  assert.deepStrictEqual(circ.remarks, ['1. 報名前須獲得家長同意；', '2. 學員必須全期出席。']);
+  assert.strictEqual(circ.enquiry, '如有查詢請與班領導人聯絡。');
+  assert.strictEqual(circ.signer, '袁可秀');
+  assert.strictEqual(circ.deputy, '楊德銘');
+});
+
+check('冇 Print_通告 → circular 係 null（唔報錯）', () => {
+  const keep = sheets['Print_通告'];
+  delete sheets['Print_通告'];
+  const d = ctx.getCourseProfile_({ apiKey: KEY }).data;
+  assert.strictEqual(d.circular, null);
+  assert.strictEqual(d.courseName, '第1屆工作坊');
+  sheets['Print_通告'] = keep;
+});
+
+check('✓上通告剔格 FALSE → 該節唔上通告（就算有通告顯示日期）', () => {
+  const v2 = realInput02();
+  v2[8][7] = false; // 第一節 H=FALSE
+  const keep = sheets['Input02 訓練班資料'];
+  sheets['Input02 訓練班資料'] = makeSheet('Input02 訓練班資料', v2);
+  const p = ctx.getCourseProfile_({ apiKey: KEY }).data;
+  assert.strictEqual(p.sessions[0].showOnCircular, false);
+  assert.strictEqual(p.sessions[0].displayDate, '2025年8月8日（星期五）');
+  sheets['Input02 訓練班資料'] = keep;
 });
 
 console.log(pass ? `\n全部通過（${pass} 項）✓` : '\n冇跑到任何測試');

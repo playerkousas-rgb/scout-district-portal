@@ -40,8 +40,8 @@ function makeSheet(name, rows) {
 }
 
 const CIRC_HEADERS = ['id', 'districtCode', 'circularNo', 'category', 'title', 'sections', 'sessions',
-  'leader', 'eligibility', 'fee', 'originalFee', 'subsidyNote', 'quota', 'deadline',
-  'courseId', 'signupUrl', 'uniform', 'remarks', 'contactName', 'contactEmail',
+  'leader', 'eligibility', 'fee', 'originalFee', 'subsidyNote', 'feeNote', 'quota', 'deadline',
+  'courseId', 'signupUrl', 'signupNote', 'uniform', 'remarks', 'contactName', 'contactEmail',
   'contactPhone', 'enquiryNote', 'attachments', 'issueDate', 'issuer', 'signedBy',
   'status', 'publishedAt', 'publishedBy', 'updatedAt', 'createdAt'];
 const LINK_HEADERS = ['courseId', 'districtCode', 'title', 'badgeName', 'section', 'courseNo', 'sessionsText',
@@ -156,10 +156,11 @@ check('編號／標題必填', () => {
 });
 
 let id2607;
-check('新增草稿：created＋預設 draft＋issueDate 預設今日＋signupUrl 照存', () => {
+check('新增草稿：created＋預設 draft＋issueDate 預設今日＋signupUrl／feeNote／signupNote 照存', () => {
   const r = ctx.saveCircular_(dcToken, {
     circularNo: '2607', title: '測試通告', category: '訓練班', issueDate: day(-30),
     signupUrl: 'https://member-portal-sigma-swart.vercel.app/training',
+    feeNote: '活動費用港幣25元正（包括茶點）。', signupNote: '請於成員系統報名。',
   });
   assert.ok(r.ok, JSON.stringify(r));
   assert.strictEqual(r.data.created, true);
@@ -167,6 +168,8 @@ check('新增草稿：created＋預設 draft＋issueDate 預設今日＋signupUr
   const got = ctx.getCirculars_(dcToken).data.items[0];
   assert.strictEqual(got.status, 'draft');
   assert.strictEqual(got.signupUrl, 'https://member-portal-sigma-swart.vercel.app/training');
+  assert.strictEqual(got.feeNote, '活動費用港幣25元正（包括茶點）。');
+  assert.strictEqual(got.signupNote, '請於成員系統報名。');
   assert.strictEqual(got.url, undefined, 'PDF-only：唔再有公開 url 欄');
 });
 

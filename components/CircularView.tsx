@@ -1,6 +1,6 @@
 'use client';
 /**
- * 📜 通告版面（v4.12.0）— 職員端預覽＋列印（傳統格式 PDF，例 2607）。
+ * 📜 通告版面（v4.13.0）— 職員端預覽＋列印（傳統格式 PDF，例 2607）。
  * 節數表／班領導人／參加資格／費用＋FPS QR／名額／截止／報名辦法／
  * 服裝／備註／查詢／署名。列印即成 PDF 上載區網（即時數據列印時自動隱藏）。
  */
@@ -94,11 +94,15 @@ export default function CircularView({ circular: c, districtName, districtCode, 
         {c.eligibility && (
           <><dt>參加資格</dt><dd className="prewrap">{c.eligibility}</dd></>
         )}
-        {(c.fee || c.originalFee || c.subsidyNote) && (
+        {(c.fee || c.originalFee || c.subsidyNote || c.feeNote) && (
           <>
             <dt>費　用</dt>
             <dd>
-              {c.fee && <div>活動費用港幣 <b>{c.fee}</b> 元正{c.originalFee ? `（原價港幣 ${c.originalFee} 元）` : ''}</div>}
+              {c.feeNote ? (
+                <div className="prewrap">{c.feeNote}</div>
+              ) : (
+                c.fee && <div>活動費用港幣 <b>{c.fee}</b> 元正{c.originalFee ? `（原價港幣 ${c.originalFee} 元）` : ''}</div>
+              )}
               {c.subsidyNote && <div className="prewrap" style={{ marginTop: 4 }}>{c.subsidyNote}</div>}
               {showFps && fpsAccount && (
                 <div className="circular-fps">
@@ -135,7 +139,11 @@ export default function CircularView({ circular: c, districtName, districtCode, 
           <>
             <dt>報名辦法</dt>
             <dd>
-              <div>成員須前往成員系統訓練班頁填表報名{c.course?.title ? `（${c.course.title}）` : ''}：</div>
+              {c.signupNote ? (
+                <div className="prewrap">{c.signupNote}</div>
+              ) : (
+                <div>成員須前往成員系統訓練班頁填表報名{c.course?.title ? `（${c.course.title}）` : ''}：</div>
+              )}
               {signupText && (
                 <div>
                   <a href={signupText} target="_blank" rel="noopener noreferrer">{signupText} ↗</a>
