@@ -61,6 +61,30 @@ await check('自動填好嘅欄（名稱／徽章／費用／截止⋯）收埋�
   assert.ok(page.includes('🔍 自動填好嘅資料'), '要有「🔍 自動填好嘅資料」開關');
 });
 
+await check('v4.16.0 通告全文欄：班領導人／服裝／備註／報名辦法／費用全文 有得填（收埋區）', () => {
+  const autoIdx = page.indexOf('{showAuto && (');
+  const endIdx = page.indexOf('自動展開俾你檢查', autoIdx);
+  for (const marker of [
+    'placeholder="班領導人 leader"',
+    'placeholder="服裝 uniform',
+    'placeholder="報名辦法 signupText',
+    'placeholder="費用全文 feeNote',
+    'placeholder="備註 remarks',
+  ] as const) {
+    const i = page.indexOf(marker);
+    assert.ok(i > autoIdx && i < endIdx, `${marker} 要喺 showAuto 區塊入面`);
+  }
+});
+
+await check('readFromNotice 填晒通告全文欄（leader／uniform／remarks／signupText／feeNote／subsidyNote／badgeName／section）', () => {
+  const i = page.indexOf('async function readFromNotice');
+  const body = page.slice(i, page.indexOf('async function save()', i));
+  for (const k of ['leader:', 'uniform:', 'remarks:', 'signupText:', 'feeNote:', 'subsidyNote:', 'badgeName:', 'section:'] as const) {
+    assert.ok(body.includes(k), `readFromNotice 要填 ${k}`);
+  }
+  assert.ok(body.includes('f.badges.join'), '徽章要由 badges 串埋');
+});
+
 await check('讀取成功／編輯舊班都會自動展開收埋區（setShowAuto(true) ≥ 3 處）', () => {
   const n = page.split('setShowAuto(true)').length - 1;
   assert.ok(n >= 3, `setShowAuto(true) 應該起碼 3 處（Sheet 讀取／通告讀取／編輯），而家 ${n}`);

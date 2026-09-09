@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  hkTodayISO, parseNoticeHtml, parseNoticeText, pickPdfUrl, zhDateToISO,
+  extractBadges, extractSubsidyNote, hkTodayISO, inferSection, mergePageExtras, parseNoticeHtml, parseNoticeText, pickPdfUrl, zhDateToISO,
 } from '../lib/notice-parse.ts';
 
 let pass = 0;
@@ -36,6 +36,25 @@ check('收費 100＋原價 200＋費用段全文', () => {
   assert.strictEqual(f.fee, '100');
   assert.strictEqual(f.originalFee, '200');
   assert.ok(f.feeText.includes('轉數快'));
+});
+
+check('資助說明：費用段「原價…資助」嗰句抽得出（v4.16.0）', () => {
+  assert.ok(f.subsidyNote.startsWith('本活動原價港幣200元'), `應由「本活動原價」開始（而家：「${f.subsidyNote.slice(0, 20)}…」）`);
+  assert.ok(f.subsidyNote.includes('青少年成員及童軍領袖訓練資助計劃'));
+  assert.ok(f.subsidyNote.includes('減半'));
+});
+
+check('標題拆徽章：三個章齊（v4.16.0）', () => {
+  assert.deepStrictEqual(f.badges, ['社區參與章', '公民章', '積極公民獎章']);
+  assert.deepStrictEqual(extractBadges('第1屆急救工作坊'), []);
+  assert.deepStrictEqual(extractBadges('公民章訓練班'), ['公民章']);
+});
+
+check('支部推斷：參加資格「童軍支部成員」→ 童軍（v4.16.0）', () => {
+  assert.strictEqual(f.section, '童軍');
+  assert.strictEqual(inferSection('深資童軍支部成員'), '深資童軍');
+  assert.strictEqual(inferSection('任何樂行童軍'), '樂行童軍');
+  assert.strictEqual(inferSection('中學生'), '');
 });
 
 check('名額 30＋截止 2026-07-08', () => {
@@ -119,6 +138,50 @@ check('HTML 帖文頁：og:title＋PDF 連結＋揀 uploads 嗰條', () => {
     pickPdfUrl('https://www.skwscout.org.hk/2026/05/abc/', p.pdfUrls),
     'https://www.skwscout.org.hk/wp-content/uploads/2026/05/2607.pdf',
   );
+});
+
+check('帖文頁標籤：/tag/ 連結抽得出（percent-encoded 中文名都解到）', () => {
+  const html = `<body>Tags:
+  <a href="https://www.skwscout.org.hk/tag/%e5%85%ac%e6%b0%91%e7%ab%a0/">公民章</a>
+  <a href="https://www.skwscout.org.hk/tag/%e7%ab%a5%e8%bb%8d%e6%94%af%e9%83%a8/">童軍支部</a>
+  <a href="https://www.skwscout.org.hk/tag/%e8%a8%93%e7%b7%b4%e7%8f%ad/">訓練班</a></body>`;
+  const p = parseNoticeHtml(html);
+  assert.deepStrictEqual(p.tags, ['公民章', '童軍支部', '訓練班']);
+});
+
+check('mergePageExtras：標籤補徽章＋支部，唔覆蓋 PDF 讀到嘅料（v4.16.0）', () => {
+  const pdfFields = parseNoticeText(textA, { url: URL_2607, today: '2026-06-01' });
+  const page = parseNoticeHtml(`<body>
+    <a href="/tag/%e7%a4%be%e5%8d%80%e5%8f%83%e8%88%87%e7%ab%a0/">社區參與章</a>
+    <a href="/tag/%e5%85%ac%e6%b0%91%e7%ab%a0/">公民章</a>
+    <a href="/tag/%e7%a9%8d%e6%a5%b5%e5%85%ac%e6%b0%91%e7%8d%8e%e7%ab%a0/">積極公民獎章</a>
+    <a href="/tag/%e7%ab%a5%e8%bb%8d%e6%94%af%e9%83%a8/">童軍支部</a>
+    <a href="/tag/%e8%a8%93%e7%b7%b4%e7%8f%ad/">訓練班</a></body>`);
+  const m = mergePageExtras({ ...pdfFields, badges: [], section: '' }, page);
+  assert.deepStrictEqual(m.badges, ['社區參與章', '公民章', '積極公民獎章']);
+  assert.strictEqual(m.section, '童軍');
+  // PDF 已讀到嘅嘢標籤唔會掂
+  assert.strictEqual(m.title, pdfFields.title);
+  assert.strictEqual(m.quota, pdfFields.quota);
+  // 標籤「訓練班」唔會當徽章
+  assert.ok(!m.badges.includes('訓練班'));
+});
+
+check('網頁擇要版（冇名額／班領導人／服裝／備註）→ 有警告提示貼 PDF', () => {
+  const web = `社區參與章、公民章暨積極公民獎章系列訓練班
+日期 時間 地點
+2026年7月20日（星期一） 下午七時至十時 香港童軍百周年紀念大樓
+參加資格：已宣誓及持有有效紀錄冊之童軍支部成員（港島地域成員將獲優先取錄）。
+費用：活動費用港幣 100 元正
+截止日期：2026年7月8日（星期三）
+報名辦法：成員須填妥網上表格（網址：https://forms.gle/8AieRgzp5CE52zCZ7）`;
+  const w = parseNoticeText(web, { url: 'https://www.skwscout.org.hk/2026/05/post/', today: '2026-06-01' });
+  assert.strictEqual(w.fee, '100');
+  assert.strictEqual(w.deadline, '2026-07-08');
+  assert.strictEqual(w.section, '童軍');
+  assert.ok(w.warnings.some(x => x.includes('名額')));
+  assert.ok(w.warnings.some(x => x.includes('班領導人／服裝／備註')));
+  assert.strictEqual(w.quota, '');
 });
 
 console.log(`\n共 ${pass} 項通過${process.exitCode ? '（有失敗）' : ''}`);

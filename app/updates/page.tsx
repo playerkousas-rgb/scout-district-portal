@@ -5,6 +5,16 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.16.0 — 📋 通告全文欄：貼通告連結一次填晒＋成員睇到齊料</h3>
+        <ul>
+          <li>📋 <b>「由通告網址讀取」升級</b>：除咗原有嘅 通告名／收費（連原價）／名額／截止／資格／節次／場地／聯絡，加讀 <b>班領導人／服裝／備註全文／報名辦法／費用全文（連轉數快戶口）／資助說明</b>，再由標題同網頁標籤拆出<b>徽章／支部</b>——區通告有嘅項目系統齊晒</li>
+          <li>🔗 <b>貼 PDF 定帖文頁都得</b>：貼帖文頁會自動跟入面條 PDF 讀正本（網頁管理員嘅擇要係刪減版，名額／服裝／備註等多數冇咗，系統會警告提你）；PDF 係「文字版」先讀到（掃瞄圖會警告）</li>
+          <li>📤 <b>CourseLinks 加 5 欄</b>（<code>leader／uniform／remarks／signupText／feeNote</code>）：開班登記帶入 → <code>listCourseLinks</code> 公開回傳 → 成員系統訓練班列表顯示 班領導人／服裝／「付款須知及備註（通告全文）」。舊表 <code>setupSheets()</code> 自動補欄唔清資料；「由訓練班 Sheet 讀取」讀 Print_通告內文都會填同一批欄</li>
+          <li>🧑‍🤝‍🧑 <b>多班同掛冇問題</b>：幾個班同時啟用，各自指向自己嘅收表 Script；成員報邊個班，報名就轉發去嗰個班嘅 Script（Key／入數紙夾各自歸屬），互唔干擾（有 10 項 GS 測試 <code>scripts/test-course-links-gs.js</code> 鎖住）</li>
+          <li>⚠️ 要換新 <code>Code.gs</code>（v4.16.0）→ <code>setupSheets()</code>（自動補 CourseLinks 5 欄）→ 重新部署。member-portal 想顯示新欄位就套 <code>docs/member-portal-course-fields.patch</code>（一份 patch 包埋 FPS QR；唔套都唔會壞，舊欄照用）</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>🎯 開班登記精簡：淨貼三樣＋兩個讀取掣（舊制）</h3>
         <ul>
           <li>🧭 <b>表單淨返三樣嘢</b>：① 收表 Script（<code>/exec</code>＋Key，CL 交嚟兩行一次過貼都識自動分開）② 入數紙 Drive 資料夾 ③ 通告連結 → 撳「📥 由訓練班 Sheet 讀取」＋「📥 由通告網址讀取」→ 儲存</li>

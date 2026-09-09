@@ -1,4 +1,4 @@
-# member-portal ↔ 統一後台（GS）對接合約 v4.6.2
+# member-portal ↔ 統一後台（GS）對接合約 v4.16.0
 
 兩邊共用同一份 `gs/Code.gs`、同一張 Sheet、同一個 `/exec` + API Key。
 
@@ -177,15 +177,57 @@ member-portal 個 proxy 有 **公開欄位白名單**，新欄位會被剝走，
 顯示建議：報名成功頁 + 「未交費」提示都放同一個 QR 區塊，等申請人一眼搵到「掃邊個 QR、入邊個戶口、交幾多錢」。
 `fpsQrPayload` 係 HKICL Common QR 標準字串，直接 `<QRCodeCanvas value={fpsQrPayload} />` 就掃得。
 
-**現成 patch：** [`docs/member-portal-fps-qr.patch`](member-portal-fps-qr.patch)（已對 member-portal HEAD `149f910` 做過 `tsc` 通過）。
+**現成 patch：** [`docs/member-portal-course-fields.patch`](member-portal-course-fields.patch)
+（**v4.16.0 起取代舊 `member-portal-fps-qr.patch`**——一份 patch 同時包含 FPS QR ＋ 通告全文欄；
+已對 member-portal HEAD `7c5f013` 做過 `tsc` 通過。舊 patch 已刪，要翻舊版睇 git 歷史。）
 喺 member-portal repo 入面：
 
 ```bash
-git am path/to/member-portal-fps-qr.patch   # 或 git apply
-npm install                                  # 會裝 qrcode.react
+git am path/to/member-portal-course-fields.patch   # 或 git apply
+npm install                                        # 會裝 qrcode.react
 ```
 
-包含：proxy 白名單、`CourseLink` 型別、`mapCourse`、新元件 `components/CourseFpsQr.tsx`（繳費區 + 報名成功頁）、CSS、`docs/integration-contract.md` 一段。
+包含：proxy 白名單（FPS 5 欄＋通告全文 5 欄）、`CourseLink` 型別、`mapCourse`、
+新元件 `components/CourseFpsQr.tsx`（繳費區＋報名成功頁）、`/training` 列行同報名表顯示
+班領導人／服裝／付款須知／備註、`docs/integration-contract.md` 一段。
+
+## 📋 訓練班通告全文欄（v4.16.0 新增）
+
+```
+管理系統 /training「📥 由通告網址讀取」
+   貼通告 PDF 連結（或帖文頁連結——會自動跟去 PDF 正本，兼讀埋網頁標籤）
+        │
+        ▼
+   伺服器抓 PDF → 抽文字 → 解析通告固定欄位
+        （通告名／收費／原價／資助說明／名額／截止／資格／節次／場地／
+          班領導人／聯絡／服裝／備註／報名辦法／費用全文／徽章／支部）
+        │
+        ▼
+   開班登記表單一次過填晒 → saveCourseLink
+        │
+        ▼
+CourseLinks 多 5 欄：leader / uniform / remarks / signupText / feeNote
+        │
+        ▼
+member-portal  GET listCourseLinks  → 每個 course 多呢 5 個 key（未填 = 空字串）
+```
+
+| 欄 | 通告段 | 成員系統顯示 |
+|---|---|---|
+| `leader` | 班領導人 | 列行「👔 班領導人」 |
+| `uniform` | 服裝 | 列行「👕 服裝」 |
+| `remarks` | 備註（多行） | 「📋 付款須知及備註（通告全文）」展開 |
+| `signupText` | 報名辦法 | 同上（成員照舊用內置報名表） |
+| `feeNote` | 費用全文（含轉數快戶口） | 同上＋報名表所選班面板 |
+
+**GS 行為：** `setupSheets()` 自動補呢 5 欄（舊表追加欄，唔清資料）；
+`saveCourseLink` 照寫；`courseLinkPublic_`（即 `listCourseLinks`／`getCourseLinks`）照回。
+舊 member-portal 唔改都唔會壞（多咗 key 會被佢個 proxy 白名單剝走，要顯示就套上面個 patch）。
+
+**舊制流程不變：** CL 交 Sheet /exec＋Key → ADC 貼上 →「由訓練班 Sheet 讀取」
+（Print_通告內文會帶入同一批欄）→ 儲存（啟用）→ 班即時掛上成員系統。
+**多班同掛冇問題**：每班各自指向自己嘅收表 Script，`submitCourseReg` 按 `courseId`
+對號轉發（apiKey／driveFolderId 各自歸屬），報名互唔干擾。
 
 ## 活動知會（已核對雙向打通）
 
@@ -315,10 +357,10 @@ member-portal 填表
 健康檢查 `?action=getHealthCheck`（免 Key）會回：
 
 ```json
-{ "version": "4.6.2", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
+{ "version": "4.16.0", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
 ```
 
-`version` 要係 `4.6.2` 先代表呢版 GS 已貼上線。
+`version` 要係 `4.16.0` 先代表呢版 GS 已貼上線。
 
 ## 部署
 

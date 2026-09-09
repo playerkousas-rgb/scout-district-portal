@@ -1,5 +1,22 @@
 # 下一手 Agent 交接備忘（v4.8.1）
 
+> 2026-09-09（第八輪）v4.16.0：**📋 訓練班通告全文欄**（用戶問：PDF 定網頁擇要用邊個＋系統格式同區通告唔同、有項目冇）。
+> 答咗用戶：**2607.pdf 已驗證係「文字版」**（pdf-parse 抽到全文，fixture `scripts/notice-2607-a.txt` 就係咁嚟）；
+> 網頁管理員嘅帖文係**刪減擇要**（冇名額／班領導人／服裝／備註／查詢），所以 **PDF 係正本**。改動：
+> - `lib/notice-parse.ts`：`NoticeFields` 加 `subsidyNote`（費用段「原價…資助」句）／`badges[]`（標題拆章）／`section`（參加資格推支部）；
+>   `parseNoticeHtml` 加 `tags[]`（/tag/ 標籤）；新 `mergePageExtras`（帖文頁補徽章／支部，唔覆蓋 PDF 料）；
+>   擇要版讀唔到名額／班領導人／服裝／備註會出警告叫人貼 PDF。
+> - `app/api/notice/route.ts`：網頁→PDF 路徑同純網頁路徑都行 `mergePageExtras`。
+> - `CourseLink`（types/GS/demo）加 5 欄：**`leader`／`uniform`／`remarks`／`signupText`／`feeNote`**；
+>   GS `courseLinkPublic_`＋`saveCourseLink_`＋藍圖欄（`setupSheets()` 舊表自動補喺表尾）。
+> - `/training`：「由通告網址讀取」填晒晒（subsidyNote／badges→badgeName／section／leader／uniform／remarks／signupText／feeNote），
+>   收埋區加 5 個欄位輸入；「由訓練班 Sheet 讀取」都會由 Print_通告（`CourseProfileCircular`）填同一批欄。
+> - member-portal：**`docs/member-portal-course-fields.patch`**（取代舊 `member-portal-fps-qr.patch`，一份過包含 FPS QR＋通告全文欄；
+>   對 HEAD `7c5f013` `git apply` 得＋`tsc` 過＋`check-member-alignment.js` 27 欄完全對齊）。proxy 白名單＋型別＋mapCourse＋`/training` 顯示。
+> - 多班同掛證實冇問題：`scripts/test-course-links-gs.js`（10 項）——三班兩 Script，`submitCourseReg_` 按 courseId 對號轉發（apiKey/folder 各自歸屬），filled 各自+1，滿額/過截止/停用被擋。
+> - 測試：notice-parse 13→**19**、training-wiring 10→**12**、新 course-links-gs **10**；全套（含 circulars/upgrade/news/demo 等）全綠；`tsc`＋`next build` 過。
+> - ⚠️ 部署：換 `Code.gs` 4.16.0 → `setupSheets()`（補欄唔清空）→ 重新部署；成員端套 patch 先見到新欄（唔套唔會壞）。
+>
 > 2026-09-08（第七輪）v4.7.0：**🎖 獎勵提名**（用戶指定「一站式，全部喺 app 入面睇同改」）。
 > 後台加 `Awards`（一人一行，每個獎一欄＝獲獎年份，值可以係 `2015` / `2015?` / `無`）同 `AwardTypes`（年期規則）兩張表，
 > action：`getAwardsBoard`（一 call 攞晒名冊＋規則）／`saveAwardMember`／`deleteAwardMember`／`importAwardMembers`（merge／replace）／`saveAwardTypes`；

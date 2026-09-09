@@ -1,37 +1,17 @@
-From 858f282b1f55775deec2e7ec8a873632b4fff582 Mon Sep 17 00:00:00 2001
-From: Arena Agent <arena@example.com>
-Date: Mon, 7 Sep 2026 02:42:30 +0000
-Subject: [PATCH] =?UTF-8?q?=E8=A8=93=E7=B7=B4=E7=8F=AD=E7=B9=B3=E8=B2=BB?=
- =?UTF-8?q?=E5=8D=80=E9=A1=AF=E7=A4=BA=E6=AF=8F=E7=8F=AD=20FPS=20QR?=
- =?UTF-8?q?=EF=BC=88=E9=85=8D=E5=90=88=E7=B5=B1=E4=B8=80=E5=BE=8C=E5=8F=B0?=
- =?UTF-8?q?=20v4.3.0=20CourseLinks=20fps=20=E6=AC=84=E4=BD=8D=EF=BC=89?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
-
----
- app/api/proxy/route.ts       |  3 +++
- app/globals.css              | 14 ++++++++++
- app/training/page.tsx        | 22 ++++++++++++---
- components/CourseFpsQr.tsx   | 52 ++++++++++++++++++++++++++++++++++++
- docs/integration-contract.md | 15 +++++++++++
- lib/api.ts                   |  5 ++++
- lib/types.ts                 |  6 +++++
- package.json                 |  1 +
- 8 files changed, 114 insertions(+), 4 deletions(-)
- create mode 100644 components/CourseFpsQr.tsx
-
 diff --git a/app/api/proxy/route.ts b/app/api/proxy/route.ts
-index fcaee16..e11d295 100644
+index adb6899..d3e5da4 100644
 --- a/app/api/proxy/route.ts
 +++ b/app/api/proxy/route.ts
-@@ -131,6 +131,9 @@ function publicCourse(value: unknown) {
+@@ -132,6 +132,12 @@ function publicCourse(value: unknown) {
      subsidyNote: text(row.subsidyNote), deadline: text(row.deadline), quota: number(row.quota),
      filled: number(row.filled), venue: text(row.venue), noticeUrl: publicUrl(row.noticeUrl),
      contact: text(row.contact), active: isActive(row.active),
 +    // 每班收費 FPS QR（管理系統 v4.3.0 生成；未生成 = 空字串）
 +    fpsQrPayload: text(row.fpsQrPayload), fpsAmount: text(row.fpsAmount), fpsReference: text(row.fpsReference),
 +    fpsAccountName: text(row.fpsAccountName), fpsAccountNumber: text(row.fpsAccountNumber),
++    // 通告全文欄（管理系統 v4.16.0「由通告網址讀取」帶入；區通告格式項目）
++    leader: text(row.leader), uniform: text(row.uniform), remarks: text(row.remarks),
++    signupText: text(row.signupText), feeNote: text(row.feeNote),
    };
  }
  function publicVenue(value: unknown) {
@@ -58,7 +38,7 @@ index 84e9758..9168c07 100644
 +.course-fps-msg{font-size:12px;color:#166534;font-weight:700;}
 +@media (max-width:640px){.course-fps{grid-template-columns:1fr;}.course-fps-qr{max-width:260px;margin:0 auto;}}
 diff --git a/app/training/page.tsx b/app/training/page.tsx
-index e21eccd..680e012 100644
+index e21eccd..763bb18 100644
 --- a/app/training/page.tsx
 +++ b/app/training/page.tsx
 @@ -2,6 +2,7 @@
@@ -101,7 +81,35 @@ index e21eccd..680e012 100644
          <div style={{ marginTop: 20 }}>
            <Link href={withDistrict('/')} className="btn-ghost">返回首頁</Link>{' '}
            <button className="btn-sm" onClick={() => { startedAt.current = Date.now(); setDoneRef(''); setCourseId(''); setReceiptFile(null); }}>再報名</button>
-@@ -325,9 +335,13 @@ export default function TrainingPage() {
+@@ -192,6 +202,16 @@ export default function TrainingPage() {
+                 <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
+                   費用：HK${c.fee}{c.originalFee > c.fee ? `（原價 $${c.originalFee}）` : ''}{c.subsidyNote ? ` · ${c.subsidyNote}` : ''} · 截止：{c.deadline}
+                 </div>
++                {c.leader && <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>👔 班領導人：{c.leader}</div>}
++                {c.uniform && <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>👕 服裝：{c.uniform}</div>}
++                {(c.feeNote || c.remarks || c.signupText) && (
++                  <details style={{ marginTop: 4, fontSize: 12, color: '#64748b' }}>
++                    <summary style={{ cursor: 'pointer', color: '#1565c0', fontWeight: 700 }}>📋 付款須知及備註（通告全文）</summary>
++                    {c.feeNote && <div style={{ whiteSpace: 'pre-line', marginTop: 4 }}>💰 {c.feeNote}</div>}
++                    {c.remarks && <div style={{ whiteSpace: 'pre-line', marginTop: 4 }}>📝 {c.remarks}</div>}
++                    {c.signupText && <div style={{ whiteSpace: 'pre-line', marginTop: 4 }}>🖊 {c.signupText}</div>}
++                  </details>
++                )}
+                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 6 }}>
+                   {c.noticeUrl && <a href={c.noticeUrl} target="_blank" rel="noopener" style={{ color: '#1565c0', fontSize: 12, fontWeight: 700 }}>📄 詳情及通告 ↗</a>}
+                   {c.contact && <span style={{ fontSize: 11, color: '#64748b' }}>📞 查詢：{c.contact}</span>}
+@@ -238,6 +258,10 @@ export default function TrainingPage() {
+             {selected.badgeName && <> · 🏅 {selected.badgeName}</>}
+             <div style={{ whiteSpace: 'pre-line' }}>{selected.sessionsText}</div>
+             <div>費用：HK${selected.fee}{selected.originalFee > selected.fee ? `（原價 $${selected.originalFee}）` : ''} · 截止：{selected.deadline}</div>
++            {selected.leader && <div style={{ marginTop: 2 }}>👔 班領導人：{selected.leader}</div>}
++            {selected.uniform && <div style={{ marginTop: 2 }}>👕 服裝：{selected.uniform}</div>}
++            {selected.feeNote && <div style={{ whiteSpace: 'pre-line', marginTop: 2 }}>💰 {selected.feeNote}</div>}
++            {selected.remarks && <div style={{ whiteSpace: 'pre-line', marginTop: 2 }}>📝 {selected.remarks}</div>}
+           </div>
+         )}
+ 
+@@ -325,9 +349,13 @@ export default function TrainingPage() {
  
          <div className="panel" style={{ background: '#f8fbff', border: '1px solid #dbeafe' }}>
            <h2>💳 繳費（轉數快）</h2>
@@ -177,10 +185,10 @@ index 0000000..c1fd745
 +  );
 +}
 diff --git a/docs/integration-contract.md b/docs/integration-contract.md
-index ee3bcbe..03244bc 100644
+index ee3bcbe..b0ac81c 100644
 --- a/docs/integration-contract.md
 +++ b/docs/integration-contract.md
-@@ -184,3 +184,18 @@ receiptFileName, receiptMimeType, receiptDataUrl
+@@ -184,3 +184,35 @@ receiptFileName, receiptMimeType, receiptDataUrl
  - `submitCourseReg_` 轉發 payload 已加入 `extra: b.extra || ''`；member 表單日後加入「附加資料」輸入框即可直通每班 Script，無需再改 proxy（`POST_FIELDS` 已有 `extra` 白名單）。
  
  成員系統唔應為此保留另一份 `Code.gs`；任何後台修正必須落喺管理系統唯一來源。
@@ -199,11 +207,28 @@ index ee3bcbe..03244bc 100644
 +
 +proxy `publicCourse()` 已加入白名單；`components/CourseFpsQr.tsx` 喺 `/training` 繳費區同報名成功頁顯示。
 +依賴：`qrcode.react`。
++
++## 通告全文欄（GS v4.16.0）
++
++`listCourseLinks` 每個 course 再多 5 個公開欄位（管理系統「📥 由通告網址讀取」由區網通告 PDF／帖文頁讀入；
++未填 = 空字串，舊班完全不受影響）：
++
++| 欄位 | 用途 |
++|---|---|
++| `leader` | 班領導人（通告「班領導人」段） |
++| `uniform` | 服裝（通告「服裝」段，如「整齊童軍制服」） |
++| `remarks` | 備註全文（通告「備註」段，可多行） |
++| `signupText` | 報名辦法（通告原文；成員照舊用本頁內置報名表） |
++| `feeNote` | 費用全文（含原價／資助／轉數快戶口等付款說明） |
++
++proxy `publicCourse()` 已加入白名單；`/training` 列表行顯示 班領導人／服裝，
++「📋 付款須知及備註（通告全文）」可展開 付款說明／備註／報名辦法；報名表所選班面板同時顯示。
++多班同掛照舊：每班各自指向自己嘅收表 Script（`submitCourseReg` 按 `courseId` 對號轉發）。
 diff --git a/lib/api.ts b/lib/api.ts
-index 8d782e6..49a802d 100644
+index 21f125a..8dc8159 100644
 --- a/lib/api.ts
 +++ b/lib/api.ts
-@@ -116,6 +116,11 @@ function mapCourse(value: unknown): CourseLink {
+@@ -116,6 +116,16 @@ function mapCourse(value: unknown): CourseLink {
      noticeUrl: asString(row.noticeUrl),
      contact: asString(row.contact),
      active: asBoolean(row.active, true),
@@ -212,14 +237,19 @@ index 8d782e6..49a802d 100644
 +    fpsReference: asString(row.fpsReference),
 +    fpsAccountName: asString(row.fpsAccountName),
 +    fpsAccountNumber: asString(row.fpsAccountNumber),
++    leader: asString(row.leader),
++    uniform: asString(row.uniform),
++    remarks: asString(row.remarks),
++    signupText: asString(row.signupText),
++    feeNote: asString(row.feeNote),
    };
  }
  
 diff --git a/lib/types.ts b/lib/types.ts
-index f95af63..2c4cc5d 100644
+index d2a48fa..8c6a0ed 100644
 --- a/lib/types.ts
 +++ b/lib/types.ts
-@@ -69,4 +69,10 @@ export interface CourseLink {
+@@ -69,6 +69,18 @@ export interface CourseLink {
    noticeUrl: string;
    contact: string;
    active: boolean;
@@ -229,7 +259,15 @@ index f95af63..2c4cc5d 100644
 +  fpsReference?: string;   // 參考編號（付款 App 顯示）
 +  fpsAccountName?: string; // 收款戶口名
 +  fpsAccountNumber?: string; // FPS ID
++  // 通告全文欄（管理系統 v4.16.0 由區網通告 PDF 讀入；未填 = 空字串）
++  leader?: string;      // 班領導人
++  uniform?: string;     // 服裝
++  remarks?: string;     // 備註全文（可多行）
++  signupText?: string;  // 報名辦法（通告原文）
++  feeNote?: string;     // 費用全文（含轉數快戶口／付款說明）
  }
+ 
+ export interface Announcement {
 diff --git a/package.json b/package.json
 index ab7f503..267c856 100644
 --- a/package.json
@@ -242,6 +280,3 @@ index ab7f503..267c856 100644
      "react": "19.2.8",
      "react-dom": "19.2.8"
    },
--- 
-2.39.5
-

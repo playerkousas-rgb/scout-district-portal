@@ -157,12 +157,53 @@ export interface ParseNoticeOpts {
 
 const EMPTY_CONTACT: NoticeContact = { name: '', role: '', phone: '', email: '' };
 
+/** 支部推斷：參加資格／標題提到邊個支部（長詞先行，避免「童軍」食咗「深資童軍」） */
+const SECTION_KEYWORDS: [RegExp, string][] = [
+  [/小童軍/, '小童軍'],
+  [/幼童軍/, '幼童軍'],
+  [/深資童軍/, '深資童軍'],
+  [/樂行童軍/, '樂行童軍'],
+  [/童軍支部/, '童軍'],
+  [/領袖訓練|領袖支部|成人領袖/, '領袖'],
+];
+
+/** 由參加資格／標題推支部（推唔到回 ''，唔亂估） */
+export function inferSection(...texts: string[]): string {
+  const t = texts.filter(Boolean).join(' ');
+  if (!t) return '';
+  for (const [re, name] of SECTION_KEYWORDS) if (re.test(t)) return name;
+  return '';
+}
+
+/** 標題拆徽章／章別：「社區參與章、公民章暨積極公民獎章系列訓練班」→ 三個章 */
+export function extractBadges(title: string): string[] {
+  const t = String(title || '')
+    .replace(/(系列)?(訓練班|工作坊|課程|訓練)$/u, '')
+    .trim();
+  if (!t) return [];
+  const seen = new Set<string>();
+  return t
+    .split(/[、，,暨及]/)   // 唔用「與／和」做分隔（「參與章」會被拆爛）
+    .map(s => s.replace(/系列$/u, '').trim())
+    .filter(s => s.length >= 2 && /[章]$/.test(s))
+    .filter(s => { if (seen.has(s)) return false; seen.add(s); return true; });
+}
+
+/** 費用段抽資助說明：「本活動原價港幣 200 元，因獲「…」資助，費用因此獲得減半。」嗰句 */
+export function extractSubsidyNote(feeSec: string): string {
+  // 「原價」前面最多 12 個字（本活動／是次活動等前綴；唔准跨括號，免得由「（包括行政…）」食起）；
+  // 尾段貪婪——句內「…訓練資助計劃」都仲有個「資助」，貪婪先會食到句尾
+  const m = /(?:（|^)([^。；;，（）]{0,12}原價[^。；;]*(?:資助|津貼|減免)[^。；;]*)[。；;]?[）)]?/.exec(String(feeSec || ''));
+  if (!m) return '';
+  return (m[1] || '').trim();
+}
+
 /** 主入口：PDF／網頁文字 → 報班必備欄位 */
 export function parseNoticeText(rawText: string, opts: ParseNoticeOpts = {}): NoticeFields {
   const todayISO = hkTodayISO(opts.today);
   const f = flat(rawText);
   const empty: NoticeFields = {
-    title: '', fee: '', originalFee: '', feeText: '', freeFee: false,
+    title: '', fee: '', originalFee: '', feeText: '', subsidyNote: '', badges: [], section: '', freeFee: false,
     quota: '', deadline: '', eligibility: '',
     sessions: [], sessionsText: '', venue: '',
     leader: '', contact: '', contactDetail: { ...EMPTY_CONTACT },
@@ -207,6 +248,8 @@ export function parseNoticeText(rawText: string, opts: ParseNoticeOpts = {}): No
   empty.leader = sec('班領導人');
   empty.eligibility = sec('參加資格');
   if (!empty.eligibility) empty.warnings.push('讀唔到參加資格');
+  // 支部推斷（參加資格行先；推唔到唔亂填）
+  empty.section = inferSection(empty.eligibility, empty.title);
 
   // ── 費用 ──
   const feeSec = sec('費用');
@@ -215,6 +258,7 @@ export function parseNoticeText(rawText: string, opts: ParseNoticeOpts = {}): No
   if (feeM) empty.fee = (feeM[1] || '').replace(/,/g, '');
   const origM = /原價港幣([\d,]+)元/.exec(feeSec);
   if (origM) empty.originalFee = (origM[1] || '').replace(/,/g, '');
+  empty.subsidyNote = extractSubsidyNote(feeSec);
   if (!feeM && /免費|全免|豁免收費/.test(feeSec)) empty.freeFee = true;
   if (!feeM && !empty.freeFee && feeSec) empty.warnings.push('費用段冇銀碼（唔係「港幣X元」寫法）');
   if (!feeSec) empty.warnings.push('讀唔到費用');
@@ -224,6 +268,7 @@ export function parseNoticeText(rawText: string, opts: ParseNoticeOpts = {}): No
   const quotaM = /(\d+)\s*(人|名|位)/.exec(quotaSec) || /(\d+)/.exec(quotaSec);
   if (quotaM) empty.quota = quotaM[1] || '';
   else if (quotaSec) empty.warnings.push('名額段冇數字');
+  else empty.warnings.push('讀唔到名額（網頁擇要版多數冇呢段，貼 PDF 試下）');
   const dlSec = sec('截止日期');
   const dlFull = /(\d{4})年(\d{1,2})月(\d{1,2})日/.exec(dlSec);
   const dlShort = dlFull ? null : /(\d{1,2})月(\d{1,2})日/.exec(dlSec);
@@ -236,6 +281,12 @@ export function parseNoticeText(rawText: string, opts: ParseNoticeOpts = {}): No
   empty.signupText = sec('報名辦法');
   empty.uniform = sec('服裝');
   empty.remarks = sec('備註');
+  // 網頁擇要版常見：有資格有截止，但冇晒班領導人／服裝／備註
+  if (!empty.leader && !empty.uniform && !empty.remarks) {
+    empty.warnings.push('唔見班領導人／服裝／備註段（網頁擇要版常見；貼 PDF 通告連結會讀得晒）');
+  }
+  // 徽章／章別：標題拆（網頁標籤會喺 route 層再補）
+  empty.badges = extractBadges(empty.title);
   const enquiry = sec('查詢');
   empty.enquiry = enquiry;
   const contact = parseContact(f, enquiry);
@@ -273,12 +324,14 @@ export interface NoticeHtml {
   title: string;
   pdfUrls: string[];
   text: string;
+  /** 帖文標籤（/tag/… 連結；網頁管理員擇要版獨有，PDF 冇） */
+  tags: string[];
 }
 
-/** 輕量抽帖文頁：og:title／PDF 連結／可見文字（唔引入 cheerio） */
+/** 輕量抽帖文頁：og:title／PDF 連結／標籤／可見文字（唔引入 cheerio） */
 export function parseNoticeHtml(html: string): NoticeHtml {
   const h = String(html || '');
-  const out: NoticeHtml = { title: '', pdfUrls: [], text: '' };
+  const out: NoticeHtml = { title: '', pdfUrls: [], text: '', tags: [] };
   const og = /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i.exec(h)
     || /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i.exec(h);
   const tt = /<title[^>]*>([^<]*)<\/title>/i.exec(h);
@@ -291,8 +344,53 @@ export function parseNoticeHtml(html: string): NoticeHtml {
     const u = (m[1] || '').trim();
     if (u && !seen.has(u)) { seen.add(u); out.pdfUrls.push(u); }
   }
+  // 標籤：/tag/… 連結文字（percent-encoded 中文名要 decode）
+  const tagSeen = new Set<string>();
+  const tagRe = /<a[^>]+href=["'][^"']*\/tag\/[^"']*["'][^>]*>([^<]{1,30})<\/a>/gi;
+  for (;;) {
+    const m = tagRe.exec(h);
+    if (!m) break;
+    let tag = (m[1] || '').trim();
+    try { tag = decodeURIComponent(tag); } catch { /* keep raw */ }
+    if (tag && !tagSeen.has(tag)) { tagSeen.add(tag); out.tags.push(tag); }
+  }
   const body = h.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ');
   out.text = body.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/\s+/g, ' ').trim();
+  return out;
+}
+
+/** 標籤 → 支部（「童軍支部」→ 童軍；對唔上唔理） */
+function tagToSection(tag: string): string {
+  const t = String(tag || '');
+  if (/小童軍/.test(t)) return '小童軍';
+  if (/幼童軍/.test(t)) return '幼童軍';
+  if (/深資童軍/.test(t)) return '深資童軍';
+  if (/樂行童軍/.test(t)) return '樂行童軍';
+  if (/童軍/.test(t) && !/跨/.test(t)) return '童軍';
+  if (/領袖/.test(t)) return '領袖';
+  return '';
+}
+
+/**
+ * 網頁帖文頁補料（PDF 讀完之後叫）：
+ * - 標籤 → 徽章（PDF 標題拆唔到嗰啲都有標籤兜底）＋支部
+ * - og:title → 標題後備
+ * 網頁管理員擇要版係刪減內容，所以只補「PDF 冇嘅料」，唔會覆蓋 PDF 讀到嘅嘢。
+ */
+export function mergePageExtras(fields: NoticeFields, page: Pick<NoticeHtml, 'title' | 'tags'>): NoticeFields {
+  const out: NoticeFields = { ...fields, badges: [...fields.badges] };
+  const badges = new Set(out.badges);
+  (page.tags || []).forEach(tag => {
+    if (/[章]$/.test(tag) && !/支部|訓練班/.test(tag)) badges.add(tag);
+  });
+  out.badges = [...badges];
+  if (!out.section) {
+    for (const tag of page.tags || []) {
+      const s = tagToSection(tag);
+      if (s) { out.section = s; break; }
+    }
+  }
+  if (!out.title && page.title) out.title = page.title;
   return out;
 }
 
@@ -321,7 +419,8 @@ export function demoNoticeFields(): NoticeFields {
     { date: '2026年10月11日（星期日）', dateISO: '2026-10-11', weekday: '星期日', time: '上午9時至下午5時', venue: '區總部', display: '2026年10月11日（星期日） 上午9時至下午5時 區總部' },
   ];
   return {
-    title: '第1屆急救工作坊（示範）', fee: '25', originalFee: '', feeText: '費用：活動費用港幣25元正。', freeFee: false,
+    title: '第1屆急救工作坊（示範）', fee: '25', originalFee: '', feeText: '費用：活動費用港幣25元正。',
+    subsidyNote: '', badges: ['急救'], section: '童軍', freeFee: false,
     quota: '22', deadline, eligibility: '已宣誓及持有有效紀錄冊之童軍支部成員。',
     sessions, sessionsText: sessions.map(s => s.display).join('；'), venue: '區總部',
     leader: '陳大文先生', contact: '陳大文先生（班領導人） 9123 4567 demo@demo',
