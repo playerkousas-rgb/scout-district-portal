@@ -263,6 +263,26 @@ function setupCourseSheet() {
   );
 }
 
+// ===================== API Key（獨立產生，唔掂表格） =====================
+// 區系統自動複製出嚟嘅表：Script 碼會跟住嚟，但 API Key 唔會（存喺 Script Properties，複製唔帶）。
+// 喺呢個表按 🎓 訓練班選單 → 🔑 產生 API Key（或喺編輯器執行本函數），即出新 key，表格資料唔郁。
+// 之後部署做 Web App，將 /exec＋key 交返 ADC 貼入開班登記，即可收報名。
+// 舊 key 即時作廢（唔影響已收嘅報名資料）。
+function rotateCourseApiKey() {
+  var key = 'ck_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+  PropertiesService.getScriptProperties().setProperty('API_KEY_HASH', sha256_(key));
+  try {
+    SpreadsheetApp.getUi().alert(
+      '🔑 新 API Key（只顯示一次，請即刻複製）',
+      key + '\n\n下一步（收報名用）：\n'
+      + '1. 部署 → 新增部署 → 網頁應用程式（執行身分：我；存取：任何人）\n'
+      + '2. 複製 /exec 網址\n'
+      + '3. 將 /exec 網址＋上面個 key 交返 ADC，貼入區管理平台開班登記'
+    );
+  } catch (e) { /* 冇 UI 照出 key（return 值） */ }
+  return key;
+}
+
 // ===================== 建表小工具 =====================
 
 /** 拎分頁（冇就開），捐窿捐罅用同一個 */
@@ -392,6 +412,7 @@ function buildReadmeSheet_(ss) {
     ['4', '檢查 Print_通告：標題／節數／班領導人／名額／截止／報名辦法／查詢已自動帶入；補參加資格／費用說明／服裝／備註（已有標準 6 項，可改），貼上 FPS QR 圖片，交區總監審批。'],
     ['5', '批核後：列印 Print_通告 做 PDF 交網頁管理員上載；通知 ADC 喺區管理平台開班（資料自動讀取，你唔使再填）。'],
     ['6', '開班後：報名自動寫入「表格回應」；批核後取錄／學員／出席／完成報告／資助等 Print 自動生成。實際支出記入 Input04。'],
+    ['🔑 自動建表', '如果呢本表係區系統自動起嘅：資料已經喺度，唔使跑一鍵建表！要收報名：按上面 🎓 訓練班選單 → 🔑 產生 API Key → 部署做 Web App（執行身分：我；存取：任何人）→ 將 /exec＋key 交返 ADC 貼入開班登記。'],
     ['', ''],
     ['黃色格', '自動由其他分頁帶入嘅數（例如 Input02 名額）。一般唔使改；真係要覆蓋可以直接打字（會蓋掉公式）。'],
     ['✓上通告', 'Input02 每節一行：剔咗＋有「通告顯示日期」嗰節先會出現在 Print_通告（跨日節次：第二日唔剔，喺第一日通告顯示日期寫「8月10至11日」噉）。'],
@@ -1899,6 +1920,7 @@ function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('🎓 訓練班')
     .addItem('🚀 一鍵建表（只限全新空白表）', 'setupCourseSheet')
+    .addItem('🔑 產生 API Key（唔影響表格）', 'rotateCourseApiKey')
     .addItem('🎓 新增分頁', 'addTabMenu')
     .addItem('📁 設定入數紙資料夾', 'setReceiptFolderMenu')
     .addToUi();

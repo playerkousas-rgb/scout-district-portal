@@ -8,9 +8,9 @@ export default function UpdatesPage() {
         <h3>v4.14.0 — 🆕 新制直入試驗：區系統填設定＋自動建班 Sheet＋12 張網頁列印</h3>
         <ul>
           <li>🆕 <b>訓練班管理加「新制直入」分頁</b>（同舊制並存）：成份開班設定（Input01／02／03＋通告人手格）喺區系統填，撳掣即由<b>總模版自動複製</b>班 Sheet＋寫入＋開班登記，仲可以自動分享畀班領導人——<b>連建表都慳返</b></li>
-          <li>🔄 <b>雙向同步</b>：呢邊改 → 推送返入班 Sheet；職員喺 Sheet 改（名單／實支／證書）→ 呢邊「由班 Sheet 重讀」即時睇返。舊制人手班睇得＋印得（只讀）</li>
+          <li>🔄 <b>雙向同步</b>：呢邊改 → 寫入返班 Sheet；職員喺 Sheet 改（名單／實支／證書）→ 呢邊「由班 Sheet 重讀」即時睇返。舊制人手班睇得＋印得（只讀）</li>
           <li>🖨 <b>12 張列印全部網頁版</b>：通告（複用傳統版式＋FPS QR）／取錄／合格／學員／出席／接納通知書／班職員／收支／財政預算／總會資助／完成報告／領取證書——直接列印 PDF，唔使開 Sheet</li>
-          <li>⚠️ 要換新 <code>Code.gs</code>（v4.14.0）→ <code>setupSheets()</code>（自動補 CourseLinks 兩欄＋總模版 Config）→ 重新部署；另開一張空白 Sheet 跑訓練班模版 <code>setupCourseSheet()</code> 做<b>總模版</b>，ID 填入 Config <code>COURSE_TEMPLATE_ID</code>。member-portal <b>唔使改</b></li>
+          <li>⚠️ 要換新 <code>Code.gs</code>（v4.14.0）→ <code>setupSheets()</code>（自動補 CourseLinks 兩欄＋總模版 Config）→ 重新部署；另開一張空白 Sheet 跑訓練班模版 <code>setupCourseSheet()</code> 做<b>總模版</b>，ID 填入 Config <code>COURSE_TEMPLATE_ID</code>。收報名：CL 喺班 Sheet 用 🎓 選單「🔑 產生 API Key」→ 部署 → 貼返 <code>/exec</code>＋key（唔好跑一鍵建表，會清空）。member-portal <b>唔使改</b></li>
         </ul>
       </div>
       <div className="info-card">

@@ -31,7 +31,7 @@ export default function CourseSetupTab({ session, links, reloadLinks, districtNa
   const [sheetUrl, setSheetUrl] = useState('');
 
   const link = links.find(l => l.courseId === courseId);
-  const isDirect = !!link?.sheetId;   // 區系統自動建嘅班（可推送）
+  const isDirect = !!link?.sheetId;   // 區系統自動建嘅班（可寫入）
   const hasUrl = !!link?.scriptExecUrl;
 
   function pick(id: string) {
@@ -89,13 +89,13 @@ export default function CourseSetupTab({ session, links, reloadLinks, districtNa
     setBusy('');
     if (!r.ok || !r.data) { setError(r.error || '建立失敗'); return; }
     setSheetUrl(r.data.sheetUrl);
-    setMsg(`已建立班 Sheet＋開班登記 ✓（寫入 ${r.data.cellsApplied} 格${r.data.sharedTo ? `，已分享畀 ${r.data.sharedTo}` : ''}${r.data.shareWarning ? `；⚠️ ${r.data.shareWarning}` : ''}）`);
+    setMsg(`已建立班 Sheet＋開班登記 ✓（寫入 ${r.data.cellsApplied} 格${r.data.sharedTo ? `，已分享畀 ${r.data.sharedTo}` : ''}${r.data.shareWarning ? `；⚠️ ${r.data.shareWarning}` : ''}）。收報名記得叫 CL 產生 API Key＋部署，貼返 /exec＋key 入開班登記（見上面指引）。`);
     await reloadLinks();
     setCourseId(r.data.courseId);
     setSetup({ ...setup, courseId: r.data.courseId, sheetId: r.data.sheetId, sheetUrl: r.data.sheetUrl });
   }
 
-  /** ⬆ 儲存並推送去班 Sheet（直入班） */
+  /** ⬆ 儲存並寫入班 Sheet（直入班；唔係成員端推送，純後端同步） */
   async function push() {
     if (!courseId || !link) return;
     setError(''); setMsg('');
@@ -108,8 +108,8 @@ export default function CourseSetupTab({ session, links, reloadLinks, districtNa
       if (!s2.ok) linkMsg = `；⚠️ 開班登記摘要同步失敗：${s2.error}`;
     }
     setBusy('');
-    if (!r.ok || !r.data) { setError(r.error || '推送失敗'); return; }
-    setMsg(`已推送去班 Sheet ✓（${r.data.cellsApplied} 格，開班登記摘要已同步）${linkMsg}`);
+    if (!r.ok || !r.data) { setError(r.error || '寫入失敗'); return; }
+    setMsg(`已寫入班 Sheet ✓（${r.data.cellsApplied} 格，開班登記摘要已同步）${linkMsg}`);
     await reloadLinks();
   }
 
@@ -173,7 +173,7 @@ export default function CourseSetupTab({ session, links, reloadLinks, districtNa
             </select>
           </label>
           {link && <span className="muted" style={{ fontSize: 12 }}>
-            {isDirect ? `🆕 直入班（後端 Sheet：${link.sheetId}）` : hasUrl ? '舊制班（人手建表；呢度睇得印得，推送唔用得）' : '未設定 Script／Sheet'}
+            {isDirect ? `🆕 直入班（後端 Sheet：${link.sheetId}）` : hasUrl ? '舊制班（人手建表；呢度睇得印得，唔寫返 Sheet）' : '未設定 Script／Sheet'}
           </span>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <button className={view === 'form' ? 'btn-sm' : 'mini-btn'} onClick={() => setView('form')}>📝 填表</button>
@@ -181,6 +181,10 @@ export default function CourseSetupTab({ session, links, reloadLinks, districtNa
           </span>
         </div>
         {sheetUrl && <p style={{ fontSize: 13 }}>後端班 Sheet：<a href={sheetUrl} target="_blank" rel="noreferrer">{sheetUrl}</a></p>}
+        <p className="muted" style={{ fontSize: 12.5, margin: '6px 0 0' }}>
+          收報名三步（CL 做）：開班 Sheet → 🎓 訓練班選單 → <b>🔑 產生 API Key</b>（唔影響表格，唔好跑一鍵建表！）
+          → 部署做 Web App → 將 <code>/exec</code>＋key 交返 ADC，喺「開班登記」舊分頁貼入該班並儲存。掛班上架（成員睇到＋報到名）靠開班登記＋啟用，唔使撳寫入。
+        </p>
       </section>
 
       {view === 'form' ? (
@@ -189,7 +193,7 @@ export default function CourseSetupTab({ session, links, reloadLinks, districtNa
           <div className="no-print" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
             {!courseId && <button className="btn-sm" disabled={!!busy} onClick={create}>🏗 建立班 Sheet＋開班登記</button>}
             {courseId && <button className="mini-btn" disabled={!!busy} onClick={reload}>⬇ 由班 Sheet 重讀</button>}
-            {courseId && isDirect && <button className="btn-sm" disabled={!!busy} onClick={push}>⬆ 儲存並推送去班 Sheet</button>}
+            {courseId && isDirect && <button className="btn-sm" disabled={!!busy} onClick={push}>⬆ 儲存並寫入班 Sheet</button>}
             {courseId && <button className="mini-btn" disabled={!!busy} onClick={saveDraft}>💾 只儲存草稿（唔掂班 Sheet）</button>}
             {busy && <span className="muted" style={{ fontSize: 13 }}>處理緊…</span>}
           </div>

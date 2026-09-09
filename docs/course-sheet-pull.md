@@ -12,15 +12,16 @@
 | 0. 設總模版（一次過） | 區 Sheet＋Config | 開空白 Sheet 跑訓練班模版 `setupCourseSheet()` → 試算表 ID 填 `COURSE_TEMPLATE_ID`（新班資料夾選填 `COURSE_FOLDER_ID`） |
 | 1. 填設定 | 管理系統 `/training`「新制直入」 | 成份表：基本＋8 項預算（即時小計）＋班資料（8 節次＋20 職員）＋時間表＋通告內文＋接納＋財政 |
 | 2. 建表＋開班 | 同上 | 撳「🏗 建立班 Sheet＋開班登記」→ 區後台複製總模版＋寫入設定＋開班登記＋分享畀 CL 電郵 |
-| 3. 雙向同步 | 兩邊 | 區系統改 →「⬆ 推送」寫返 Sheet；職員喺 Sheet 改 →「⬇ 重讀」即時睇返（列印數據一併更新） |
+| 2b. 收報名（CL 做） | 班 Sheet | 🎓 選單 → 🔑 產生 API Key（獨立功能，唔影響表格；唔好跑一鍵建表！）→ 部署 Web App → /exec＋key 交 ADC 貼入開班登記。掛班上架靠開班登記＋啟用；報名經 /exec 直接寫入 SHEET |
+| 3. 雙向同步 | 兩邊 | 區系統改 →「⬆ 寫入」同步返 Sheet；職員喺 Sheet 改 →「⬇ 重讀」即時睇返（列印數據一併更新） |
 | 4. 列印 | 同上「列印預覽」 | 12 張：通告／取錄／合格／學員／出席／接納／班職員／收支／財政預算／資助／完成報告／領取證書，直接印 PDF |
-| 5. 舊班 | 同上 | 人手建嘅班睇得＋印得（經 /exec 讀），推送唔用得；可「只儲存草稿」 |
+| 5. 舊班 | 同上 | 人手建嘅班睇得＋印得（經 /exec 讀），唔寫返 Sheet；可「只儲存草稿」 |
 
 API（全部需 `canCourse`）：`createCourseSheet {link, setup, cells, clEmail}`／
 `pushCourseSetup {courseId, setup, cells}`／`pullCourseSheetRaw {courseId}｜{scriptExecUrl, scriptApiKey}`
 （有 /exec 行訓練班 Script `getCourseSheetRaw`，冇就行 direct `openById`，同一形狀）／
 `getCourseSetup {courseId}`（攞 setupJson）。寫入座標跟 v4.13.0 模版，見 `lib/course-setup.ts`。
-收表試驗期唔變（照舊經每班 /exec；自動建嘅表自帶 Script 碼，部署一次就收得）。
+收表唔變（照舊經每班 /exec；自動建嘅表自帶 Script 碼，但 key 要 CL 獨立產生——見 2b，唔好跑一鍵建表）。
 
 ## 流程總覽（CL 填一次）
 

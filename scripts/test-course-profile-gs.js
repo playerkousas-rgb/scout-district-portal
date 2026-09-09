@@ -125,12 +125,14 @@ const sheets = {
 };
 
 const props = {};
+let lastAlert = '';
 const ctx = {
   console,
   SpreadsheetApp: {
     getActiveSpreadsheet: () => ({
       getSheetByName: (n) => sheets[n] || null,
     }),
+    getUi: () => ({ alert: (title, msg) => { lastAlert = String(title) + '\n' + String(msg == null ? '' : msg); } }),
   },
   Session: { getScriptTimeZone: () => 'Asia/Hong_Kong' },
   Utilities: {
@@ -351,6 +353,25 @@ check('getCourseSheetRaw 缺頁 → 該 key 係 []（唔報錯）', () => {
   const r = ctx.getCourseSheetRaw_({ apiKey: KEY }).data;
   assert.deepStrictEqual(plain(r.input03), []);
   assert.deepStrictEqual(plain(r.accept), []);
+});
+
+check('rotateCourseApiKey：出新 key＋存 hash＋alert 顯示（唔掂表格）', () => {
+  const before = ctx.getCourseProfile_({ apiKey: KEY }).data.courseName;
+  const k1 = ctx.rotateCourseApiKey();
+  assert.ok(/^ck_[a-z0-9]+$/.test(k1), 'key 格式：' + k1);
+  assert.notStrictEqual(k1, KEY);
+  assert.ok(lastAlert.includes(k1), 'alert 要顯示新 key');
+  assert.ok(/部署/.test(lastAlert), 'alert 要有部署指引');
+  assert.strictEqual(props.API_KEY_HASH, ctx.sha256_(k1));
+  assert.strictEqual(ctx.getCourseProfile_({ apiKey: k1 }).data.courseName, before, '新 key 用得，表格冇郁');
+});
+
+check('rotate 後舊 key 即時作廢（唔影響已收資料）', () => {
+  const bad = ctx.getCourseProfile_({ apiKey: KEY });
+  assert.strictEqual(bad.ok, false);
+  assert.ok(/Unauthorized/.test(bad.error));
+  // 還原 key，等之後測試環境乾淨（之後冇測試，純保險）
+  props.API_KEY_HASH = ctx.sha256_(KEY);
 });
 
 console.log(pass ? `\n全部通過（${pass} 項）✓` : '\n冇跑到任何測試');
