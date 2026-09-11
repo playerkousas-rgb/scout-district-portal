@@ -40,6 +40,14 @@
 >   （寄件人直接用班信箱，須部署帳戶 Gmail send-as 驗證；未驗證自動 fallback）。
 >   Sheet 唔使搬去班信箱：職員經 App（共用密碼）存取，GS 留機房歸檔。全部見
 >   `docs/course-email-drive-architecture.md`（已重寫非 Gmail 版）。測試 16 項。
+> - **v4.17.1（同日）：📬 收生通知**——用戶核心需求「發接納／不接納通知＋查詢信職員要收到」。
+>   新後台 action `sendCourseRegNotice`（notices[{id,kind}]；內容由班 Sheet 帶：Input02 B1 班名／
+>   9–16 節次（H=FALSE skip）／Print_接納通知書 23/30/32/34 人手格／職員 23–42 班領導人署名；
+>   ReplyTo 優先序 b.replyTo > 參數「訓練班電郵」（direct 先讀到）> 領導人電郵；副本 CC 領導人；
+>   紀錄寫 CourseLinks 新欄 `regNotices` JSON {id:{kind,at,by}}，flatten link 先寫防洗走）；
+>   CourseOpsTab 新「📬 收生通知」分頁（未寄／已接納／已拒絕篩選＋批量寄＋逐筆重寄＋限額提示）；
+>   demo engine 有 case；mock server getCourseSheetRaw 改用 CourseRegs 真數據＋seed 4 筆示範報名；
+>   測試 19 項（+⑨⑩⑩b）。A/B（webmail/IMAP/轉寄）5 分鐘驗證法＋C（Gmail POP3）逐步已寫入架構文件。
 >
 
 > 2026-09-09（第八輪）v4.16.0：**📋 訓練班通告全文欄**（用戶問：PDF 定網頁擇要用邊個＋系統格式同區通告唔同、有項目冇）。

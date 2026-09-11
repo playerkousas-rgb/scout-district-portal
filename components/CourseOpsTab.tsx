@@ -35,7 +35,7 @@ interface Props {
   courseTemplateSet: boolean;
 }
 
-type SubTab = 'review' | 'notice' | 'payment' | 'done' | 'connect';
+type SubTab = 'review' | 'notice' | 'reg' | 'payment' | 'done' | 'connect';
 
 const STATUS_LABEL: Record<string, string> = { approved: '已接納', rejected: '已拒絕', cancelled: '已取消', pending: '待批' };
 
@@ -67,6 +67,7 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
   const [emailChecked, setEmailChecked] = useState(true);
 
   const [payFilter, setPayFilter] = useState<'all' | 'unchecked' | 'checked' | 'approved'>('all');
+  const [regFilter, setRegFilter] = useState<'todo' | 'approved' | 'rejected' | 'all'>('todo');
   const [printsOpen, setPrintsOpen] = useState(false);
   const [opsInfo, setOpsInfo] = useState<CourseOpsInfo | null>(null);
 
@@ -457,9 +458,9 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
           {chip(mounted, '📢 已掛載', '未掛載')}
           {raw && <span className="muted" style={{ fontSize: 12.5 }}>報名 {respCount}{payStats.total ? `・已核對收款 ${payStats.checked}/${payStats.total}` : ''}</span>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {(['review', 'notice', 'payment', 'done', 'connect'] as SubTab[]).map(t => (
+            {(['review', 'notice', 'reg', 'payment', 'done', 'connect'] as SubTab[]).map(t => (
               <button key={t} className={sub === t ? 'btn-sm' : 'mini-btn'} onClick={() => setSub(t)}>
-                {{ review: '🔎 批核', notice: '📢 通告＋掛載', payment: '💰 收款核對', done: '🎓 完成', connect: '🔗 連結' }[t]}
+                {{ review: '🔎 批核', notice: '📢 通告＋掛載', reg: '📬 收生通知', payment: '💰 收款核對', done: '🎓 完成', connect: '🔗 連結' }[t]}
               </button>
             ))}
           </span>
@@ -612,6 +613,81 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
           </section>
         </>
       )}
+
+      {/* ── 📬 收生通知 ── */}
+      {sub === 'reg' && (() => {
+        let recs: Record<string, { kind: string; at: string; by: string }> = {};
+        try { recs = JSON.parse(String(link?.regNotices || '') || '{}') || {}; } catch { recs = {}; }
+        const decided = paymentRows.filter(r => r.status === 'approved' || r.status === 'rejected');
+        const pendingN = paymentRows.length - decided.length;
+        const todo = decided.filter(r => !recs[r.id]);
+        const shownRegs = regFilter === 'todo' ? todo
+          : regFilter === 'approved' ? decided.filter(r => r.status === 'approved')
+          : regFilter === 'rejected' ? decided.filter(r => r.status === 'rejected')
+          : decided;
+        async function sendRegs(items: Array<{ id: string; kind: 'approved' | 'rejected' }>) {
+          if (!courseId || !items.length) return;
+          setBusy('reg'); setError(''); setMsg('');
+          const r = await api.sendCourseRegNotice(session.token, {
+            courseId, notices: items, by: session.displayName,
+            replyTo: (courseEmail.trim() || leaderEmail),
+          });
+          setBusy('');
+          if (!r.ok || !r.data) { setError(r.error || '寄通知失敗'); return; }
+          const bad = (r.data.results || []).filter(x => !x.ok);
+          let m = `✉ 已寄 ${r.data.sent} 封收生通知（回覆會去${r.data.replyTo ? ' ' + r.data.replyTo : '班信箱'}；副本 CC 班領導人）`;
+          if (bad.length) m += `\n⚠️ ${bad.length} 封失敗：${bad.map(x => x.id + (x.error ? `（${x.error}）` : '')).join('、')}`;
+          if (r.data.warning) m += `\nℹ ${r.data.warning}`;
+          await reloadLinks();
+          setMsg(m);
+        }
+        return (
+          <section className="info-card">
+            <h3>📬 收生通知（CL 喺 App 批完收生之後，喺呢度一撳寄俾申請人）</h3>
+            <p style={{ fontSize: 13, margin: '4px 0 8px' }}>
+              <b>接納通知</b>：上課節次＋報到時間＋攜帶物品自動由班 Sheet 帶出；<b>不接納通知</b>：客氣版（名額所限）。
+              回覆會去班信箱，副本 CC 班領導人（{leaderEmail || '職員表未填電郵'}）。
+              ⚠️ 每日郵件限額（免費 Gmail 約 100 封，連副本每人約計兩封）——大班分批寄。
+            </p>
+            {pendingN > 0 && <div className="err" style={{ marginBottom: 8 }}>⏳ 仲有 {pendingN} 位待批——等 CL 喺訓練班 App 度接納／拒絕之後先寄得。</div>}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+              {([['todo', `未寄（${todo.length}）`], ['approved', '已接納'], ['rejected', '已拒絕'], ['all', '全部']] as Array<[typeof regFilter, string]>).map(([k, lb]) => (
+                <button key={k} className={regFilter === k ? 'btn-sm' : 'mini-btn'} onClick={() => setRegFilter(k)}>{lb}</button>
+              ))}
+              <span style={{ marginLeft: 'auto' }}>
+                <button className="btn-sm" disabled={!!busy || !todo.length}
+                  onClick={() => sendRegs(todo.map(r => ({ id: r.id, kind: r.status === 'approved' ? 'approved' as const : 'rejected' as const })))}>
+                  {busy === 'reg' ? '寄出中…' : `✉ 寄晒未寄（${todo.length}）`}
+                </button>
+              </span>
+            </div>
+            {!raw ? <p className="muted" style={{ fontSize: 13 }}>未讀取——先去「🔎 批核」讀取。</p> : shownRegs.length ? (
+              <div style={{ overflowX: 'auto' }}><table className="data-table">
+                <thead><tr>{['報名', '姓名', '旅', '狀態', '電郵', '通知紀錄', '動作'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+                <tbody>{shownRegs.map(r => {
+                  const rec = recs[r.id];
+                  const kind = r.status === 'approved' ? 'approved' as const : 'rejected' as const;
+                  return (
+                    <tr key={r.id}>
+                      <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{String(r.id).replace('T', ' ').slice(0, 16)}</td>
+                      <td>{r.name || '—'}</td>
+                      <td>{r.troopNo || r.troop || '—'}</td>
+                      <td>{STATUS_LABEL[r.status] || r.status}</td>
+                      <td style={{ fontSize: 12 }}>{r.email || <b style={{ color: '#b91c1c' }}>冇電郵</b>}</td>
+                      <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{rec ? <>✔ {rec.kind === 'approved' ? '接納' : '不接納'}・{String(rec.at).slice(5, 16).replace('T', ' ')}・{rec.by}</> : '—'}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <button className="mini-btn" disabled={!!busy || !r.email} onClick={() => sendRegs([{ id: r.id, kind }])}>
+                          {rec ? '↻ 重寄' : kind === 'approved' ? '✉ 寄接納通知' : '✉ 寄不接納通知'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table></div>
+            ) : <p className="muted" style={{ fontSize: 13 }}>{decided.length ? '呢個篩選冇人。' : '仲未有接納／拒絕紀錄——等 CL 喺 App 度批完先有得寄。'}</p>}
+          </section>
+        );
+      })()}
 
       {/* ── 💰 收款核對 ── */}
       {sub === 'payment' && (

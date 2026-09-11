@@ -173,9 +173,35 @@ const ctx = {
         } });
       }
       if (payload.action === 'getCourseSheetRaw') {
+        // v4.17.1 預覽示範：該班一筆報名都冇 → 塞四筆示範報名（收款核對／收生通知用；重開即 reset）
+        if (row && readSheet('CourseRegs').filter(r => String(r.courseId || '') === String(row.courseId)).length === 0) {
+          const shR = sheets['CourseRegs'];
+          const hdR = (shR.getDataRange().getValues()[0] || []).map(x => String(x).trim());
+          if (hdR.length) {
+            [
+              { email: 'chan@example.com', nameZh: '陳小文', phone: '91230001', status: 'approved' },
+              { email: 'wong@example.com', nameZh: '黃小玲', phone: '92340001', status: 'approved' },
+              { email: 'lee@example.com', nameZh: '李小強', phone: '93450001', status: 'rejected' },
+              { email: 'ho@example.com', nameZh: '何小美', phone: '94560001', status: 'pending' },
+            ].forEach((d, i) => {
+              shR.appendRow(hdR.map(h => {
+                if (h === 'id') return 'reg-demo-' + String(row.courseId) + '-' + (i + 1);
+                if (h === 'districtCode') return 'SKW';
+                if (h === 'courseId') return row.courseId;
+                if (h === 'courseTitle') return row.title;
+                if (h === 'timestamp') return '2026/09/0' + (i + 1) + ' 10:0' + i + ':00';
+                return d[h] || '';
+              }));
+            });
+            console.log('🧪 [示範] 已為 ' + row.courseId + ' 塞 4 筆模擬報名（收款核對／收生通知用）');
+          }
+        }
+        const regs = readSheet('CourseRegs').filter(r => row && String(r.courseId || '') === String(row.courseId));
+        const resp = [['時間戳記', '電郵地址', '中文姓名', '聯絡電話', '審批狀態']]
+          .concat(regs.map(r => [r.timestamp || r.id || '', r.email || '', r.nameZh || '', r.phone || '', r.status || 'pending']));
         return reply({ ok: true, data: {
-          input01: [], input02: [], input03: [], input04: [], resp: [], paramsWX: [],
-          notice: [], accept: [], finance: [], completion: [], cert: [], subsidy: [],
+          input01: [], input02: [[String((row && row.title) || '模擬訓練班'), '']], input03: [], input04: [],
+          resp, paramsWX: [], notice: [], accept: [], finance: [], completion: [], cert: [], subsidy: [],
           pulledAt: new Date().toISOString(), rev: 1, revSavedAt: new Date().toISOString(), revBy: 'mock',
         } });
       }

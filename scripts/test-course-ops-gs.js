@@ -79,7 +79,7 @@ const LINK_HEADERS = ['courseId', 'districtCode', 'title', 'badgeName', 'section
   'active', 'createdAt',
   'fpsQrPayload', 'fpsAmount', 'fpsReference', 'fpsAccountName', 'fpsAccountNumber', 'fpsUpdatedAt',
   'leader', 'uniform', 'remarks', 'signupText', 'feeNote',
-  'sheetId', 'setupJson', 'gsUrl', 'approval', 'approvedAt', 'approvedBy', 'revisions'];
+  'sheetId', 'setupJson', 'gsUrl', 'approval', 'approvedAt', 'approvedBy', 'revisions', 'regNotices'];
 const linkRow = (o) => LINK_HEADERS.map(h => (o[h] === undefined ? '' : o[h]));
 
 function seedCourseSS() {
@@ -372,6 +372,41 @@ test('⑧ 普通儲存 saveCourseLink 唔會洗走 approval／revisions', () => 
   assert.strictEqual(after.title, '改名咗');
   assert.strictEqual(after.approval, before.approval);
   assert.strictEqual(after.revisions, before.revisions);
+});
+
+// ── ⑨⑩ 收生通知 ──
+test('⑨ 收生通知：接納＋不接納一撳寄（ReplyTo 班信箱＋紀錄寫返 CourseLinks）', () => {
+  mails.length = 0;
+  const r = ctx.sendCourseRegNotice_(tk, {
+    courseId: 'cl-ops1', by: '示範ADC', replyTo: 'ops1@skwscout.org.hk',
+    notices: [
+      { id: '2026-09-01T10:00:00Z', kind: 'approved' },
+      { id: '2026-09-02T11:00:00Z', kind: 'rejected' },
+    ],
+  });
+  assert.ok(r.ok, r.error);
+  assert.strictEqual(r.data.sent, 2);
+  assert.strictEqual(mails.length, 2);
+  assert.ok(String(mails[0].subject).includes('接納通知'), mails[0].subject);
+  assert.ok(String(mails[0].htmlBody).includes('已獲接納'));
+  assert.ok(String(mails[0].htmlBody).includes('陳小文'));
+  assert.ok(String(mails[1].subject).includes('申請結果'));
+  assert.ok(String(mails[1].htmlBody).includes('未能獲得接納'));
+  assert.strictEqual(mails[0].replyTo, 'ops1@skwscout.org.hk');
+  const link = ctx.courseLinkById_('cl-ops1');
+  const recs = JSON.parse(link.regNotices);
+  assert.strictEqual(recs['2026-09-01T10:00:00Z'].kind, 'approved');
+  assert.strictEqual(recs['2026-09-02T11:00:00Z'].kind, 'rejected');
+});
+test('⑩ 收生通知：ghost id 回 error result（唔會炸成批）', () => {
+  const r = ctx.sendCourseRegNotice_(tk, { courseId: 'cl-ops1', by: 'X', notices: [{ id: 'ghost', kind: 'approved' }] });
+  assert.ok(r.ok && r.data.results[0].ok === false && /找不到/.test(r.data.results[0].error));
+});
+test('⑩b 收生通知：申請人冇電郵 → error result', () => {
+  const sh = courseSS._sheets['表格回應'];
+  sh.appendRow(['2026-09-03T09:00:00Z', '', '無郵人', '90000000', 'approved']);
+  const r = ctx.sendCourseRegNotice_(tk, { courseId: 'cl-ops1', by: 'X', notices: [{ id: '2026-09-03T09:00:00Z', kind: 'approved' }] });
+  assert.ok(r.ok && r.data.results[0].ok === false && /冇電郵/.test(r.data.results[0].error));
 });
 
 console.log(`\n共 ${pass} 項通過${process.exitCode ? '（有失敗）' : ' ✓'}`);

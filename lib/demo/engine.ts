@@ -758,6 +758,25 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       if (!to || !to.includes('@')) return fail('缺少收件人電郵（to——通常係班領導人 email）');
       return ok({ sent: true, to, cc: String(payload.cc || ''), fromUsed: 'demo@skwscout.org.hk', warning: '🎭 示範版：唔會真係寄電郵。', subject: '[示範] ' + String(payload.kind || 'custom') });
     }
+    case 'sendCourseRegNotice': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const row = d.courseLinks.find(x => x.courseId === payload.courseId);
+      if (!row) return fail('找不到此訓練班（courseId）');
+      const items = Array.isArray(payload.notices) ? payload.notices : [];
+      const recs: AnyObj = (() => { try { return JSON.parse(String(row.regNotices || '') || '{}') || {}; } catch { return {}; } })();
+      const results: AnyObj[] = [];
+      let sent = 0;
+      items.forEach((it: AnyObj) => {
+        const id = String(it.id || '').trim();
+        if (!id) { results.push({ id, ok: false, error: 'missing id' }); return; }
+        recs[id] = { kind: String(it.kind || 'approved'), at: nowIso(), by: String(payload.by || '') };
+        results.push({ id, ok: true });
+        sent++;
+      });
+      row.regNotices = JSON.stringify(recs);
+      persistDb();
+      return ok({ sent, results, regNotices: recs, replyTo: String(payload.replyTo || ''), warning: '🎭 示範版：唔會真係寄電郵。' });
+    }
     case 'getCourseOpsInfo': {
       const r = requireUser(token, 2); if (isErr(r)) return r;
       return ok({

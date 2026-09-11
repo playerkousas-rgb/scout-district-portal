@@ -44,6 +44,14 @@
 
 > 建議組合：**A 做核心＋B 做通知**。C 係零成本升級位；D 係日後真想「一戶過」嘅代價表。
 
+### 點樣 5 分鐘查到 A／B 做唔做到（問寄存商或自己試）
+
+1. **Webmail**：瀏覽器開 `webmail.skwscout.org.hk`（cPanel 寄存通常係呢個；唔係就問寄存商網址）→ 登入班信箱見到收件匣＝有 webmail（A 成立）。
+2. **IMAP／SMTP**：手機郵件 App 加戶口——收件伺服器 IMAP `mail.skwscout.org.hk`（或 imap.）port 993 SSL；SMTP `mail.skwscout.org.hk` port 465／587——收發到＝A 成立。
+3. **轉寄**：寄存控制台（cPanel → Email → Forwarders／電郵轉寄）見到轉寄設定＝B 成立。
+4. 懶得試就直接問寄存商一句：「`@skwscout.org.hk` 嘅信箱支唔支援 (1) webmail (2) IMAP/POP3 (3) 自動轉寄（保留副本）？」——三樣通常最少有兩樣。
+5. 若果**連 webmail 都冇**（淨係轉寄戶口）：A 冇、B 就係佢全部功能 → 直接行 C。
+
 ### A. Webmail／IMAP＋共用密碼（核心，建議）
 - 職員用寄存商嘅 **webmail**（例 `webmail.skwscout.org.hk`）或手機／電腦郵件 App（**IMAP＋SMTP**）登入班信箱。
 - 密碼班職員內部分享——**同訓練班 App「每班共用密碼」完全同一套文化**，冇新增負擔。
@@ -66,6 +74,18 @@
 - 每個班信箱＝一個授權（每月約 US$7/戶）——每班一戶長期開就貴；只開一兩個「當值」授權輪流用又失去每班獨立歸檔。
 - 換嚟嘅係：真 Gmail＋委派存取＋Drive／Sheet 同戶（用戶嘅「一戶過」夢想成真）。
 - **現階段唔建議即刻做**——A+B 已經解決九成；等真係痛到先諗。
+
+## 三之二、收生通知（v4.17.1 已內建喺區系統）
+
+> 核心需求：**發接納／不接納通知**。CL 喺訓練班 App 批完收生（接納／拒絕）之後，
+> 管理層喺 portal「⭐ 新版流程 → 📬 收生通知」一撳就寄——**唔使等 course repo 改**。
+
+- **接納通知**：上課節次（Input02 上通告嗰啲）＋報到時間／攜帶物品／其他／備註（Print_接納通知書人手格）自動組版，班領導人署名。
+- **不接納通知**：客氣版（名額所限，歡迎日後再報名）。
+- **ReplyTo＝班信箱**（批核分頁填嘅「訓練班電郵」> 班 Sheet 參數格 > 班領導人電郵）——申請人回覆直接去班職員度；**副本 CC 班領導人**（就算班信箱未設定好，CL 都一定收到副本）。
+- 每筆有**通知紀錄**（CourseLinks `regNotices`：邊個幾時寄邊種），有「✉ 寄晒未寄（N）」一鍵批量＋逐筆重寄。
+- ⚠️ 郵件限額：免費 Gmail（skddbs）每日約 100 封（連副本每人約計兩封）——大班分批寄；上 Workspace／alias 限額高好多。
+- （course repo 嗰邊日後可以整埋 App 內「寄通知」掣直接叫同一個 GAS action——見第六節。）
 
 ## 四、Sheet 點解唔使搬去班信箱
 
@@ -91,6 +111,17 @@
 每班嘅「訓練班電郵」（班信箱地址）喺**批核分頁**填，寫入班 GS 參數分頁「訓練班電郵」格——
 訓練班 App 通告查詢行會自動用佢；區系統寄通知 ReplyTo（mode=course 時連 From）亦自動用佢。
 
+## 五之二、C 案（免費 Gmail POP3）逐步（~15 分鐘）
+
+1. 開一個**免費 Gmail 做營運中樞**，例 `skw.course.ops@gmail.com`（一個夠，用 label 分班；想每班完全獨立就每班開一個 `blt2601.skw@gmail.com`）。
+2. Gmail ⚙ →「查看所有設定」→「帳戶和匯入」→ **「查看其他帳戶的郵件」→ 新增郵件帳戶**：
+   - 填班信箱地址 → 揀「透過 POP3 匯入郵件」；
+   - POP 伺服器／port／使用者名稱／密碼：問寄存商（通常 `mail.skwscout.org.hk`，port 995 SSL）；
+   - ✅「在伺服器上保留其他帳戶郵件副本」；✅「標籤收到的郵件」填班名。
+3. 同一頁 **「用這個地址傳送郵件」→ 新增另一個電郵地址**：填同一個班地址 → SMTP 伺服器＋port＋班信箱登入 → Gmail 寄一封驗證信去班信箱 → 去 webmail（或等步驟 2 拉入嚟）撳驗證連結。
+4. 完成。職員開呢個 Gmail：班信自動入嚟（有 label），回信揀班地址寄出——**查詢信 CL／職員一定收到**；仲可以喺呢個 Gmail 加**委派存取**俾多個職員（唔使共享密碼）。
+5. 每班加一條 POP3＋一個 send-as（新班約 5 分鐘）。
+
 ## 六、Course repo 建議改動清單（交返訓練班系統嗰邊，可遲啲做）
 
 1. **CourseFactory.gs**：`createCourse` 加 `file.addEditor(OPS_EMAIL)`（Script Properties `OPS_EMAIL`）
@@ -98,3 +129,5 @@
 2. **coursev5 加 `setParamLabel` action**（label 對位寫參數分頁一格）——
    冇 share 嘅班都可以經 Script tick「區會批准」／寫「訓練班電郵」。
 3. （可選）`getCourseSummary` 已回 `courseEmail`／`approved`——夠用，唔使改。
+4. （可選）收生通知而家由區系統寄（見三之二）；如果想 CL 喺 App 批完即場寄，可以喺 coursev5
+   加 `sendRegNotice` action（同樣 MailApp＋ReplyTo 班信箱）＋ intake 頁加掣——同區系統版二選一就得。

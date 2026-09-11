@@ -188,6 +188,7 @@ export interface CourseLink {
   // ── 新版流程（v4.17.0：訓練班系統先行）──
   gsUrl?: string;             // CL 交嚟嘅班 Google Sheet 網址（批核直接開 GS 用）
   approval?: string;          // '' | 'PENDING' | 'APPROVED'（區會批准）
+  regNotices?: string;        // v4.17.1 收生通知紀錄 JSON（{報名id:{kind,at,by}}）
   approvedAt?: string;        // 批准時間（ISO）
   approvedBy?: string;        // 批准人
   revisions?: string;         // 修訂清單 JSON（CourseRevision[]；list 唔回原字串）
@@ -198,6 +199,13 @@ export interface CourseChange {
   label: string;              // 人類可讀欄位名（例「名額」「1. 膳食 第2行 價錢」）
   from: string;               // 原值（CL 填嘅）
   to: string;                 // 新值（管理層改嘅）
+}
+
+/** 收生通知紀錄一筆（CourseLinks.regNotices JSON） */
+export interface CourseRegNoticeRec {
+  kind: 'approved' | 'rejected' | string;   // 寄咗邊種
+  at: string;                               // ISO 時間
+  by: string;                               // 邊個寄
 }
 
 /** 修訂紀錄一筆（CourseLinks.revisions JSON） */

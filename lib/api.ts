@@ -10,7 +10,7 @@ import type {
   CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
   Circular, CircularsBoard, CircularStatus, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
-  CourseChange, CourseRevision, CourseOpsInfo,
+  CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec,
 } from './types.ts';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers.ts';
 import type { IcsEvent } from './ics.ts';
@@ -208,6 +208,11 @@ export const api = {
     callPost('sendCourseEmail', { token, ...req }),
   getCourseOpsInfo: (token: string): Promise<ApiResult<CourseOpsInfo>> =>
     callPost('getCourseOpsInfo', { token }),
+  // v4.17.1 收生通知：接納／不接納通知寄俾申請人（內容由班 Sheet 帶出；ReplyTo 班信箱＋CC 班領導人）
+  sendCourseRegNotice: (token: string, req: {
+    courseId: string; notices: Array<{ id: string; kind: 'approved' | 'rejected' }>; by: string; replyTo?: string;
+  }): Promise<ApiResult<{ sent: number; results: Array<{ id: string; ok: boolean; error?: string }>; regNotices: Record<string, CourseRegNoticeRec>; replyTo?: string; warning?: string }>> =>
+    callPost('sendCourseRegNotice', { token, ...req }),
 
   // 區通告（職員專用；輸出傳統格式 PDF 上載區網）
   getCirculars: (token: string): Promise<ApiResult<CircularsBoard>> =>

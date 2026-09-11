@@ -16,7 +16,9 @@ export default function UpdatesPage() {
           <li>✉️ <b>CL 電郵通知</b>（批准／掛載／收款）：寄俾班領導人，<b>ReplyTo＝班信箱</b>（例 <code>blt2601@skwscout.org.hk</code>）——CL 回覆去班信箱，機房信箱（<code>skw@hkirscout.org.hk</code>）零班務信。班信箱管理建議 Gmail 委派存取＋Google Group（睇 <code>docs/course-email-drive-architecture.md</code>），唔再轉寄 CL 個人電郵</li>
           <li>🔗 <b>連結分頁</b>：GS／Script／Key／Drive 一版管晒＋「📨 俾 CL 嘅開班指引」一鍵複製（開班網址＋開班碼由 Config 帶出）</li>
           <li>🆕 後台新 action：<code>pullCourseSummary</code>／<code>saveCourseApproval</code>／<code>setCoursePaymentCheck</code>／<code>sendCourseEmail</code>／<code>getCourseOpsInfo</code>；CourseLinks 加 <code>gsUrl／approval／approvedAt／approvedBy／revisions</code> 5 欄（<code>setupSheets()</code> 自動補）；Config 加 <code>COURSE_EMAIL_FROM／COURSE_FACTORY_URL／COURSE_FACTORY_CODE</code>。測試：<code>node scripts/test-course-ops-gs.js</code>（15 項）</li>
-          <li>⚠️ 部署：換 <code>Code.gs</code>（v4.17.0）→ <code>setupSheets()</code>（補欄唔清空）→ 重新部署；Config 填 CourseFactory 網址＋開班碼</li>
+          <li>📬 <b>收生通知（v4.17.1）</b>：CL 喺 App 批完收生，「📬 收生通知」分頁一撳寄<b>接納／不接納通知</b>俾申請人——節次＋報到時間＋攜帶物品自動由班 Sheet 帶出，ReplyTo＝班信箱＋副本 CC 班領導人，有通知紀錄＋批量寄</li>
+          <li>📧 <b>班信箱唔使係 Gmail</b>：區 domain（skwscout.org.hk）寄存信箱照用——ReplyTo 天然有效；管理＝webmail/IMAP 共用密碼／免費 Gmail POP3（<code>docs/course-email-drive-architecture.md</code> 有逐步）；Config <code>COURSE_EMAIL_FROM_MODE=course</code> 可以連寄件人都用班信箱</li>
+          <li>⚠️ 部署：換 <code>Code.gs</code>（v4.17.1）→ <code>setupSheets()</code>（補欄唔清空）→ 重新部署；Config 填 CourseFactory 網址＋開班碼</li>
         </ul>
       </div>
       <div className="info-card">
