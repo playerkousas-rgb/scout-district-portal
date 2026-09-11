@@ -37,6 +37,9 @@
 - 日常答一兩句 → 用**自己 email** 覆（收到轉寄信直接撳回覆）——申請人見到職員個人地址，冇問題
 - 想用班地址出 → 開 **webmail**（`webmail.skwscout.org.hk` 登入班信箱覆）——申請人見到班地址
 
+（收信轉寄去**任何 email** 都得，唔使 Gmail。CL 個 mail app 唔係 Gmail 而想喺 app 內用班地址：
+加一個 IMAP 郵件帳戶＝班信箱一次過收＋回——呢個教學之後喺訓練班系統（course repo）做。）
+
 **其他全部唔使做：**
 - ~~send-as~~（教個人 Gmail 扮班地址出信）：每班做一次＋要班信箱密碼——**開頭唔好做**；
   CL 用落覺得日日開 webmail 麻煩先做（見三之四）。
@@ -216,4 +219,7 @@
 3. **roster／intake 顯示**（加顯示，唔改邏輯）：報名行加「💰✔ 已核對收款」「↩ 已退款」「✉ 通知書已寄（accepted/rejected＋時間）」
    ——「表格回應」AX/AY/AZ/BA 四欄照 header 名讀。
 4. CourseFactory `file.addEditor(OPS_EMAIL)`、coursev5 setParamLabel（舊有待辦）。
+5. **非 Gmail send-as／IMAP 教學**（用戶指定喺 course repo 嗰邊做）：班職員想喺自己 mail app
+   用班地址回覆——Gmail＝send-as；Outlook/iPhone Mail/Thunderbird＝加 IMAP 帳戶（mail.skwscout.org.hk）
+   一次過收＋回。教學放 course repo 使用說明／guide 頁。
 5. （可選）`getCourseSummary` 已回 `courseEmail`／`approved`——夠用，唔使改。
