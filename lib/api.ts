@@ -197,6 +197,8 @@ export const api = {
     callPost('saveCourseApproval', { token, ...req }),
   setCoursePaymentCheck: (token: string, req: { courseId: string; checks: Array<{ id: string; verified: boolean }>; by: string }): Promise<ApiResult<{ saved: boolean; results: Array<{ id: string; ok: boolean; error?: string; verified?: boolean }>; path: string }>> =>
     callPost('setCoursePaymentCheck', { token, ...req }),
+  setCourseRefund: (token: string, req: { courseId: string; refunds: Array<{ id: string; refunded: boolean }>; by: string }): Promise<ApiResult<{ saved: boolean; results: Array<{ id: string; ok: boolean; error?: string; refunded?: boolean }>; path: string }>> =>
+    callPost('setCourseRefund', { token, ...req }),
   sendCourseEmail: (token: string, req: {
     courseId: string; kind: 'approved' | 'mounted' | 'payment' | 'custom';
     to: string; cc?: string; title?: string;

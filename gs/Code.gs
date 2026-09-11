@@ -305,7 +305,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.17.1',
+      version: '4.17.2',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -459,6 +459,7 @@ function doPost(e) {
       case 'pullCourseSummary':    return json(pullCourseSummary_(b.token, b));
       case 'saveCourseApproval':   return json(saveCourseApproval_(b.token, b));
       case 'setCoursePaymentCheck': return json(setCoursePaymentCheck_(b.token, b));
+      case 'setCourseRefund': return json(setCourseRefund_(b.token, b));
       case 'sendCourseEmail':      return json(sendCourseEmail_(b.token, b));
       case 'sendCourseRegNotice':  return json(sendCourseRegNotice_(b.token, b));
       case 'getCourseOpsInfo':     return json(getCourseOpsInfo_(b.token));
@@ -3776,6 +3777,66 @@ function setCoursePaymentCheck_(token, b) {
       try { r = JSON.parse(resp.getContentText()); } catch (e) {}
       if (r.ok) results.push({ id: String((c && c.id) || ''), ok: true, verified: !(c && c.verified === false) });
       else results.push({ id: String((c && c.id) || ''), ok: false, error: (r && r.error) || '寫入失敗' });
+    } catch (e) { results.push({ id: String((c && c.id) || ''), ok: false, error: String(e) }); }
+  });
+  var failed = results.filter(function (x) { return !x.ok; }).length;
+  return ok({ saved: failed < results.length, results: results, path: 'exec' });
+}
+
+/**
+ * 已退款 tick（管理層退咗錢俾未獲接納／取消嘅申請人之後 tick，CL 喺 App 見到）——寫「表格回應」AX/AY
+ * （已退款／退款核對人）。b: { courseId, refunds[{id(=時間戳記), refunded}], by }。
+ * 首選 direct 寫班 Sheet；fallback 經該班 /exec setCourseRefund（course repo Refund.gs，
+ * 照 PaymentCheck.gs 語義：identity 對行、唔 bump rev、自動補表頭；
+ * 舊班 Script 未貼 Refund.gs 之前 exec 模式會回 error——direct 模式唔受影響）。
+ */
+function setCourseRefund_(token, b) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  b = b || {};
+  var link = courseLinkById_(b.courseId);
+  if (!link) return err('找不到此訓練班（courseId）');
+  var refunds = Array.isArray(b.refunds) ? b.refunds : [];
+  if (!refunds.length) return err('冇帶 refunds');
+  var by = String(b.by || '區管理系統').trim();
+  var execUrl = courseExecUrl_(link), apiKey = courseApiKey_(link);
+  var sheetId = courseSheetFileId_(link);
+  var results = [];
+  var ss = null;
+  if (sheetId) {
+    try { ss = SpreadsheetApp.openById(sheetId); } catch (e) { ss = null; }
+  }
+  if (ss) {
+    var sh = ss.getSheetByName('表格回應');
+    if (!sh) return err('班 Sheet 冇「表格回應」分頁');
+    if (String(sh.getRange(1, 50).getDisplayValue() || '').trim() === '') {
+      sh.getRange(1, 50, 1, 2).setValues([['已退款', '退款核對人']]);
+    }
+    var last = sh.getLastRow();
+    var ids = last > 1 ? sh.getRange(2, 1, last - 1, 1).getDisplayValues() : [];
+    refunds.forEach(function (c) {
+      var id = String((c && c.id) != null ? c.id : '').trim();
+      var hit = -1;
+      for (var i = 0; i < ids.length; i++) { if (String(ids[i][0]).trim() === id) { hit = i + 2; break; } }
+      if (hit < 0) { results.push({ id: id, ok: false, error: '找不到該報名' }); return; }
+      var refunded = !(c && c.refunded === false);
+      sh.getRange(hit, 50).setValue(refunded ? '✔' : '');
+      sh.getRange(hit, 51).setValue(refunded ? by : '');
+      results.push({ id: id, ok: true, refunded: refunded, row: hit });
+    });
+    return ok({ saved: true, results: results, path: 'direct' });
+  }
+  if (!execUrl) return err('呢班未有 Script 網址／Sheet——退款 tick 寫唔到');
+  refunds.forEach(function (c) {
+    try {
+      var resp = UrlFetchApp.fetch(execUrl, {
+        method: 'post', contentType: 'application/json',
+        payload: JSON.stringify({ action: 'setCourseRefund', apiKey: apiKey, id: String((c && c.id) || '').trim(), refunded: !(c && c.refunded === false), by: by }),
+        muteHttpExceptions: true,
+      });
+      var r = {};
+      try { r = JSON.parse(resp.getContentText()); } catch (e2) {}
+      if (r.ok) results.push({ id: String((c && c.id) || ''), ok: true, refunded: !(c && c.refunded === false) });
+      else results.push({ id: String((c && c.id) || ''), ok: false, error: (r && r.error) || '寫入失敗（班 Script 貼咗 Refund.gs 先支援）' });
     } catch (e) { results.push({ id: String((c && c.id) || ''), ok: false, error: String(e) }); }
   });
   var failed = results.filter(function (x) { return !x.ok; }).length;

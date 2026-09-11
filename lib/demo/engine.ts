@@ -752,6 +752,21 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       persistDb();
       return ok({ saved: results.every(x => x.ok), results, path: 'demo' });
     }
+    case 'setCourseRefund': { // 🎭 demo：已退款 tick（寫 demo db，唔真寫班 Sheet）
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const refunds = ((d as AnyObj).courseRefunds as Record<string, AnyObj> || {}) as Record<string, AnyObj>;
+      const results: AnyObj[] = [];
+      (Array.isArray(payload.refunds) ? payload.refunds : []).forEach((c: AnyObj) => {
+        const id = String(c.id || '').trim();
+        if (!id) { results.push({ id, ok: false, error: 'missing id' }); return; }
+        const refunded = c.refunded !== false;
+        refunds[id] = { refunded, by: String(payload.by || ''), at: nowIso() };
+        results.push({ id, ok: true, refunded });
+      });
+      (d as AnyObj).courseRefunds = refunds;
+      persistDb();
+      return ok({ saved: results.every(x => x.ok), results, path: 'demo' });
+    }
     case 'sendCourseEmail': {
       const r = requireUser(token, 2); if (isErr(r)) return r;
       const to = String(payload.to || '').trim();

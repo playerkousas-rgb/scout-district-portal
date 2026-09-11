@@ -171,6 +171,8 @@ const ctx = {
           out = { ok: true, data: { saved: true, updated: payload.cells.length, skippedTabs: [] } };
         } else if (payload.action === 'setPaymentCheck') {
           out = payload.id === '2026-09-02T11:00:00Z' ? { ok: true, data: { saved: true } } : { ok: false, error: '找不到該報名' };
+        } else if (payload.action === 'setCourseRefund') {
+          out = payload.id === '2026-09-02T11:00:00Z' ? { ok: true, data: { saved: true, refunded: payload.refunded } } : { ok: false, error: '找不到該報名' };
         }
       }
       return { getContentText: () => JSON.stringify(out), getResponseCode: () => 200 };
@@ -316,6 +318,41 @@ test('⑤ 收款核對 冇 GS：setPaymentCheck 經 /exec', () => {
 test('⑤b 收款核對 exec：後端話搵唔到 → result error', () => {
   const r = ctx.setCoursePaymentCheck_(tk, { courseId: 'cl-ops2', by: 'X', checks: [{ id: 'ghost', verified: true }] });
   assert.ok(r.ok && r.data.results[0].ok === false);
+});
+
+// ── ⑪ setCourseRefund_（v4.17.2 已退款——管理層理錢，CL 個 APP 見到）──
+test('⑪ 退款 tick direct：AX/AY 自動補表頭＋寫 ✔/核對人', () => {
+  const r = ctx.setCourseRefund_(tk, { courseId: 'cl-ops1', by: '示範財務', refunds: [{ id: '2026-09-01T10:00:00Z', refunded: true }] });
+  assert.ok(r.ok, r.error);
+  assert.strictEqual(r.data.path, 'direct');
+  assert.strictEqual(r.data.results[0].ok, true);
+  const resp = courseSS._sheets['表格回應'].getDataRange().getValues();
+  assert.strictEqual(String(resp[0][49]), '已退款');             // AX1 自動補表頭
+  assert.strictEqual(String(resp[0][50]), '退款核對人');          // AY1
+  assert.strictEqual(String(resp[1][49]), '✔');                  // AX2
+  assert.strictEqual(String(resp[1][50]), '示範財務');            // AY2
+});
+test('⑪b 退款還原：refunded=false 清走 AX/AY', () => {
+  const r = ctx.setCourseRefund_(tk, { courseId: 'cl-ops1', by: 'X', refunds: [{ id: '2026-09-01T10:00:00Z', refunded: false }] });
+  assert.ok(r.ok, r.error);
+  const resp = courseSS._sheets['表格回應'].getDataRange().getValues();
+  assert.strictEqual(String(resp[1][49]), '');
+  assert.strictEqual(String(resp[1][50]), '');
+});
+test('⑪c 退款 exec：setCourseRefund 經 /exec', () => {
+  const r = ctx.setCourseRefund_(tk, { courseId: 'cl-ops2', by: '示範財務', refunds: [{ id: '2026-09-02T11:00:00Z', refunded: true }] });
+  assert.ok(r.ok, r.error);
+  assert.strictEqual(r.data.path, 'exec');
+  assert.strictEqual(r.data.results[0].ok, true);
+  const f = fetches[fetches.length - 1];
+  assert.strictEqual(f.payload.action, 'setCourseRefund');
+  assert.strictEqual(f.payload.refunded, true);
+  assert.strictEqual(f.payload.by, '示範財務');
+});
+test('⑪d 退款 ghost id → error result', () => {
+  const r = ctx.setCourseRefund_(tk, { courseId: 'cl-ops1', by: 'X', refunds: [{ id: 'ghost', refunded: true }] });
+  assert.ok(r.ok && r.data.results[0].ok === false);
+  assert.ok(/找不到/.test(r.data.results[0].error));
 });
 
 // ── ⑥ sendCourseEmail_ ──

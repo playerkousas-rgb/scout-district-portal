@@ -111,6 +111,7 @@ export interface CoursePaymentRow {
   status: string;                     // approved / rejected / cancelled / pending
   receiptUrl: string;                 // 入數紙截圖（Drive）
   payChecked: boolean; payBy: string; payAt: string;
+  refunded: boolean; refundedBy: string;   // v4.17.2 已退款（管理層 tick，CL 個 APP 見到）
   sta: boolean; staNote: string;
 }
 

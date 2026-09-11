@@ -75,17 +75,49 @@
 - 換嚟嘅係：真 Gmail＋委派存取＋Drive／Sheet 同戶（用戶嘅「一戶過」夢想成真）。
 - **現階段唔建議即刻做**——A+B 已經解決九成；等真係痛到先諗。
 
-## 三之二、收生通知（v4.17.1 已內建喺區系統）
+## 三之二、收生通知（v4.17.1 區系統版＋v4.17.2 分工更正）
 
-> 核心需求：**發接納／不接納通知**。CL 喺訓練班 App 批完收生（接納／拒絕）之後，
-> 管理層喺 portal「⭐ 新版流程 → 📬 收生通知」一撳就寄——**唔使等 course repo 改**。
+> **分工定案（重要）**：**接納／唔接納由 CL 決定**（喺訓練班 App roster 批）；管理層只理錢
+> （收款核對＋退款 tick）。寄通知書嘅**正路**係 CL 喺 App 按「發出接納及不接納通知書」掣
+> ——後端模組 `RegNotice.gs` 已寫好（`course.git` repo `apps-script/RegNotice.gs`，貼入班 Script＋
+> doPost 加 `case 'sendRegNotice'` 一行＋roster 頁加掣就得）。
+> 區系統 portal「📬 收生通知」分頁保留做**管理層代寄後備**（CL 個 App 未上掣之前頂住用）。
 
-- **接納通知**：上課節次（Input02 上通告嗰啲）＋報到時間／攜帶物品／其他／備註（Print_接納通知書人手格）自動組版，班領導人署名。
-- **不接納通知**：客氣版（名額所限，歡迎日後再報名）。
-- **ReplyTo＝班信箱**（批核分頁填嘅「訓練班電郵」> 班 Sheet 參數格 > 班領導人電郵）——申請人回覆直接去班職員度；**副本 CC 班領導人**（就算班信箱未設定好，CL 都一定收到副本）。
-- 每筆有**通知紀錄**（CourseLinks `regNotices`：邊個幾時寄邊種），有「✉ 寄晒未寄（N）」一鍵批量＋逐筆重寄。
-- ⚠️ 郵件限額：免費 Gmail（skddbs）每日約 100 封（連副本每人約計兩封）——大班分批寄；上 Workspace／alias 限額高好多。
-- （course repo 嗰邊日後可以整埋 App 內「寄通知」掣直接叫同一個 GAS action——見第六節。）
+**CL 喺 App 按「發出接納及不接納通知書」之後會發生（RegNotice.gs 流程）**：
+1. 前端 POST 班 Script `{action:'sendRegNotice', apiKey, ids:[時間戳記…]}`（留空 ids＝全部已決定而未寄嘅報名）。
+2. 班 Script 讀**自己**班 Sheet：Input02 B1 班名＋9–16 節次（H 欄 FALSE 唔出）＋Print_接納通知書
+   人手格（報到 23／物品 30／其他 32／備註 34）＋職員表 23–42 班領導人署名。
+3. 逐個 MailApp 寄：**ReplyTo＝班信箱**（參數「訓練班電郵」）——申請人撳回覆就去班信箱；
+   接納版＝節次＋報到＋物品＋其他＋備註＋「直接回覆本電郵」；不接納版＝客氣（名額所限＋退款安排＋歡迎再報名）。
+4. 寫紀錄入班 Sheet「表格回應」AZ/BA（通知書 accepted/rejected＋時間）——再撳唔會重複寄，CL／管理層都查到。
+5. ⚠️ 寄信 quota 計**班 Script 部署帳戶**（免費 Gmail 100/日、Workspace 1500/日）——大班分批寄。
+
+（區系統代寄後備版：portal「📬 收生通知」分頁，ReplyTo 班信箱＋副本 CC 班領導人，紀錄寫 CourseLinks.regNotices。）
+
+## 三之三、已退款 tick（v4.17.2——管理層理錢，CL 個 APP 見到）
+
+- 班 Sheet「表格回應」**AX「已退款」✔＋AY「退款核對人」**——管理層退咗錢俾未獲接納／取消嘅申請人之後，
+  喺 portal「💰 收款核對」逐筆 tick「↩ 已退款」（可取消重 tick）。
+- 直接寫入班 Sheet（direct）或經班 Script `setCourseRefund` action（模組 `Refund.gs` 已寫好——
+  `course.git` repo `apps-script/Refund.gs`，同 PaymentCheck.gs 同構：identity 對行、唔 bump rev、自動補表頭）。
+- CL 個 APP roster／intake 顯示（course repo 待辦）：見到 ↩ 就知區會已退錢俾嗰位申請人。
+
+## 三之四、查詢信點樣到 CL／職員（**完全唔使登入班信箱**）
+
+有人電郵到 `XXX@skwscout.org.hk`，CL 想喺自己平時開住嘅個人 email 見到——用 **B 案「轉寄副本」**：
+
+1. 寄存商控制台（cPanel 類 → Email → **Forwarders／轉寄**）設 `XXX@skwscout.org.hk` 自動轉寄副本去
+   **CL 個人 email（＋管理層 email，逗號分隔可以多個）**——建議「保留副本」，班信箱本身仲留底。
+2. 之後查詢信會**即時 copy 去每個轉寄目標**——CL 日日開自己 email 就見到，乜都唔使登入。
+3. 如果寄存商冇轉寄功能 → 行 C 案（免費 Gmail POP3 拉信，見五之二）——CL 開嗰個 Gmail 就見到，一樣唔使碰班信箱。
+
+**申請人回覆通知書電郵又會點？**
+
+1. 通知書 ReplyTo＝班信箱 → 申請人撳「回覆」，收件人自動係 `XXX@skwscout.org.hk`（唔會散去 CL 個人信箱）。
+2. 回覆信落班信箱 → 經 B 案轉寄副本 → CL／管理層個人 email 即時見到（同一封，未讀狀態照跟）。
+3. CL 喺自己 email 直接撳回覆 → 覆到申請人（寄件人顯示 CL 個人地址）。想用班信箱名義回覆，
+   就喺自己 Gmail 加一次「用這個地址傳送郵件」（send-as，SMTP 驗證班信箱）——之後回覆時揀班地址寄出。
+4. 貼士：轉寄信第一次可能入垃圾匣——喺 Gmail 撳「唔係垃圾郵件」＋把寄件人加入聯絡人就得。
 
 ## 四、Sheet 點解唔使搬去班信箱
 
@@ -124,10 +156,12 @@
 
 ## 六、Course repo 建議改動清單（交返訓練班系統嗰邊，可遲啲做）
 
-1. **CourseFactory.gs**：`createCourse` 加 `file.addEditor(OPS_EMAIL)`（Script Properties `OPS_EMAIL`）
-   —— 區後台直接寫班 GS 批核（唔使逐班人手 share）。
-2. **coursev5 加 `setParamLabel` action**（label 對位寫參數分頁一格）——
-   冇 share 嘅班都可以經 Script tick「區會批准」／寫「訓練班電郵」。
-3. （可選）`getCourseSummary` 已回 `courseEmail`／`approved`——夠用，唔使改。
-4. （可選）收生通知而家由區系統寄（見三之二）；如果想 CL 喺 App 批完即場寄，可以喺 coursev5
-   加 `sendRegNotice` action（同樣 MailApp＋ReplyTo 班信箱）＋ intake 頁加掣——同區系統版二選一就得。
+> 兩個後端模組**已寫好**，喺 `course.git` repo working tree（未 commit）：`apps-script/Refund.gs`＋`apps-script/RegNotice.gs`。
+
+1. **Refund.gs**（退款 tick）：貼入班 Script＋doPost 加 `case 'setCourseRefund'`——區系統「↩ 已退款」即刻運作。
+2. **RegNotice.gs**（CL 喺 App 寄通知書）：貼入班 Script＋doPost 加 `case 'sendRegNotice'`＋roster 頁加
+   「發出接納及不接納通知書」掣（POST `{action:'sendRegNotice', apiKey, ids, by}`；留空 ids＝全部未寄嘅已決定報名）。
+3. **roster／intake 顯示**（加顯示，唔改邏輯）：報名行加「💰✔ 已核對收款」「↩ 已退款」「✉ 通知書已寄（accepted/rejected＋時間）」
+   ——「表格回應」AX/AY/AZ/BA 四欄照 header 名讀。
+4. CourseFactory `file.addEditor(OPS_EMAIL)`、coursev5 setParamLabel（舊有待辦）。
+5. （可選）`getCourseSummary` 已回 `courseEmail`／`approved`——夠用，唔使改。

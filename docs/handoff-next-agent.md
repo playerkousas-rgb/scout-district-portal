@@ -48,6 +48,14 @@
 >   CourseOpsTab 新「📬 收生通知」分頁（未寄／已接納／已拒絕篩選＋批量寄＋逐筆重寄＋限額提示）；
 >   demo engine 有 case；mock server getCourseSheetRaw 改用 CourseRegs 真數據＋seed 4 筆示範報名；
 >   測試 19 項（+⑨⑩⑩b）。A/B（webmail/IMAP/轉寄）5 分鐘驗證法＋C（Gmail POP3）逐步已寫入架構文件。
+> - **v4.17.2（同日）：分工更正＋已退款 tick**——用戶更正：管理層只理錢（收款核對＋退款），
+>   接納／唔接納由 CL 決定；寄通知書正路係 CL 喺 App 按（course repo `RegNotice.gs` 已備好——
+>   班 Script 讀自己 Sheet 組版 MailApp 寄，ReplyTo 班信箱，紀錄寫表格回應 AZ/BA 防重寄；
+>   portal「📬 收生通知」轉做代寄後備，UI 加分工說明）。新：收款核對每筆「↩ 已退款」tick
+>   （`setCourseRefund` action＋router case；direct 寫表格回應 AX/AY 已退款/退款核對人＋自動補表頭；
+>   exec 經班 Script `Refund.gs`——已備好；parseRawToPaymentRows 讀 AX/AY；CourseOpsTab 退款欄＋
+>   refunded 篩選；demo engine case；mock setCourseRefund 真寫 CourseRegs）。測試 23 項（+⑪⑪b⑪c⑪d）。
+>   另修 mock readSheet 副本寫唔入嘅 bug（要經 getRange 寫儲存格）。
 >
 
 > 2026-09-09（第八輪）v4.16.0：**📋 訓練班通告全文欄**（用戶問：PDF 定網頁擇要用邊個＋系統格式同區通告唔同、有項目冇）。

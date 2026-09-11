@@ -66,7 +66,7 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
   const [approveNote, setApproveNote] = useState('');
   const [emailChecked, setEmailChecked] = useState(true);
 
-  const [payFilter, setPayFilter] = useState<'all' | 'unchecked' | 'checked' | 'approved'>('all');
+  const [payFilter, setPayFilter] = useState<'all' | 'unchecked' | 'checked' | 'refunded' | 'approved'>('all');
   const [regFilter, setRegFilter] = useState<'todo' | 'approved' | 'rejected' | 'all'>('todo');
   const [printsOpen, setPrintsOpen] = useState(false);
   const [opsInfo, setOpsInfo] = useState<CourseOpsInfo | null>(null);
@@ -275,6 +275,24 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
     })();
   }
 
+  // ── ↩ 已退款（管理層退咗錢 tick，CL 個 APP 見到——接納／唔接納係 CL 嘅決定，區會只理錢） ──
+  async function tickRefund(row: CoursePaymentRow, refunded: boolean) {
+    if (!courseId) return;
+    setBusy('refund-' + row.id); setError('');
+    const r = await api.setCourseRefund(session.token, {
+      courseId, by: session.displayName, refunds: [{ id: row.id, refunded }],
+    });
+    setBusy('');
+    if (!r.ok || !r.data) { setError(r.error || '寫入失敗'); return; }
+    const bad = (r.data.results || []).find(x => !x.ok);
+    if (bad) { setError(`「${row.name}」寫唔到：${bad.error || '未知'}`); return; }
+    setMsg(`${refunded ? '↩' : '↩'} 「${row.name || row.id}」${refunded ? '已標記退款——CL 個 APP 會見到 ↩' : '已還原退款標記'}（${session.displayName}）`);
+    void (async () => {
+      const rr = await api.pullCourseSheetRaw(session.token, { courseId });
+      if (rr.ok && rr.data) setRaw(rr.data);
+    })();
+  }
+
   async function notifyPayment() {
     if (!courseId || !link) return;
     const pending = paymentRows.filter(r => !r.payChecked).map(r => `${r.name || '（未名）'}(${r.troopNo || r.troop || '?'})`);
@@ -439,7 +457,7 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
     { label: '7. 紀念品', v: bt.souvenir }, { label: '8. 其他', v: bt.misc },
   ];
   const respCount = raw && Array.isArray(raw.resp) ? raw.resp.slice(1).filter((r: unknown[]) => Array.isArray(r) && String(r[0] ?? '').trim() !== '').length : 0;
-  const shownPay = paymentRows.filter(r => payFilter === 'all' ? true : payFilter === 'unchecked' ? !r.payChecked : payFilter === 'checked' ? r.payChecked : r.status === 'approved');
+  const shownPay = paymentRows.filter(r => payFilter === 'all' ? true : payFilter === 'unchecked' ? !r.payChecked : payFilter === 'checked' ? r.payChecked : payFilter === 'refunded' ? r.refunded : r.status === 'approved');
 
   return (
     <div>
@@ -645,6 +663,8 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
           <section className="info-card">
             <h3>📬 收生通知（CL 喺 App 批完收生之後，喺呢度一撳寄俾申請人）</h3>
             <p style={{ fontSize: 13, margin: '4px 0 8px' }}>
+              ⚠️ <b>分工</b>：接納／唔接納係 <b>CL 喺訓練班 App 決定</b>（區會唔代 CL 批人）。寄通知書嘅<b>正路</b>係 CL 喺 App 撳「發出通知書」（等 course repo 上呢個掣）；
+              呢頁係<b>管理層代寄後備</b>——CL 個 App 未有掣之前頂住先用。
               <b>接納通知</b>：上課節次＋報到時間＋攜帶物品自動由班 Sheet 帶出；<b>不接納通知</b>：客氣版（名額所限）。
               回覆會去班信箱，副本 CC 班領導人（{leaderEmail || '職員表未填電郵'}）。
               ⚠️ 每日郵件限額（免費 Gmail 約 100 封，連副本每人約計兩封）——大班分批寄。
@@ -694,11 +714,13 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
         <section className="info-card">
           <h3>💰 收款核對（報名截止後做——對完區帳戶先 tick）</h3>
           <p style={{ fontSize: 13, margin: '4px 0 8px' }}>
-            tick ✔ 會寫入班 Sheet「表格回應」已核對收款／核對人／核對時間——CL 個 APP 即時見 💰✔。
+            <b>分工：管理層只理錢（核對收款＋標記退款）；接納／唔接納由 CL 喺佢個 APP 決定。</b><br />
+            tick ✔ 會寫入班 Sheet「表格回應」已核對收款／核對人／核對時間——CL 個 APP 即時見 💰✔；
+            tick「↩ 已退款」寫入已退款／退款核對人——CL 個 APP 見到 ↩（退咗錢俾未獲接納／取消嘅人）。
             總共 <b>{payStats.total}</b> 筆報名・已接納 <b>{payStats.approved}</b>・<b style={{ color: payStats.unchecked ? '#b45309' : '#166534' }}>未核對 {payStats.unchecked}</b>。
           </p>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-            {([['all', '全部'], ['unchecked', '未核對'], ['checked', '已核對'], ['approved', '已接納']] as Array<[typeof payFilter, string]>).map(([k, lb]) => (
+            {([['all', '全部'], ['unchecked', '未核對'], ['checked', '已核對'], ['refunded', '↩ 已退款'], ['approved', '已接納']] as Array<[typeof payFilter, string]>).map(([k, lb]) => (
               <button key={k} className={payFilter === k ? 'btn-sm' : 'mini-btn'} onClick={() => setPayFilter(k)}>{lb}</button>
             ))}
             <span style={{ marginLeft: 'auto' }}>
@@ -707,7 +729,7 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
           </div>
           {!raw ? <p className="muted" style={{ fontSize: 13 }}>未讀取——先去「🔎 批核」讀取。</p> : shownPay.length ? (
             <div style={{ overflowX: 'auto' }}><table className="data-table">
-              <thead><tr>{['報名', '姓名', '旅', '狀態', '入數紙', '收款核對', '動作'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+              <thead><tr>{['報名', '姓名', '旅', '狀態', '入數紙', '收款核對', '退款', '動作'].map(h => <th key={h}>{h}</th>)}</tr></thead>
               <tbody>{shownPay.map(r => (
                 <tr key={r.id} style={r.payChecked ? { background: '#f0fdf4' } : r.status === 'approved' ? { background: '#fffbeb' } : {}}>
                   <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{String(r.id).replace('T', ' ').slice(0, 16)}</td>
@@ -716,9 +738,13 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
                   <td>{STATUS_LABEL[r.status] || r.status}</td>
                   <td>{r.receiptUrl ? <a href={r.receiptUrl} target="_blank" rel="noreferrer">🧾 截圖</a> : '—'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>{r.payChecked ? <>✔ {r.payBy}<br /><span className="muted" style={{ fontSize: 12 }}>{String(r.payAt).slice(0, 16)}</span></> : <b style={{ color: '#b45309' }}>未核對</b>}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{r.refunded ? <>↩ {r.refundedBy || '已退款'}</> : '—'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <button className="mini-btn" disabled={!!busy} onClick={() => tickPay(r, true)}>✔ 對到數</button>{' '}
-                    {r.payChecked && <button className="mini-btn" disabled={!!busy} onClick={() => tickPay(r, false)}>↩</button>}
+                    {r.payChecked && <button className="mini-btn" disabled={!!busy} onClick={() => tickPay(r, false)}>↩</button>}{' '}
+                    {r.refunded
+                      ? <button className="mini-btn" disabled={!!busy} onClick={() => tickRefund(r, false)}>取消退款</button>
+                      : <button className="mini-btn" disabled={!!busy} onClick={() => tickRefund(r, true)} title="退咗錢俾佢就 tick——CL 個 APP 會見到">↩ 已退款</button>}
                   </td>
                 </tr>
               ))}</tbody>

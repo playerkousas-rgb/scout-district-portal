@@ -197,8 +197,8 @@ const ctx = {
           }
         }
         const regs = readSheet('CourseRegs').filter(r => row && String(r.courseId || '') === String(row.courseId));
-        const resp = [['時間戳記', '電郵地址', '中文姓名', '聯絡電話', '審批狀態']]
-          .concat(regs.map(r => [r.timestamp || r.id || '', r.email || '', r.nameZh || '', r.phone || '', r.status || 'pending']));
+        const resp = [['時間戳記', '電郵地址', '中文姓名', '聯絡電話', '審批狀態', '已退款', '退款核對人']]
+          .concat(regs.map(r => [r.timestamp || r.id || '', r.email || '', r.nameZh || '', r.phone || '', r.status || 'pending', r.refunded ? '✔' : '', r.refundedBy || '']));
         return reply({ ok: true, data: {
           input01: [], input02: [[String((row && row.title) || '模擬訓練班'), '']], input03: [], input04: [],
           resp, paramsWX: [], notice: [], accept: [], finance: [], completion: [], cert: [], subsidy: [],
@@ -210,6 +210,24 @@ const ctx = {
       }
       if (payload.action === 'setPaymentCheck') {
         return reply({ ok: true, data: { saved: true } });
+      }
+      if (payload.action === 'setCourseRefund') {
+        // 照 course repo Refund.gs 語義（identity 對行、唔 bump rev）——mock 直接寫返 CourseRegs 儲存格
+        const shR = sheets['CourseRegs'];
+        const vals = shR.getDataRange().getValues();
+        const hdR = (vals[0] || []).map(x => String(x).trim());
+        const iId = hdR.indexOf('timestamp') >= 0 ? hdR.indexOf('timestamp') : hdR.indexOf('id');
+        let iRef = hdR.indexOf('refunded');
+        let iRefBy = hdR.indexOf('refundedBy');
+        if (iRef < 0) { hdR.push('refunded'); iRef = hdR.length - 1; shR.getRange(1, iRef + 1).setValue('refunded'); }
+        if (iRefBy < 0) { hdR.push('refundedBy'); iRefBy = hdR.length - 1; shR.getRange(1, iRefBy + 1).setValue('refundedBy'); }
+        const refunded = payload.refunded !== false;
+        let hit = -1;
+        for (let i = 1; i < vals.length; i++) { if (String(vals[i][iId] || '').trim() === String(payload.id || '').trim()) { hit = i; break; } }
+        if (hit < 0) return reply({ ok: false, error: '找不到該報名（時間戳記：' + payload.id + '）' });
+        shR.getRange(hit + 1, iRef + 1).setValue(refunded ? '✔' : '');
+        shR.getRange(hit + 1, iRefBy + 1).setValue(refunded ? String(payload.by || '') : '');
+        return reply({ ok: true, data: { saved: true, row: hit + 1, refunded: refunded } });
       }
       if (payload.action === 'getCourseProfile') {
         return reply({ ok: true, data: { courseName: row ? String(row.title || '') : '模擬訓練班', quota: row ? Number(row.quota) || 0 : 0, staff: [], sessions: [] } });

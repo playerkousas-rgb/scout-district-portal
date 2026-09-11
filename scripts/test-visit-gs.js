@@ -343,7 +343,7 @@ check('舊 Visits 表（未升級）跑 ensureSheetColumns_ 自動補四欄，�
 
 check('健康檢查版本 4.14.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.17.1');
+  assert.strictEqual(parsed.data.version, '4.17.2');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

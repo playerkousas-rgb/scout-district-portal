@@ -392,6 +392,8 @@ export function parseRawToPaymentRows(raw: CourseSheetRaw): CoursePaymentRow[] {
   const iPayAt = idx(['核對時間'], 46);
   const iSta = idx(['已交表格正本（STA）', '已交表格正本'], 47);
   const iStaNote = idx(['收表記錄'], 48);
+  const iRefund = idx(['已退款'], 49);
+  const iRefundBy = idx(['退款核對人'], 50);
   const str = (r: unknown[], i: number): string => String((r || [])[i] ?? '').trim();
   const out: CoursePaymentRow[] = [];
   resp.slice(1).forEach(r => {
@@ -407,6 +409,7 @@ export function parseRawToPaymentRows(raw: CourseSheetRaw): CoursePaymentRow[] {
       receiptUrl: str(r, iReceipt),
       payChecked: str(r, iPay) === '✔', payBy: str(r, iPayBy), payAt: str(r, iPayAt),
       sta: str(r, iSta) === '✔', staNote: str(r, iStaNote),
+      refunded: str(r, iRefund) === '✔', refundedBy: str(r, iRefundBy),
     });
   });
   return out;
