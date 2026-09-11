@@ -10,6 +10,7 @@ import type {
   CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
   Circular, CircularsBoard, CircularStatus, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
+  CourseChange, CourseRevision, CourseOpsInfo,
 } from './types.ts';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers.ts';
 import type { IcsEvent } from './ics.ts';
@@ -183,6 +184,30 @@ export const api = {
     callPost('pullCourseSheetRaw', { token, ...req }),
   getCourseSetup: (token: string, courseId: string): Promise<ApiResult<{ courseId: string; sheetId: string; setup: CourseSetup | null }>> =>
     callPost('getCourseSetup', { token, courseId }),
+  // ── 新版流程（v4.17.0：訓練班系統先行）── 批核／修訂／收款核對／CL 電郵／開班指引
+  pullCourseSummary: (token: string, req: { courseId?: string; scriptExecUrl?: string; scriptApiKey?: string }): Promise<ApiResult<Record<string, unknown>>> =>
+    callPost('pullCourseSummary', { token, ...req }),
+  saveCourseApproval: (token: string, req: {
+    courseId: string; by: string;
+    cells: SetupCell[];                                 // 核心修改（setupCellsWithLabels 出嘅 cells 子集）
+    approval?: 'APPROVED' | 'PENDING' | '';             // '' = 唔掂批准格
+    courseEmail?: string; changes?: CourseChange[]; revisionNote?: string;
+    link?: Partial<CourseLink>;                         // 開班登記摘要同步
+  }): Promise<ApiResult<{ saved: boolean; courseId: string; path: string; approvalDone: boolean; cellsApplied: number; skippedTabs: string[]; warnings: string[]; revisions: CourseRevision[] }>> =>
+    callPost('saveCourseApproval', { token, ...req }),
+  setCoursePaymentCheck: (token: string, req: { courseId: string; checks: Array<{ id: string; verified: boolean }>; by: string }): Promise<ApiResult<{ saved: boolean; results: Array<{ id: string; ok: boolean; error?: string; verified?: boolean }>; path: string }>> =>
+    callPost('setCoursePaymentCheck', { token, ...req }),
+  sendCourseEmail: (token: string, req: {
+    courseId: string; kind: 'approved' | 'mounted' | 'payment' | 'custom';
+    to: string; cc?: string; title?: string;
+    replyTo?: string;                                   // 班信箱（XXX@skwscout.org.hk）——CL 回覆會去呢度
+    changes?: CourseChange[]; noticeUrl?: string;
+    paymentStats?: { checked: number; total: number; unchecked: number; pending?: string[] };
+    note?: string; by?: string;
+  }): Promise<ApiResult<{ sent: boolean; to: string; cc: string; fromUsed: string; warning: string; subject: string }>> =>
+    callPost('sendCourseEmail', { token, ...req }),
+  getCourseOpsInfo: (token: string): Promise<ApiResult<CourseOpsInfo>> =>
+    callPost('getCourseOpsInfo', { token }),
 
   // 區通告（職員專用；輸出傳統格式 PDF 上載區網）
   getCirculars: (token: string): Promise<ApiResult<CircularsBoard>> =>

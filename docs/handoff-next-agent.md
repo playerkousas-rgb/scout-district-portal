@@ -1,5 +1,39 @@
 # 下一手 Agent 交接備忘（v4.8.1）
 
+> 2026-09-11（第九輪）v4.17.0：**⭐ 訓練班新版流程（訓練班系統先行）**。用戶拍板：全部由
+> [course repo（訓練班系統）](https://github.com/playerkousas-rgb/course)開始——CL 喺 App 開班
+> （CourseFactory 即起真 GS）＋填晒文件 → 交「GS＋SCRIPT 網址」→ 區系統批核（**話事權喺區會**）。
+> 改動：
+> - **「🆕 新制直入」tab 改造成「⭐ 新版流程」指揮台**（`components/CourseOpsTab.tsx` 新寫；
+>   原直入版搬去 `CourseSetupLegacy.tsx` 收埋做後備 tab，`CourseSetupTab.tsx` 變切換 wrapper；
+>   外面「📋 開班登記（舊制 Sheet 先行）」原封不動）。五個子分頁：🔎批核／📢通告＋掛載／💰收款核對／🎓完成／🔗連結。
+> - 後台 5 個新 action（全部 `canCourse`）：`pullCourseSummary`（經該班 /exec 拉 coursev5
+>   `getCourseSummary`）、`saveCourseApproval`（cells＋「區會批准」tick＋「訓練班電郵」＋「區會修訂」行
+>   一次過寫班 Sheet，首選 direct `openById`（gsUrl/sheetId）→ fallback `/exec saveCourseBatch`，
+>   bump rev，同步 CourseLinks `approval/approvedAt/approvedBy/revisions`（JSON 近 30 筆））、
+>   `setCoursePaymentCheck`（批量時間戳記 tick AS–AU；direct 首選→exec fallback；照 PaymentCheck.gs
+>   語義唔 bump rev）、`sendCourseEmail`（kind=approved/mounted/payment/custom；**ReplyTo＝班信箱**）、
+>   `getCourseOpsInfo`（CourseFactory 網址＋開班碼＋email alias 現狀）。
+> - CourseLinks 加 5 欄：`gsUrl/approval/approvedAt/approvedBy/revisions`（setupSheets 自動補）；
+>   Config 加 `COURSE_EMAIL_FROM`（選填 alias；留空＝部署帳戶地址＋ReplyTo 班信箱）、
+>   `COURSE_FACTORY_URL`、`COURSE_FACTORY_CODE`。`getConfig` 回 `courseEmailFrom/courseFactoryUrl`。
+> - 批核改核心資料＝`lib/course-setup.ts` 新 `setupCellsWithLabels`（每格有人類可讀 label）＋
+>   `diffSetups`（原值→新值，俾 email／修訂紀錄「標亮」用）＋`parseRawToPaymentRows`
+>   （表格回應 header 名對位做收款核對列）。`CourseSetupForm` 加 `hide` props（批核時鎖職員表＋時間表）。
+> - **電郵架構定案（用戶提供實況）**：區 domain `skwscout.org.hk`，**每班開班信箱
+>   `XXX@skwscout.org.hk`**；機房（班 GS/Script）＋教材 Drive 喺 `skw@hkirscout.org.hk`（唔可以
+>   俾班職員掂）。所以通知 From=機房帳戶、**ReplyTo=班信箱**（CL 回覆去班信箱，機房 inbox 零班務信）；
+>   班信箱管理＝Gmail 委派存取（核心）＋Google Group（全體），唔再轉寄 CL 個人 email。
+>   全部寫晒喺 **`docs/course-email-drive-architecture.md`**（含 CourseFactory 建議改動清單：
+>   `addEditor(OPS_EMAIL)` 自動 share 班 GS 俾區後台＋coursev5 `setParamLabel` action）。
+> - 測試：新 `scripts/test-course-ops-gs.js`（15 項，vm emulator 覆蓋 5 個新 action＋direct/exec
+>   兩條路＋「普通 saveCourseLink 唔會洗走 approval/revisions」）。全套（course-links 10／
+>   demo-engine 22／news 38／visit 27／awards 27…）全綠；`tsc`＋`next build` 過。
+> - ⚠️ 部署：換 `Code.gs` 4.17.0 → `setupSheets()` → 重新部署；Config 填 CourseFactory 網址＋開班碼。
+>   未做（等用戶叫）：course repo 嗰邊嘅 CourseFactory share＋setParamLabel；deep link 報名
+>   （用戶話唔使 patch——通告印成員系統 `/training` 公開報名表已夠，掛載列表係畀已用開系統嘅人）。
+>
+
 > 2026-09-09（第八輪）v4.16.0：**📋 訓練班通告全文欄**（用戶問：PDF 定網頁擇要用邊個＋系統格式同區通告唔同、有項目冇）。
 > 答咗用戶：**2607.pdf 已驗證係「文字版」**（pdf-parse 抽到全文，fixture `scripts/notice-2607-a.txt` 就係咁嚟）；
 > 網頁管理員嘅帖文係**刪減擇要**（冇名額／班領導人／服裝／備註／查詢），所以 **PDF 係正本**。改動：

@@ -118,7 +118,78 @@ const ctx = {
   MailApp: { sendEmail: (...a) => console.log('  ✉️ (mock) sendEmail', JSON.stringify(a).slice(0, 120)) },
   GmailApp: { sendEmail: () => {} },
   UrlFetchApp: {
-    fetch: () => ({ getContentText: () => '{}', getResponseCode: () => 200, getAllHeaders: () => ({}) }),
+    // v4.17.0：訓練班新版流程會經 /exec 打去「該班 Script」（coursev5）——本機冇真 Script，
+    // 就用 mock 資料扮 coursev5 回應（getCourseSummary／getCourseSheetRaw／saveCourseBatch／setPaymentCheck），
+    // 等預覽行到成條批核線。其他 URL 照舊死回 {}。
+    fetch: (_url, opt = {}) => {
+      let payload = {};
+      try { payload = JSON.parse(String(opt.payload || '{}')); } catch (e) {}
+      const reply = (obj) => ({ getContentText: () => JSON.stringify(obj), getResponseCode: () => 200 });
+      // readSheet：照 Code.gs readSheet_ 同款（表頭 → 物件陣列）
+      const readSheet = (name) => {
+        const sh = sheets[name];
+        if (!sh) return [];
+        const v = sh.getDataRange().getValues();
+        if (v.length < 2) return [];
+        const hd = v[0].map(x => String(x).trim());
+        return v.slice(1).filter(r => r.join('') !== '').map(r => { const o = {}; hd.forEach((h, i) => { o[h] = r[i]; }); return o; });
+      };
+      const row = readSheet('CourseLinks').find(r => r.scriptExecUrl && payload.apiKey === r.scriptApiKey)
+        || readSheet('CourseLinks').find(r => r.scriptExecUrl && String(_url).includes(String(r.courseId || ''))) || null;
+      if (payload.action === 'getCourseSummary') {
+        const t = row ? String(row.title || '模擬訓練班') : '模擬訓練班';
+        return reply({ ok: true, data: {
+          courseName: t, edition: '1', section: row ? String(row.section || '童軍') : '童軍', badge: '模擬專章',
+          customName: '', type1: '訓練班', type2: '', intake: Number((row && row.quota) || 24) - 4,
+          fee: Number((row && row.fee) || 100), quota: Number((row && row.quota) || 24), staffCount: 4,
+          deadline: String((row && row.deadline) || ''), publish: '',
+          sessions: [
+            { date: '2026-10-03', time: '09:00 - 12:00', venue: (row && row.venue) || '區總部', onNotice: true },
+            { date: '2026-10-10', time: '09:00 - 12:00', venue: (row && row.venue) || '區總部', onNotice: true },
+            { date: '2026-10-17', time: '09:00 - 17:00', venue: (row && row.venue) || '區總部', onNotice: true },
+          ],
+          leader: { name: '陳大文', title: '先生', phone: '97001122', email: 'leader@example.com' },
+          staff: [
+            { role: '班領導人', name: '陳大文', title: '先生' },
+            { role: '副班領導人', name: '黃小明', title: '先生' },
+            { role: '助理班領導人', name: '林小珍', title: '小姐' },
+            { role: '導師', name: '張嘉偉', title: '先生' },
+          ],
+          budget: { sections: [
+            { key: 'meal', label: '1. 膳食', mapTo: ['B', 'C', 'D'], budget: 480 },
+            { key: 'rent', label: '2. 租金（場租＋露營＋住宿）', mapTo: ['E'], budget: 900 },
+            { key: 'transport', label: '3. 交通', mapTo: ['F'], budget: 350 },
+            { key: 'handouts', label: '4. 講義及快勞', mapTo: ['H'], budget: 220 },
+            { key: 'programme', label: '5. 節目', mapTo: ['I'], budget: 150 },
+            { key: 'admin', label: '6. 行政', mapTo: ['G'], budget: 80 },
+            { key: 'souvenir', label: '7. 紀念品', mapTo: ['I'], budget: 300 },
+            { key: 'misc', label: '8. 其他', mapTo: ['I'], budget: 120 },
+          ], total: 2600 },
+          notice: { fileNo: String((row && row.courseNo) || ''), issueDate: '', eligibility: String((row && row.eligibility) || ''), feeNote: '', uniform: '' },
+          courseEmail: String((row && row.courseNo) || 'course').toLowerCase() + '@skwscout.org.hk',
+          approved: !!(row && String(row.approval || '') === 'APPROVED'),
+          regCount: readSheet('CourseRegs').filter(r => String(r.courseId || '') === String((row && row.courseId) || '')).length,
+          pulledAt: new Date().toISOString(),
+        } });
+      }
+      if (payload.action === 'getCourseSheetRaw') {
+        return reply({ ok: true, data: {
+          input01: [], input02: [], input03: [], input04: [], resp: [], paramsWX: [],
+          notice: [], accept: [], finance: [], completion: [], cert: [], subsidy: [],
+          pulledAt: new Date().toISOString(), rev: 1, revSavedAt: new Date().toISOString(), revBy: 'mock',
+        } });
+      }
+      if (payload.action === 'saveCourseBatch') {
+        return reply({ ok: true, data: { saved: true, rev: Date.now() % 100000, savedAt: new Date().toISOString(), updated: (payload.cells || []).length, skippedTabs: [] } });
+      }
+      if (payload.action === 'setPaymentCheck') {
+        return reply({ ok: true, data: { saved: true } });
+      }
+      if (payload.action === 'getCourseProfile') {
+        return reply({ ok: true, data: { courseName: row ? String(row.title || '') : '模擬訓練班', quota: row ? Number(row.quota) || 0 : 0, staff: [], sessions: [] } });
+      }
+      return reply({});
+    },
   },
   PropertiesService: {
     getScriptProperties: () => ({

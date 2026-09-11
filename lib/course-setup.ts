@@ -7,7 +7,7 @@ import type {
   PrintRosterRow, PrintCompletionRow, PrintCertRow,
   SetupBudgetDate, SetupMealLine, SetupRentLine, SetupTransportLine,
   SetupQtyPriceLine, SetupMiscLine, SetupExpenses, SetupSession, SetupFlow,
-  SetupTimetable, SetupCell, SheetMatrix,
+  SetupTimetable, SetupCell, SheetMatrix, CourseChange, CoursePaymentRow,
 } from './types.ts';
 
 // ===================== 預設值 =====================
@@ -249,89 +249,166 @@ const IN1 = 'Input01 訓練班預算';
 const IN2 = 'Input02 訓練班資料';
 const IN3 = 'Input03 時間表';
 
-/** 成份設定轉寫入格清單（後台照單寫入；空值都寫，確保覆蓋舊值） */
-export function setupToCells(s: CourseSetup): SetupCell[] {
-  const out: SetupCell[] = [];
-  const put = (tab: string, row: number, col: number, value: string | boolean) => {
-    out.push({ tab, row, col, value: typeof value === 'boolean' ? value : String(value ?? '').trim() });
+/** 成份設定轉寫入格清單（連人類可讀 label——批核修訂清單「改咗咩」用；v4.17.0） */
+export function setupCellsWithLabels(s: CourseSetup): Array<SetupCell & { label: string }> {
+  const out: Array<SetupCell & { label: string }> = [];
+  const put = (tab: string, row: number, col: number, value: string | boolean, label = '') => {
+    out.push({ tab, row, col, value: typeof value === 'boolean' ? value : String(value ?? '').trim(), label });
   };
   // ── Input01 頭段 ──
-  put(IN1, 1, 2, s.courseName); put(IN1, 4, 2, s.edition); put(IN1, 5, 2, s.section);
-  put(IN1, 6, 2, s.badge); put(IN1, 7, 2, s.customName); put(IN1, 8, 2, s.form1); put(IN1, 9, 2, s.form2);
-  put(IN1, 11, 2, s.expectedIntake); put(IN1, 12, 2, s.expectedFee); put(IN1, 13, 2, s.expectedStaff);
+  put(IN1, 1, 2, s.courseName, '課程名稱'); put(IN1, 4, 2, s.edition, '屆別'); put(IN1, 5, 2, s.section, '支部');
+  put(IN1, 6, 2, s.badge, '專章'); put(IN1, 7, 2, s.customName, '自訂名稱'); put(IN1, 8, 2, s.form1, '形式-1'); put(IN1, 9, 2, s.form2, '形式-2');
+  put(IN1, 11, 2, s.expectedIntake, '預計收生人數'); put(IN1, 12, 2, s.expectedFee, '預計收費$'); put(IN1, 13, 2, s.expectedStaff, '預計職員人數');
   for (let i = 0; i < 9; i++) {
     const d = s.budgetDates[i] || { date: '', time: '', venue: '' };
-    put(IN1, 16 + i, 2, d.date); put(IN1, 16 + i, 3, d.time); put(IN1, 16 + i, 5, d.venue);
+    put(IN1, 16 + i, 2, d.date, `預算日期 ${i + 1} 日期`); put(IN1, 16 + i, 3, d.time, `預算日期 ${i + 1} 時間`); put(IN1, 16 + i, 5, d.venue, `預算日期 ${i + 1} 場地`);
   }
   // ── Input01 膳食 32–39 ──
   s.expenses.meals.forEach((l, i) => {
     const r = 32 + i;
-    put(IN1, r, 2, l.date); put(IN1, r, 3, l.time);
-    put(IN1, r, 5, l.breakfast); put(IN1, r, 6, l.lunch); put(IN1, r, 7, l.dinner);
-    put(IN1, r, 8, l.snack); put(IN1, r, 9, l.water); put(IN1, r, 10, l.who);
+    put(IN1, r, 2, l.date, `膳食 ${i + 1} 日期`); put(IN1, r, 3, l.time, `膳食 ${i + 1} 時間`);
+    put(IN1, r, 5, l.breakfast, `膳食 ${i + 1} 早餐$`); put(IN1, r, 6, l.lunch, `膳食 ${i + 1} 午餐$`); put(IN1, r, 7, l.dinner, `膳食 ${i + 1} 晚餐$`);
+    put(IN1, r, 8, l.snack, `膳食 ${i + 1} 茶點$`); put(IN1, r, 9, l.water, `膳食 ${i + 1} 飲用水$`); put(IN1, r, 10, l.who, `膳食 ${i + 1} 職員/學員`);
   });
   // ── Input01 租金：場租 47–49／露營 54–56／住宿 62–64 ──
-  const rentBlock = (lines: SetupRentLine[], rows: number[]) => {
+  const rentBlock = (lines: SetupRentLine[], rows: number[], name: string) => {
     lines.forEach((l, i) => {
       const r = rows[i];
-      put(IN1, r, 2, l.place); put(IN1, r, 3, l.period);
-      put(IN1, r, 6, l.qty); put(IN1, r, 7, l.qty2); put(IN1, r, 8, l.price);
+      put(IN1, r, 2, l.place, `${name} ${i + 1} 地點`); put(IN1, r, 3, l.period, `${name} ${i + 1} 時段`);
+      put(IN1, r, 6, l.qty, `${name} ${i + 1} 數量`); put(IN1, r, 7, l.qty2, `${name} ${i + 1} 數量2`); put(IN1, r, 8, l.price, `${name} ${i + 1} 價錢$`);
     });
   };
-  rentBlock(s.expenses.venue, [47, 48, 49]);
-  rentBlock(s.expenses.camp, [54, 55, 56]);
-  rentBlock(s.expenses.lodging, [62, 63, 64]);
+  rentBlock(s.expenses.venue, [47, 48, 49], '場租');
+  rentBlock(s.expenses.camp, [54, 55, 56], '露營');
+  rentBlock(s.expenses.lodging, [62, 63, 64], '住宿');
   // ── Input01 交通 69–74／講義 79–81／節目 85–87／行政 91–93／紀念品 97–98／其他 102–104 ──
-  s.expenses.transport.forEach((l, i) => { put(IN1, 69 + i, 3, l.route); put(IN1, 69 + i, 8, l.budget); });
-  const qpBlock = (lines: SetupQtyPriceLine[], start: number) => {
-    lines.forEach((l, i) => { put(IN1, start + i, 2, l.item); put(IN1, start + i, 7, l.qty); put(IN1, start + i, 8, l.price); });
+  s.expenses.transport.forEach((l, i) => { put(IN1, 69 + i, 3, l.route, `交通 ${i + 1} 說明`); put(IN1, 69 + i, 8, l.budget, `交通 ${i + 1} 預算$`); });
+  const qpBlock = (lines: SetupQtyPriceLine[], start: number, name: string) => {
+    lines.forEach((l, i) => { put(IN1, start + i, 2, l.item, `${name} ${i + 1} 項目`); put(IN1, start + i, 7, l.qty, `${name} ${i + 1} 數量`); put(IN1, start + i, 8, l.price, `${name} ${i + 1} 單價$`); });
   };
-  qpBlock(s.expenses.handouts, 79); qpBlock(s.expenses.program, 85);
-  qpBlock(s.expenses.admin, 91); qpBlock(s.expenses.souvenir, 97);
-  s.expenses.misc.forEach((l, i) => { put(IN1, 102 + i, 2, l.item); put(IN1, 102 + i, 5, l.amount); });
+  qpBlock(s.expenses.handouts, 79, '講義'); qpBlock(s.expenses.program, 85, '節目');
+  qpBlock(s.expenses.admin, 91, '行政'); qpBlock(s.expenses.souvenir, 97, '紀念品');
+  s.expenses.misc.forEach((l, i) => { put(IN1, 102 + i, 2, l.item, `其他 ${i + 1} 項目`); put(IN1, 102 + i, 5, l.amount, `其他 ${i + 1} 金額$`); });
   // ── Input02 ──
-  put(IN2, 1, 2, s.courseName);
-  put(IN2, 4, 2, s.quota); put(IN2, 5, 2, s.fee); put(IN2, 6, 2, s.staffCount);
+  put(IN2, 1, 2, s.courseName, '課程名稱（Input02）');
+  put(IN2, 4, 2, s.quota, '名額'); put(IN2, 5, 2, s.fee, '收費$'); put(IN2, 6, 2, s.staffCount, '職員人數');
   s.sessions.forEach((sess, i) => {
     const r = 9 + i;
-    put(IN2, r, 2, sess.date); put(IN2, r, 3, sess.spanNext);
-    put(IN2, r, 4, sess.time); put(IN2, r, 5, sess.venue);
-    put(IN2, r, 8, sess.show);
-    put(IN2, r, 9, sess.displayDate); put(IN2, r, 10, sess.displayTime); put(IN2, r, 11, sess.displayVenue);
+    put(IN2, r, 2, sess.date, `第${i + 1}節 日期`); put(IN2, r, 3, sess.spanNext, `第${i + 1}節 跨日`);
+    put(IN2, r, 4, sess.time, `第${i + 1}節 時間`); put(IN2, r, 5, sess.venue, `第${i + 1}節 場地`);
+    put(IN2, r, 8, sess.show, `第${i + 1}節 ✓上通告`);
+    put(IN2, r, 9, sess.displayDate, `第${i + 1}節 通告顯示日期`); put(IN2, r, 10, sess.displayTime, `第${i + 1}節 通告顯示時間`); put(IN2, r, 11, sess.displayVenue, `第${i + 1}節 通告顯示地點`);
   });
-  put(IN2, 18, 2, s.deadline); put(IN2, 19, 2, s.publishDate);
+  put(IN2, 18, 2, s.deadline, '截止報名日期'); put(IN2, 19, 2, s.publishDate, '最遲公佈取錄日期');
   s.staff.forEach((st, i) => {
     const r = 23 + i;
-    put(IN2, r, 1, st.role); put(IN2, r, 2, st.name); put(IN2, r, 3, st.title);
-    put(IN2, r, 4, st.unit); put(IN2, r, 5, st.qualification);
-    put(IN2, r, 6, st.phone); put(IN2, r, 7, st.email);
+    put(IN2, r, 1, st.role, `職員 ${i + 1} 職位`); put(IN2, r, 2, st.name, `職員 ${i + 1} 姓名`); put(IN2, r, 3, st.title, `職員 ${i + 1} 稱謂`);
+    put(IN2, r, 4, st.unit, `職員 ${i + 1} 單位`); put(IN2, r, 5, st.qualification, `職員 ${i + 1} 資格`);
+    put(IN2, r, 6, st.phone, `職員 ${i + 1} 電話`); put(IN2, r, 7, st.email, `職員 ${i + 1} 電郵`);
   });
-  put(IN2, 46, 2, s.residentStaff);
+  put(IN2, 46, 2, s.residentStaff, '常駐職員人數');
   // ── Input03（3 組：top 2／12／22；E 服裝＋5 行流程 C 需時／D 項目／E 負責人） ──
   s.timetable.forEach((g, gi) => {
     const top = [2, 12, 22][gi];
-    put(IN3, top + 1, 5, g.clothing);
+    put(IN3, top + 1, 5, g.clothing, `時間表 第${gi + 1}節 服裝`);
     g.flows.forEach((f, i) => {
       const r = top + 4 + i;
-      put(IN3, r, 3, f.mins); put(IN3, r, 4, f.item); put(IN3, r, 5, f.owner);
+      put(IN3, r, 3, f.mins, `時間表 第${gi + 1}節 流程${i + 1} 需時`); put(IN3, r, 4, f.item, `時間表 第${gi + 1}節 流程${i + 1} 項目`); put(IN3, r, 5, f.owner, `時間表 第${gi + 1}節 流程${i + 1} 負責人`);
     });
   });
   // ── Print_通告人手格 ──
   const PN = 'Print_通告';
-  put(PN, 23, 3, s.eligibility); put(PN, 24, 3, s.feeNote); put(PN, 31, 3, s.uniform);
-  for (let i = 0; i < 6; i++) put(PN, 32 + i, 3, s.remarks[i] || '');
-  put(PN, 12, 7, s.fileNo ? `檔案編號: ${s.fileNo}` : '');
-  put(PN, 13, 7, s.issueDate);
-  put(PN, 43, 5, s.signer);
-  put(PN, 45, 5, s.deputy ? `（${s.deputy}代行）` : '');
+  put(PN, 23, 3, s.eligibility, '通告·參加資格'); put(PN, 24, 3, s.feeNote, '通告·費用說明'); put(PN, 31, 3, s.uniform, '通告·服裝');
+  for (let i = 0; i < 6; i++) put(PN, 32 + i, 3, s.remarks[i] || '', `通告·備註 ${i + 1}`);
+  put(PN, 12, 7, s.fileNo ? `檔案編號: ${s.fileNo}` : '', '通告·檔案編號');
+  put(PN, 13, 7, s.issueDate, '通告·發出日期');
+  put(PN, 43, 5, s.signer, '通告·區總監署名');
+  put(PN, 45, 5, s.deputy ? `（${s.deputy}代行）` : '', '通告·代行');
   // ── Print_接納通知書人手格 ──
   const PA = 'Print_接納通知書';
-  put(PA, 23, 4, s.acceptCheckin); put(PA, 30, 4, s.acceptItems);
-  put(PA, 32, 4, s.acceptOthers); put(PA, 34, 4, s.acceptNote);
+  put(PA, 23, 4, s.acceptCheckin, '接納通知書·報到時間'); put(PA, 30, 4, s.acceptItems, '接納通知書·攜帶物品');
+  put(PA, 32, 4, s.acceptOthers, '接納通知書·其他'); put(PA, 34, 4, s.acceptNote, '接納通知書·備註');
   // ── Print_財政預算＋資助人手格 ──
-  put('Print_財政預算', 95, 2, s.financeApproved);
-  put('Print_財政預算', 90, 8, s.financeHqSubsidy);
-  put('Print_總會資助計劃', 11, 17, s.subsidyOrigFee);
+  put('Print_財政預算', 95, 2, s.financeApproved, '批准總預算$');
+  put('Print_財政預算', 90, 8, s.financeHqSubsidy, '總會津貼$');
+  put('Print_總會資助計劃', 11, 17, s.subsidyOrigFee, '資助前原價$');
+  return out;
+}
+
+/** 成份設定轉寫入格清單（後台照單寫入；空值都寫，確保覆蓋舊值） */
+export function setupToCells(s: CourseSetup): SetupCell[] {
+  return setupCellsWithLabels(s).map(({ label, ...c }) => c);
+}
+
+// ===================== 批核修訂（v4.17.0：改咗咩要標亮俾 CL 知） =====================
+
+export interface SetupDiff {
+  changes: CourseChange[];   // 人類可讀修訂清單（email／修訂紀錄用）
+  cells: SetupCell[];        // 淨係改咗嗰啲格（saveCourseApproval 用——唔會成張寫）
+}
+
+/** 兩份設定逐格比較（照 setupCellsWithLabels 座標對位；職員／時間表可以預先由呼叫方鎖返原值） */
+export function diffSetups(base: CourseSetup, next: CourseSetup): SetupDiff {
+  const key = (c: { tab: string; row: number; col: number }) => `${c.tab}|${c.row}|${c.col}`;
+  const mapBase = new Map(setupCellsWithLabels(base).map(c => [key(c), c]));
+  const changes: CourseChange[] = [];
+  const cells: SetupCell[] = [];
+  setupCellsWithLabels(next).forEach(c => {
+    const pb = mapBase.get(key(c));
+    if (!pb || String(pb.value ?? '') !== String(c.value ?? '')) {
+      changes.push({ label: c.label || `${c.tab} R${c.row}C${c.col}`, from: String(pb?.value ?? ''), to: String(c.value ?? '') });
+      cells.push({ tab: c.tab, row: c.row, col: c.col, value: c.value });
+    }
+  });
+  return { changes, cells };
+}
+
+// ===================== 收款核對（v4.17.0：報名截止後，區管理層對完區帳戶 tick） =====================
+
+/** 表格回應 → 收款核對列（header 名對位，同訓練班 App parseRegs 同一套欄名；搵唔到先用舊欄號） */
+export function parseRawToPaymentRows(raw: CourseSheetRaw): CoursePaymentRow[] {
+  const resp = Array.isArray(raw.resp) ? raw.resp : [];
+  if (resp.length < 2) return [];
+  const headers = (resp[0] || []).map(x => String(x ?? '').trim());
+  const idx = (names: string[], fallback: number): number => {
+    for (const n of names) { const i = headers.indexOf(n); if (i >= 0) return i; }
+    return fallback;
+  };
+  const iId = idx(['時間戳記'], 0);
+  const iEmail = idx(['電郵', '電子郵件'], RC.email);
+  const iName = idx(['中文姓名'], RC.name);
+  const iNameEn = idx(['英文姓名'], RC.nameEn);
+  const iPhone = idx(['聯絡電話', '電話'], RC.phone);
+  const iDistrict = idx(['所屬區', '童軍區'], RC.district);
+  const iTroop = idx(['所屬旅團', '旅團'], RC.troop);
+  const iTroopNo = idx(['旅號'], RC.troopNo);
+  const iStudentNo = idx(['學員編號'], RC.code);
+  const iGroup = idx(['分組'], RC.group);
+  const iStatus = idx(['審批狀態'], RC.status);
+  const iAccept = idx(['接納'], -1);
+  const iReceipt = idx(['已繳付訓練班費用截圖'], -1);
+  const iPay = idx(['已核對收款'], 44);
+  const iPayBy = idx(['核對人'], 45);
+  const iPayAt = idx(['核對時間'], 46);
+  const iSta = idx(['已交表格正本（STA）', '已交表格正本'], 47);
+  const iStaNote = idx(['收表記錄'], 48);
+  const str = (r: unknown[], i: number): string => String((r || [])[i] ?? '').trim();
+  const out: CoursePaymentRow[] = [];
+  resp.slice(1).forEach(r => {
+    if (!Array.isArray(r) || str(r, iId) === '') return;
+    let status = str(r, iStatus).toLowerCase();
+    if (!status && iAccept >= 0) status = str(r, iAccept) === '✔' ? 'approved' : (str(r, iAccept) === '✗' ? 'rejected' : 'pending');
+    if (!['approved', 'rejected', 'cancelled'].includes(status)) status = 'pending';
+    out.push({
+      id: str(r, iId),
+      name: str(r, iName), nameEn: str(r, iNameEn), phone: str(r, iPhone), email: str(r, iEmail),
+      troop: str(r, iTroop), troopNo: str(r, iTroopNo), group: str(r, iGroup), studentNo: str(r, iStudentNo),
+      district: str(r, iDistrict), status,
+      receiptUrl: str(r, iReceipt),
+      payChecked: str(r, iPay) === '✔', payBy: str(r, iPayBy), payAt: str(r, iPayAt),
+      sta: str(r, iSta) === '✔', staNote: str(r, iStaNote),
+    });
+  });
   return out;
 }
 

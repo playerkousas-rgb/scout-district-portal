@@ -88,6 +88,30 @@ export interface DistrictConfig {
   budgetSheetUrl?: string;            // v4.5.0：區年度預算 Google Sheet 網址（Config BUDGET_SHEET_URL；留空用內建）
   memberPortalUrl?: string;           // v4.12.0：成員系統網址（通告「報名辦法」報名連結用）
   courseTemplateSet?: boolean;        // v4.14.0：訓練班總模版有冇設定（新制直入用）
+  courseEmailFrom?: string;           // v4.17.0：訓練班郵件 alias（留空=部署帳戶本身地址）
+  courseFactoryUrl?: string;          // v4.17.0：CourseFactory 開班網址（開班指引用）
+}
+
+/** 開班指引＋訓練班郵件現狀（getCourseOpsInfo；canCourse 先睇到） */
+export interface CourseOpsInfo {
+  districtName: string;
+  factoryUrl: string;                 // CourseFactory /exec（CL「新開班 → 連區會起表」用）
+  factoryCode: string;                // 開班碼（只交俾 CL，季度更換）
+  emailFrom: string;                  // 訓練班郵件 alias（空 = 用部署帳戶地址）
+  memberPortalUrl: string;
+  notifyFrom: string;
+}
+
+/** 收款核對一列（收款核對分頁用；由表格回應 header 對位） */
+export interface CoursePaymentRow {
+  id: string;                         // 時間戳記（setPaymentCheck 對行用）
+  name: string; nameEn: string; phone: string; email: string;
+  troop: string; troopNo: string; group: string; studentNo: string;
+  district: string;
+  status: string;                     // approved / rejected / cancelled / pending
+  receiptUrl: string;                 // 入數紙截圖（Drive）
+  payChecked: boolean; payBy: string; payAt: string;
+  sta: boolean; staNote: string;
 }
 
 export interface SystemState {
@@ -161,6 +185,30 @@ export interface CourseLink {
   sheetId?: string;           // 區後台自動複製嘅班 Sheet ID（人手建表嘅班冇）
   setupJson?: string;         // CourseSetup JSON（list 唔回，要用 getCourseSetup 攞）
   hasSetup?: boolean;         // 有冇儲存過直入設定
+  // ── 新版流程（v4.17.0：訓練班系統先行）──
+  gsUrl?: string;             // CL 交嚟嘅班 Google Sheet 網址（批核直接開 GS 用）
+  approval?: string;          // '' | 'PENDING' | 'APPROVED'（區會批准）
+  approvedAt?: string;        // 批准時間（ISO）
+  approvedBy?: string;        // 批准人
+  revisions?: string;         // 修訂清單 JSON（CourseRevision[]；list 唔回原字串）
+}
+
+/** 批核修訂一項（v4.17.0）：管理層改咗嘅嘢——標亮俾 CL 知 */
+export interface CourseChange {
+  label: string;              // 人類可讀欄位名（例「名額」「1. 膳食 第2行 價錢」）
+  from: string;               // 原值（CL 填嘅）
+  to: string;                 // 新值（管理層改嘅）
+}
+
+/** 修訂紀錄一筆（CourseLinks.revisions JSON） */
+export interface CourseRevision {
+  at: string;                 // ISO 時間
+  by: string;                 // 管理層名
+  approval: string;           // 'APPROVED' | 'PENDING' | ''
+  changes: CourseChange[];
+  note: string;
+  cellsApplied?: number;
+  path?: string;              // 'direct'（開 GS 寫）| 'exec'（經 Script 寫）
 }
 
 // ===================== 訓練班 Sheet profile（pullCourseProfile） =====================
