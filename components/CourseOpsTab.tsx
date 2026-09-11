@@ -180,7 +180,8 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
     if (emailChecked && leaderEmail) {
       const e = await api.sendCourseEmail(session.token, {
         courseId, kind: 'approved', to: leaderEmail, cc: courseEmail.trim(),
-        title: link.title, changes: allChanges, note: approveNote.trim(), by: session.displayName,
+        title: link.title, replyTo: courseEmail.trim(),
+        changes: allChanges, note: approveNote.trim(), by: session.displayName,
       });
       m += e.ok && e.data
         ? `\n✉ 已寄通知俾 ${e.data.to}（寄件人：${e.data.fromUsed}）${e.data.warning ? `；⚠ ${e.data.warning}` : ''}`
@@ -324,12 +325,12 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
       `   開班網址：${d?.factoryUrl || '（未設定——Config COURSE_FACTORY_URL）'}`,
       `   開班碼：${d?.factoryCode || '（未設定——Config COURSE_FACTORY_CODE）'}`,
       '2️⃣ 班信箱：區會會為呢個班開 XXX@skwscout.org.hk 班電郵（通告查詢行印呢個地址）。',
-      '   班職員想睇班信箱：CL 喺班信箱 Gmail → 設定 → 帳戶 →「授予存取權限」加職員（對方喺自己 Gmail 右上角切換入去，可以代班回信）；',
-      '   全體職員通知就開個 Google Group 轉寄。唔使再轉寄去 CL 個人電郵。',
+      '   職員收發班信：用 webmail 或手機／電腦郵件 App（IMAP＋SMTP）登入班信箱（密碼班職員內部分享，課程完建議換密碼歸檔）；',
+      '   想喺自己信箱順手回、又用班地址：喺自己 Gmail「設定→帳戶→用這個地址傳送郵件」加班地址（SMTP 填班信箱登入資料）。唔使再轉寄去 CL 個人電郵。',
       '3️⃣ 填文件：喺 App「📝 開班文件」填晒預算／班資料／時間表，再喺「📢 通告」補參加資格等（檔案編號＋班電郵由區會告知）。',
       '4️⃣ 交網址：App 會出「📋 網址」視窗（GS＋SCRIPT 兩條）——一併 Send 俾區管理層，等我哋批核。',
       '5️⃣ 等批：區會批好會 tick「區會批准」＋寄 email 話你知（有改嘅位會喺 email 標亮）。未收 ✔ 之前唔使做嘢。',
-      '   （通知郵件嘅「回覆」會去班信箱——職員 delegate 入去就見到成個對話。）',
+      '   （通知郵件嘅「回覆」會去班信箱——職員入 webmail／IMAP 就見到成個對話。）',
       '6️⃣ 上網：批完由區會出通告上網＋掛載成員系統——你又唔使出通告，收到 email 就代表報名開始。',
       '7️⃣ 之後：收生／點名／收支／評核／證書照喺 App 度做；收款核對由區會財務負責（💰✔ 會喺 App 見到）。',
       '',
@@ -513,10 +514,13 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
             <section className="info-card">
               <h3>✏️ 批核修改（核心資料＋預算＋通告內文；職員表／時間表唔准改）</h3>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-                <label style={{ fontWeight: 700 }}>訓練班電郵（區會派俾呢個班；通告查詢行自動用）
+                <label style={{ fontWeight: 700 }}>訓練班電郵（區會為每班開嘅班信箱）
                   <input value={courseEmail} onChange={e => setCourseEmail(e.target.value)} placeholder="例：blt2601@skwscout.org.hk" style={{ marginLeft: 6, padding: '5px 7px', border: '1px solid #cbd5e1', borderRadius: 6, width: 250 }} />
                 </label>
                 {!summaryOk && <span className="muted" style={{ fontSize: 12.5 }}>（呢班 Script 冇 coursev5 摘要——現值讀唔到，直接填就得）</span>}
+                <p className="muted" style={{ fontSize: 12.5, margin: 0, width: '100%' }}>
+                  印喺通告查詢行；系統通知嘅「回覆」都會去呢個班信箱（唔會入機房信箱）。班信箱唔使係 Gmail——職員用 webmail／手機 IMAP＋共用密碼收發（同訓練班 App 同一套文化，課程完換密碼歸檔）；想喺自己信箱順手回就用班地址做 send-as。細節睇 <code>docs/course-email-drive-architecture.md</code>。
+                </p>
               </div>
               <CourseSetupForm setup={setup} onChange={setSetup} hide={{ staff: true, timetable: true }} />
             </section>

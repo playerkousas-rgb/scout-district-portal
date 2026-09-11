@@ -338,6 +338,21 @@ test('⑥b 寄信：冇 to 报錯', () => {
   const r = ctx.sendCourseEmail_(tk, { courseId: 'cl-ops1', kind: 'custom', to: '' });
   assert.ok(!r.ok);
 });
+test('⑥c COURSE_EMAIL_FROM_MODE=course：寄件人直接用班信箱（非 Gmail 班信箱＋Gmail send-as 情境）', () => {
+  const cfg = sheets.Config._data;
+  let row = cfg.find(r => r[0] === 'COURSE_EMAIL_FROM_MODE');
+  if (row) row[1] = 'course'; else cfg.push(['COURSE_EMAIL_FROM_MODE', 'course', '']);
+  mails.length = 0;
+  const r = ctx.sendCourseEmail_(tk, { courseId: 'cl-ops1', kind: 'mounted', to: 'cl@personal.example', replyTo: 'ops1@skwscout.org.hk', title: 'X' });
+  assert.ok(r.ok, r.error);
+  assert.strictEqual(mails[0].from, 'ops1@skwscout.org.hk');
+  assert.strictEqual(mails[0].replyTo, 'ops1@skwscout.org.hk');
+  // mode 留空時 from 用 COURSE_EMAIL_FROM，唔會攞班信箱
+  cfg.find(r => r[0] === 'COURSE_EMAIL_FROM_MODE')[1] = '';
+  mails.length = 0;
+  ctx.sendCourseEmail_(tk, { courseId: 'cl-ops1', kind: 'custom', to: 'x@y.z', replyTo: 'ops1@skwscout.org.hk', note: 'hi' });
+  assert.strictEqual(mails[0].from, 'courses@skwscout.org.hk');
+});
 
 // ── ⑦ getCourseOpsInfo_ ──
 test('⑦ 開班指引：CourseFactory 網址＋開班碼由 Config 帶出', () => {

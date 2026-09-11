@@ -32,6 +32,14 @@
 > - ⚠️ 部署：換 `Code.gs` 4.17.0 → `setupSheets()` → 重新部署；Config 填 CourseFactory 網址＋開班碼。
 >   未做（等用戶叫）：course repo 嗰邊嘅 CourseFactory share＋setParamLabel；deep link 報名
 >   （用戶話唔使 patch——通告印成員系統 `/training` 公開報名表已夠，掛載列表係畀已用開系統嘅人）。
+> - **更正（同日）：班信箱 `XXX@skwscout.org.hk` 唔係 Gmail**（區自己 domain 嘅寄存郵箱）——
+>   Gmail 委派存取／同 domain Google Group 都行唔通。定案：ReplyTo 照樣有效（MailApp replyTo
+>   唔使 Gmail）；班信箱管理＝webmail／IMAP＋共用密碼（同 App 同文化，課程完換密碼歸檔）＋
+>   個人 Gmail send-as（SMTP 班信箱）做代班回覆；零成本升級位＝免費 Gmail POP3 拉信；
+>   Workspace 每班一授權太貴唔建議。新增 Config `COURSE_EMAIL_FROM_MODE=course`
+>   （寄件人直接用班信箱，須部署帳戶 Gmail send-as 驗證；未驗證自動 fallback）。
+>   Sheet 唔使搬去班信箱：職員經 App（共用密碼）存取，GS 留機房歸檔。全部見
+>   `docs/course-email-drive-architecture.md`（已重寫非 Gmail 版）。測試 16 項。
 >
 
 > 2026-09-09（第八輪）v4.16.0：**📋 訓練班通告全文欄**（用戶問：PDF 定網頁擇要用邊個＋系統格式同區通告唔同、有項目冇）。

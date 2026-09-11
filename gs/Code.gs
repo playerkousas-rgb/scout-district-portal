@@ -3789,7 +3789,8 @@ function setCoursePaymentCheck_(token, b) {
 function courseMail_(to, subject, htmlBody, textBody, opts) {
   opts = opts || {};
   var replyTo = String(opts.replyTo || '').trim();
-  var from = String(getConfigValue_('COURSE_EMAIL_FROM') || '').trim();
+  // 寄件地址：opts.from（例 mode=course 傳入班信箱）> Config COURSE_EMAIL_FROM > 留空（部署帳戶本身）
+  var from = String(opts.from || getConfigValue_('COURSE_EMAIL_FROM') || '').trim();
   var name = String(opts.name || getConfigValue_('notifyFrom') || ((getConfigValue_('districtName') || '童軍區') + ' 管理系統'));
   var base = { to: to, subject: subject, htmlBody: htmlBody, body: textBody, name: name };
   if (replyTo && replyTo.indexOf('@') > 0) base.replyTo = replyTo;
@@ -3800,7 +3801,7 @@ function courseMail_(to, subject, htmlBody, textBody, opts) {
     } catch (e) {
       // alias 未驗證／無效——fallback 機房帳戶地址（replyTo 照跟，回覆照去班信箱）
       MailApp.sendEmail(base);
-      return { fromUsed: '(帳戶本身)', warning: 'COURSE_EMAIL_FROM（' + from + '）寄唔到（未喺 Gmail 驗證 alias？），已改用部署帳戶地址寄出；回覆照去班信箱。' };
+      return { fromUsed: '(帳戶本身)', warning: from + ' 寄唔到（send-as 未喺部署帳戶 Gmail 驗證／SMTP 唔對？），已改用部署帳戶地址寄出；回覆照去班信箱。' };
     }
   }
   MailApp.sendEmail(base);
@@ -3856,19 +3857,25 @@ function sendCourseEmail_(token, b) {
     body = head + '<p>' + esc_(String(b.note || '').trim() || '（冇內容）') + '</p>' + courseChangesHtml_(b.changes) + foot;
   }
   var cc = String(b.cc || '').trim();
+  var replyTo = String(b.replyTo || '').trim();
+  // COURSE_EMAIL_FROM_MODE=course：寄件人直接用班信箱（須預先喺部署帳戶 Gmail
+  // 「用這個地址傳送郵件」＋班信箱 SMTP 驗證；未驗證 courseMail_ 會自動 fallback 機房地址）
+  var fromOpt = '';
+  if (String(getConfigValue_('COURSE_EMAIL_FROM_MODE') || '').trim().toLowerCase() === 'course'
+      && replyTo && replyTo.indexOf('@') > 0) fromOpt = replyTo;
   var mail;
   try {
     mail = courseMail_(to, subject, body, subject + '\n\n（詳情請睇 HTML 版）', {
-      replyTo: String(b.replyTo || '').trim(),
+      replyTo: replyTo,
+      from: fromOpt,
       name: (districtName + '·' + title).substring(0, 60),
     });
     if (cc && cc.indexOf('@') >= 0) {
       try {
-        MailApp.sendEmail({
-          to: cc, subject: subject, htmlBody: body,
-          name: (districtName + '·' + title).substring(0, 60),
-          replyTo: String(b.replyTo || '').trim(),
-        });
+        var ccOpts = { to: cc, subject: subject, htmlBody: body,
+          name: (districtName + '·' + title).substring(0, 60), replyTo: replyTo };
+        if (fromOpt) ccOpts.from = fromOpt;
+        MailApp.sendEmail(ccOpts);
       } catch (e) {}
     }
   } catch (e) { return err('寄電郵失敗：' + e); }
@@ -5184,6 +5191,7 @@ function blueprint_() {
       ['notifyFrom', '', '寄件人顯示名稱（不是 Gmail 地址；留空用區名）'],
       // v4.17.0 訓練班新版流程：CL 電郵 alias＋開班指引（CourseFactory）
       ['COURSE_EMAIL_FROM', '', '（選填）通知寄件 alias；留空=用部署帳戶地址＋ReplyTo 班信箱（CL 回覆去班信箱，唔入機房 inbox）'],
+      ['COURSE_EMAIL_FROM_MODE', '', 'course = 寄件人直接用該班班信箱（須先喺部署帳戶 Gmail「用這個地址傳送郵件」＋班信箱 SMTP 驗證；未驗證自動 fallback）；留空=上式'],
       ['COURSE_FACTORY_URL', '', 'CourseFactory 開班網址（/exec）——CL 喺訓練班 App「新開班」用'],
       ['COURSE_FACTORY_CODE', '', '開班碼（明文；只交俾 CL，季度更換）'],
       // 付款 / 規定
