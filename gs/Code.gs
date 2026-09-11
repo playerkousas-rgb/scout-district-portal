@@ -305,7 +305,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.16.0',
+      version: '4.17.2',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -455,6 +455,14 @@ function doPost(e) {
       case 'pushCourseSetup':      return json(pushCourseSetup_(b.token, b));
       case 'pullCourseSheetRaw':   return json(pullCourseSheetRaw_(b.token, b));
       case 'getCourseSetup':       return json(getCourseSetup_(b.token, b.courseId));
+      // v4.17.0 新版流程（訓練班系統先行）：批核＋修訂＋收款核對＋CL 電郵＋開班指引
+      case 'pullCourseSummary':    return json(pullCourseSummary_(b.token, b));
+      case 'saveCourseApproval':   return json(saveCourseApproval_(b.token, b));
+      case 'setCoursePaymentCheck': return json(setCoursePaymentCheck_(b.token, b));
+      case 'setCourseRefund': return json(setCourseRefund_(b.token, b));
+      case 'sendCourseEmail':      return json(sendCourseEmail_(b.token, b));
+      case 'sendCourseRegNotice':  return json(sendCourseRegNotice_(b.token, b));
+      case 'getCourseOpsInfo':     return json(getCourseOpsInfo_(b.token));
 
       // ---------- 區通告 ----------
       case 'saveCircular':         return json(saveCircular_(b.token, b.circular || {}));
@@ -642,6 +650,9 @@ function getConfig_() {
     memberPortalUrl: getConfigValue_('MEMBER_PORTAL_URL') || '',
     // v4.14.0 新制直入：訓練班總模版有冇設定（CourseLinks.sheetId 班先有後端直讀）
     courseTemplateSet: !!String(getConfigValue_('COURSE_TEMPLATE_ID') || '').trim(),
+    // v4.17.0 新版流程：訓練班郵件 alias（留空=部署帳戶本身地址）＋CourseFactory 開班網址
+    courseEmailFrom: getConfigValue_('COURSE_EMAIL_FROM') || '',
+    courseFactoryUrl: getConfigValue_('COURSE_FACTORY_URL') || '',
   };
 }
 
@@ -3219,6 +3230,13 @@ function getCourseLinks_(token) {
     o.driveFolderId = r.driveFolderId || '';
     o.sheetId = r.sheetId || '';                       // v4.14.0 新制直入：後端班 Sheet ID
     o.hasSetup = !!String(r.setupJson || '').trim();   // 有冇儲存過直入設定（JSON 本體用 getCourseSetup 攞）
+    // v4.17.0 新版流程：GS 網址＋批核狀態＋修訂清單（revisions = JSON 字串，前端 parse）
+    o.gsUrl = String(r.gsUrl || '').trim();
+    o.approval = String(r.approval || '').trim();
+    o.approvedAt = String(r.approvedAt || '').trim();
+    o.approvedBy = String(r.approvedBy || '').trim();
+    o.revisions = String(r.revisions || '').trim();
+    o.regNotices = String(r.regNotices || '').trim();   // v4.17.1 收生通知紀錄（JSON 字串，前端 parse）
     o.apiBase = o.scriptExecUrl;  // 相容舊前端
     o.apiKey  = o.scriptApiKey;
     o.active = String(r.active).toUpperCase() !== 'FALSE';
@@ -3265,6 +3283,14 @@ function saveCourseLink_(token, link) {
   // v4.14.0 新制直入：後端 Sheet ID＋設定 JSON（undefined = 保留；空字串 = 清除）
   if (link.sheetId !== undefined) row.sheetId = String(link.sheetId || '').trim();
   if (link.setupJson !== undefined) row.setupJson = String(link.setupJson || '');
+  // v4.17.0 新版流程：GS 網址＋批核狀態＋修訂清單（revisions 由 saveCourseApproval_ 維護，
+  //  呢度 undefined = 保留；saveCourseLink 明確帶先寫——避免普通儲存洗走修訂紀錄）
+  if (link.gsUrl !== undefined) row.gsUrl = String(link.gsUrl || '').trim();
+  if (link.approval !== undefined) row.approval = String(link.approval || '').trim();
+  if (link.approvedAt !== undefined) row.approvedAt = String(link.approvedAt || '').trim();
+  if (link.approvedBy !== undefined) row.approvedBy = String(link.approvedBy || '').trim();
+  if (link.revisions !== undefined) row.revisions = String(link.revisions || '').trim();
+  if (link.regNotices !== undefined) row.regNotices = String(link.regNotices || '').trim();   // v4.17.1
 
   if (link.fpsQrPayload !== undefined) {
     var payload = String(link.fpsQrPayload || '').trim();
@@ -3478,13 +3504,14 @@ function pullCourseSheetRaw_(token, b) {
   var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
   b = b || {};
   var execUrl = String(b.scriptExecUrl || b.apiBase || '').trim();
-  var apiKey = String(b.scriptApiKey || b.apiKey || '').trim();
+  // 注意：唔可以 fallback 用 b.apiKey（嗰個係區後台 key，唔係班 Script 嘅 key）
+  var apiKey = String(b.scriptApiKey || '').trim();
   var sheetId = '';
   if ((!execUrl || !apiKey) && b.courseId) {
     var link = courseLinkById_(b.courseId);
     if (link) {
       if (!execUrl) execUrl = courseExecUrl_(link);
-      if (!apiKey) apiKey = courseApiKey_(link);
+      if (!apiKey) apiKey = courseApiKey_(link) || String(b.apiKey || '').trim();
       sheetId = String(link.sheetId || '').trim();
     }
   }
@@ -3518,6 +3545,579 @@ function getCourseSetup_(token, courseId) {
   try { setup = link.setupJson ? JSON.parse(link.setupJson) : null; } catch (e) { setup = null; }
   return ok({ courseId: String(courseId).trim(), sheetId: String(link.sheetId || ''), setup: setup });
 }
+
+// ===================== 訓練班新版流程（v4.17.0：訓練班系統先行） ======================
+// CL 喺訓練班 App（course repo）開班＋填晒 Input01/02/03＋通告 → 交「GS＋SCRIPT 網址」→
+// 管理層喺區系統：①拉 getCourseSummary 批核 ②改核心資料（修訂清單標亮＋寫返 GS）③tick 區會批准
+// ④出通告上網→貼 URL 掛載 ⑤報名截止後收款核對（setPaymentCheck）⑥完成報告對接。
+// 決定權喺區管理層——批完由呢邊出通告，CL 純被通知（email 由 COURSE_EMAIL_FROM alias 出）。
+
+/** 由 CourseLink 解析班 Sheet 檔案 ID（gsUrl 為主；sheetId 後備） */
+function courseSheetFileId_(link) {
+  var url = String(link.gsUrl || '').trim();
+  var m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if (m) return m[1];
+  return String(link.sheetId || '').trim();
+}
+
+/** 參數分頁 label 對位：搵「label」行（A 欄整格相符）；冇就喺表尾補一行（CourseFactory 同款）。
+ *  回傳 { row }；搵唔到分頁回 null。 */
+function courseParamRow_(ss, label) {
+  var sh = ss.getSheetByName('參數');
+  if (!sh) return null;
+  var last = sh.getLastRow();
+  if (last > 0) {
+    var found = sh.getRange(1, 1, last, 1).getValues();
+    for (var i = 0; i < found.length; i++) {
+      if (String(found[i][0] || '').trim() === label) return { row: i + 1 };
+    }
+  }
+  sh.getRange(last + 1, 1, 1, 2).setValues([[label, '']]);
+  return { row: last + 1 };
+}
+
+/**
+ * 拉訓練班批核摘要（coursev5 getCourseSummary——一個 call 攞齊課程資料・節次・職員・
+ * 預算 8 大類・通告要點・批准狀態・報名數）。b: { courseId } 或 { scriptExecUrl, scriptApiKey }。
+ * 淨係 /exec 班（新版流程班）；直入班（得 sheetId）前端用 pullCourseSheetRaw 自己組。
+ */
+function pullCourseSummary_(token, b) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  b = b || {};
+  var execUrl = String(b.scriptExecUrl || b.apiBase || '').trim();
+  var apiKey = String(b.scriptApiKey || b.apiKey || '').trim();
+  if ((!execUrl || !apiKey) && b.courseId) {
+    var link = courseLinkById_(b.courseId);
+    if (link) { if (!execUrl) execUrl = courseExecUrl_(link); if (!apiKey) apiKey = courseApiKey_(link); }
+  }
+  if (!execUrl) return err('呢班未有訓練班 Script 網址（新版流程班請貼 CL 交嚟嘅網址）');
+  try {
+    var resp = UrlFetchApp.fetch(execUrl, {
+      method: 'post', contentType: 'application/json',
+      payload: JSON.stringify({ action: 'getCourseSummary', apiKey: apiKey }),
+      muteHttpExceptions: true,
+    });
+    var r = {};
+    try { r = JSON.parse(resp.getContentText()); } catch (e) { r = {}; }
+    if (!r.ok) return err((r && r.error) || '讀取批核摘要失敗（HTTP ' + resp.getResponseCode() + '）——請確認該班 Script 已裝 coursev5（Summary.gs）');
+    return ok(r.data || {});
+  } catch (e) { return err('讀取批核摘要失敗：' + e); }
+}
+
+/**
+ * 批核寫入：核心資料修改（cells）＋區會批准 tick＋訓練班電郵＋修訂清單，一次過寫入班 Sheet。
+ * b: { courseId, by, cells[{tab,row,col,value}], approval('APPROVED'|'PENDING'|''=不變),
+ *      courseEmail, changes[{label,from,to}], revisionNote, link(摘要同步欄) }
+ * 首選 direct openById（gsUrl／sheetId；同一帳戶擁有）：先寫格，再參數分頁 label 對位寫
+ * 「區會批准」「訓練班電郵」「區會修訂」行，最後 bump rev（職員前端會偵測到有人改過）。
+ * 開唔到 Sheet（唔同帳戶）就 fallback 經 /exec saveCourseBatch 寫 cells——批准格要人手開 GS tick。
+ */
+function saveCourseApproval_(token, b) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  b = b || {};
+  var link = courseLinkById_(b.courseId);
+  if (!link) return err('找不到此訓練班（courseId）');
+  var by = String(b.by || '區管理系統').trim();
+  var cells = Array.isArray(b.cells) ? b.cells : [];
+  var warnings = [];
+  var applied = { applied: 0, skippedTabs: [] };
+  var approvalDone = false, path = '';
+
+  var fileId = courseSheetFileId_(link);
+  var ss = null;
+  if (fileId) {
+    try { ss = SpreadsheetApp.openById(fileId); } catch (e) { ss = null; }
+  }
+  if (ss) {
+    path = 'direct';
+    try {
+      applied = applySetupCells_(ss, cells);
+      // 區會批准 tick（approval=''=唔掂）
+      var appr = String(b.approval || '').trim().toUpperCase();
+      if (appr === 'APPROVED' || appr === 'PENDING') {
+        var prow = courseParamRow_(ss, '區會批准');
+        if (prow) {
+          ss.getSheetByName('參數').getRange(prow.row, 2).setValue(appr === 'APPROVED' ? '✔' : '');
+          approvalDone = true;
+        } else warnings.push('班 Sheet 冇「參數」分頁——批准格寫唔到');
+      }
+      // 訓練班電郵（有帶先寫；通告查詢行自動用）
+      var cemail = String(b.courseEmail || '').trim();
+      if (cemail) {
+        var erow = courseParamRow_(ss, '訓練班電郵');
+        if (erow) ss.getSheetByName('參數').getRange(erow.row, 2).setValue(cemail);
+      }
+      // 區會修訂行（等 CL 開 GS／日後訓練班 App 都見到管理層改咗咩）
+      var changes = Array.isArray(b.changes) ? b.changes : [];
+      var note = String(b.revisionNote || '').trim();
+      if (changes.length || note) {
+        var lines = changes.map(function (c) {
+          return c.label + '：' + String(c.from === undefined || c.from === null ? '（空）' : c.from) + ' → ' + String(c.to === undefined || c.to === null ? '（空）' : c.to);
+        });
+        if (note) lines.unshift(note);
+        var ts = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', 'yyyy-MM-dd HH:mm');
+        var sh = ss.getSheetByName('參數');
+        var last = sh.getLastRow();
+        sh.getRange(last + 1, 1, 1, 2).setValues([['區會修訂 ' + ts, '【' + by + '】' + lines.join('；').substring(0, 900)]]);
+      }
+      try { bumpCourseRev_(ss, by); } catch (e) {}
+    } catch (e) {
+      return err('寫入班 Sheet 失敗：' + e);
+    }
+  } else {
+    // fallback：經該班 /exec 寫 cells（批准格寫唔到——要人手開 GS）
+    var execUrl = courseExecUrl_(link), apiKey = courseApiKey_(link);
+    if (!execUrl) return err('開唔到班 Sheet（gsUrl／sheetId 冇效），又冇 Script 網址——請喺「連結」分頁補返');
+    if (!cells.length) {
+      // 冇 cells 又開唔到班 Sheet：照同步開班登記（approval／修訂紀錄），批准格請人手開 GS tick
+      warnings.push('開唔到班 Sheet（可能唔同帳戶擁有）——「區會批准」格請開 GS 人手 tick：' + String(link.gsUrl || '（未存 GS 網址）'));
+      approvalDone = false;
+    } else {
+    try {
+      var resp = UrlFetchApp.fetch(execUrl, {
+        method: 'post', contentType: 'application/json',
+        payload: JSON.stringify({ action: 'saveCourseBatch', apiKey: apiKey, by: by, cells: cells }),
+        muteHttpExceptions: true,
+      });
+      var r = {};
+      try { r = JSON.parse(resp.getContentText()); } catch (e) {}
+      if (!r.ok) return err((r && r.error) || '經 Script 寫入失敗');
+      applied = { applied: (r.data && r.data.updated) || cells.length, skippedTabs: (r.data && r.data.skippedTabs) || [] };
+      path = 'exec';
+    } catch (e) { return err('經 Script 寫入失敗：' + e); }
+    var appr2 = String(b.approval || '').trim().toUpperCase();
+    if (appr2 === 'APPROVED' || appr2 === 'PENDING') warnings.push('開唔到班 Sheet（可能唔同帳戶擁有）——「區會批准」格請開 GS 人手 tick：' + String(link.gsUrl || '（未存 GS 網址）'));
+    }
+  }
+
+  // 修訂紀錄（CourseLinks.revisions JSON；近 30 筆）
+  var prev = [];
+  try { prev = JSON.parse(String(link.revisions || '') || '[]') || []; } catch (e) { prev = []; }
+  if (!Array.isArray(prev)) prev = [];
+  var changes2 = Array.isArray(b.changes) ? b.changes : [];
+  var appr3 = String(b.approval || '').trim().toUpperCase();
+  if (changes2.length || approvalDone || note2_(b)) {
+    prev.unshift({
+      at: new Date().toISOString(), by: by,
+      approval: appr3 === 'APPROVED' ? 'APPROVED' : (appr3 === 'PENDING' ? 'PENDING' : ''),
+      changes: changes2.map(function (c) { return { label: c.label, from: String(c.from == null ? '' : c.from), to: String(c.to == null ? '' : c.to) }; }),
+      note: String(b.revisionNote || '').trim(),
+      cellsApplied: applied.applied, path: path,
+    });
+    if (prev.length > 30) prev = prev.slice(0, 30);
+  }
+
+  // 開班登記同步（先攤平【現有成行 link】再覆蓋 approval／sync 欄——
+  //  唔攤平嘅話 saveCourseLink_ 會當冇帶＝寫空串，洗走 scriptExecUrl／apiKey／fee 等現有值）
+  var sync = b.link || {};
+  var saved = saveCourseLink_(token, Object.assign({}, link, {
+    approval: appr3 === 'APPROVED' ? 'APPROVED' : (appr3 === 'PENDING' ? 'PENDING' : String(link.approval || '')),
+    approvedAt: appr3 === 'APPROVED' ? new Date().toISOString() : String(link.approvedAt || ''),
+    approvedBy: appr3 === 'APPROVED' ? by : String(link.approvedBy || ''),
+    revisions: JSON.stringify(prev),
+  }, sync));
+  if (!saved.ok) warnings.push('開班登記同步失敗：' + saved.error);
+
+  return ok({ saved: true, courseId: String(b.courseId).trim(), path: path, approvalDone: approvalDone,
+    cellsApplied: applied.applied, skippedTabs: applied.skippedTabs, warnings: warnings, revisions: prev });
+}
+function note2_(b) { return String(b.revisionNote || '').trim() !== ''; }
+
+/**
+ * 收款核對（報名截止後，區管理層對完區帳戶 tick）——寫「表格回應」AS/AT/AU
+ * （已核對收款／核對人／核對時間）。b: { courseId, checks[{id(=時間戳記), verified}], by }。
+ * 首選經該班 /exec setPaymentCheck；直入班（sheetId）直接寫（照 PaymentCheck.gs 語義：identity 對行、唔 bump rev）。
+ */
+function setCoursePaymentCheck_(token, b) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  b = b || {};
+  var link = courseLinkById_(b.courseId);
+  if (!link) return err('找不到此訓練班（courseId）');
+  var checks = Array.isArray(b.checks) ? b.checks : [];
+  if (!checks.length) return err('冇帶 checks');
+  var by = String(b.by || '區管理系統').trim();
+  var execUrl = courseExecUrl_(link), apiKey = courseApiKey_(link);
+  var sheetId = courseSheetFileId_(link);
+  var results = [];
+  var ss = null;
+  if (sheetId) {
+    // 首選 direct：一次過寫晒（批量唔使逐筆打 Script quota）；開唔到（唔同帳戶）先 fallback exec
+    try { ss = SpreadsheetApp.openById(sheetId); } catch (e) { ss = null; }
+  }
+  if (ss) {
+    var sh = ss.getSheetByName('表格回應');
+    if (!sh) return err('班 Sheet 冇「表格回應」分頁');
+    if (String(sh.getRange(1, 45).getDisplayValue() || '').trim() === '') {
+      sh.getRange(1, 45, 1, 3).setValues([['已核對收款', '核對人', '核對時間']]);
+    }
+    var last = sh.getLastRow();
+    var ids = last > 1 ? sh.getRange(2, 1, last - 1, 1).getDisplayValues() : [];
+    checks.forEach(function (c) {
+      var id = String((c && c.id) != null ? c.id : '').trim();
+      var hit = -1;
+      for (var i = 0; i < ids.length; i++) { if (String(ids[i][0]).trim() === id) { hit = i + 2; break; } }
+      if (hit < 0) { results.push({ id: id, ok: false, error: '找不到該報名' }); return; }
+      var verified = !(c && c.verified === false);
+      sh.getRange(hit, 45).setValue(verified ? '✔' : '');
+      sh.getRange(hit, 46).setValue(verified ? by : '');
+      sh.getRange(hit, 47).setValue(verified ? new Date() : '');
+      results.push({ id: id, ok: true, verified: verified, row: hit });
+    });
+    return ok({ saved: true, results: results, path: 'direct' });
+  }
+  if (!execUrl) return err('呢班未有 Script 網址／Sheet——收款核對寫唔到');
+  checks.forEach(function (c) {
+    try {
+      var resp = UrlFetchApp.fetch(execUrl, {
+        method: 'post', contentType: 'application/json',
+        payload: JSON.stringify({ action: 'setPaymentCheck', apiKey: apiKey, id: String((c && c.id) || '').trim(), verified: !(c && c.verified === false), by: by }),
+        muteHttpExceptions: true,
+      });
+      var r = {};
+      try { r = JSON.parse(resp.getContentText()); } catch (e) {}
+      if (r.ok) results.push({ id: String((c && c.id) || ''), ok: true, verified: !(c && c.verified === false) });
+      else results.push({ id: String((c && c.id) || ''), ok: false, error: (r && r.error) || '寫入失敗' });
+    } catch (e) { results.push({ id: String((c && c.id) || ''), ok: false, error: String(e) }); }
+  });
+  var failed = results.filter(function (x) { return !x.ok; }).length;
+  return ok({ saved: failed < results.length, results: results, path: 'exec' });
+}
+
+/**
+ * 已退款 tick（管理層退咗錢俾未獲接納／取消嘅申請人之後 tick，CL 喺 App 見到）——寫「表格回應」AX/AY
+ * （已退款／退款核對人）。b: { courseId, refunds[{id(=時間戳記), refunded}], by }。
+ * 首選 direct 寫班 Sheet；fallback 經該班 /exec setCourseRefund（course repo Refund.gs，
+ * 照 PaymentCheck.gs 語義：identity 對行、唔 bump rev、自動補表頭；
+ * 舊班 Script 未貼 Refund.gs 之前 exec 模式會回 error——direct 模式唔受影響）。
+ */
+function setCourseRefund_(token, b) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  b = b || {};
+  var link = courseLinkById_(b.courseId);
+  if (!link) return err('找不到此訓練班（courseId）');
+  var refunds = Array.isArray(b.refunds) ? b.refunds : [];
+  if (!refunds.length) return err('冇帶 refunds');
+  var by = String(b.by || '區管理系統').trim();
+  var execUrl = courseExecUrl_(link), apiKey = courseApiKey_(link);
+  var sheetId = courseSheetFileId_(link);
+  var results = [];
+  var ss = null;
+  if (sheetId) {
+    try { ss = SpreadsheetApp.openById(sheetId); } catch (e) { ss = null; }
+  }
+  if (ss) {
+    var sh = ss.getSheetByName('表格回應');
+    if (!sh) return err('班 Sheet 冇「表格回應」分頁');
+    if (String(sh.getRange(1, 50).getDisplayValue() || '').trim() === '') {
+      sh.getRange(1, 50, 1, 2).setValues([['已退款', '退款核對人']]);
+    }
+    var last = sh.getLastRow();
+    var ids = last > 1 ? sh.getRange(2, 1, last - 1, 1).getDisplayValues() : [];
+    refunds.forEach(function (c) {
+      var id = String((c && c.id) != null ? c.id : '').trim();
+      var hit = -1;
+      for (var i = 0; i < ids.length; i++) { if (String(ids[i][0]).trim() === id) { hit = i + 2; break; } }
+      if (hit < 0) { results.push({ id: id, ok: false, error: '找不到該報名' }); return; }
+      var refunded = !(c && c.refunded === false);
+      sh.getRange(hit, 50).setValue(refunded ? '✔' : '');
+      sh.getRange(hit, 51).setValue(refunded ? by : '');
+      results.push({ id: id, ok: true, refunded: refunded, row: hit });
+    });
+    return ok({ saved: true, results: results, path: 'direct' });
+  }
+  if (!execUrl) return err('呢班未有 Script 網址／Sheet——退款 tick 寫唔到');
+  refunds.forEach(function (c) {
+    try {
+      var resp = UrlFetchApp.fetch(execUrl, {
+        method: 'post', contentType: 'application/json',
+        payload: JSON.stringify({ action: 'setCourseRefund', apiKey: apiKey, id: String((c && c.id) || '').trim(), refunded: !(c && c.refunded === false), by: by }),
+        muteHttpExceptions: true,
+      });
+      var r = {};
+      try { r = JSON.parse(resp.getContentText()); } catch (e2) {}
+      if (r.ok) results.push({ id: String((c && c.id) || ''), ok: true, refunded: !(c && c.refunded === false) });
+      else results.push({ id: String((c && c.id) || ''), ok: false, error: (r && r.error) || '寫入失敗（班 Script 貼咗 Refund.gs 先支援）' });
+    } catch (e) { results.push({ id: String((c && c.id) || ''), ok: false, error: String(e) }); }
+  });
+  var failed = results.filter(function (x) { return !x.ok; }).length;
+  return ok({ saved: failed < results.length, results: results, path: 'exec' });
+}
+
+/**
+ * 寄 CL 電郵（通知已批准／通告已上網／收款核對摘要）。
+ * b: { courseId, kind('approved'|'mounted'|'payment'|'custom'), to, cc?, title?,
+ *      replyTo?, changes?, noticeUrl?, paymentStats?, note?, by? }
+ * 寄件架構（v4.17.0）：From = 機房帳戶（部署呢個 Script 嘅帳戶；設 COURSE_EMAIL_FROM alias 就用 alias），
+ * ReplyTo = 班信箱（b.replyTo——例 blt2601@skwscout.org.hk）。CL 撳回覆會去班信箱，
+ * 班職員 delegate／group 睇得到；機房信箱（例 skw@hkirscout.org.hk）唔會收到班務信。
+ */
+function courseMail_(to, subject, htmlBody, textBody, opts) {
+  opts = opts || {};
+  var replyTo = String(opts.replyTo || '').trim();
+  // 寄件地址：opts.from（例 mode=course 傳入班信箱）> Config COURSE_EMAIL_FROM > 留空（部署帳戶本身）
+  var from = String(opts.from || getConfigValue_('COURSE_EMAIL_FROM') || '').trim();
+  var name = String(opts.name || getConfigValue_('notifyFrom') || ((getConfigValue_('districtName') || '童軍區') + ' 管理系統'));
+  var base = { to: to, subject: subject, htmlBody: htmlBody, body: textBody, name: name };
+  if (replyTo && replyTo.indexOf('@') > 0) base.replyTo = replyTo;
+  if (from) {
+    try {
+      MailApp.sendEmail(Object.assign({}, base, { from: from }));
+      return { fromUsed: from, warning: '' };
+    } catch (e) {
+      // alias 未驗證／無效——fallback 機房帳戶地址（replyTo 照跟，回覆照去班信箱）
+      MailApp.sendEmail(base);
+      return { fromUsed: '(帳戶本身)', warning: from + ' 寄唔到（send-as 未喺部署帳戶 Gmail 驗證／SMTP 唔對？），已改用部署帳戶地址寄出；回覆照去班信箱。' };
+    }
+  }
+  MailApp.sendEmail(base);
+  return { fromUsed: '(帳戶本身)' + (replyTo ? '・回覆去 ' + replyTo : ''), warning: '' };
+}
+
+function courseChangesHtml_(changes) {
+  if (!changes || !changes.length) return '';
+  var rows = changes.map(function (c) {
+    return '<tr><td style="padding:4px 10px 4px 0;white-space:nowrap;"><b>' + esc_(c.label) + '</b></td>' +
+      '<td style="padding:4px 10px;color:#b45309;">' + esc_(String(c.from == null || c.from === '' ? '（空）' : c.from)) + '</td>' +
+      '<td style="padding:4px 10px;color:#1d4ed8;">' + esc_(String(c.to == null || c.to === '' ? '（空）' : c.to)) + '</td></tr>';
+  }).join('');
+  return '<p><b>✏️ 區會修訂（改咗咩——標亮俾你知）：</b></p>' +
+    '<table style="border-collapse:collapse;font-size:13.5px;">' + rows + '</table>';
+}
+
+function sendCourseEmail_(token, b) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  b = b || {};
+  var link = courseLinkById_(b.courseId);
+  if (!link) return err('找不到此訓練班（courseId）');
+  var to = String(b.to || '').trim();
+  if (!to || to.indexOf('@') < 0) return err('缺少收件人電郵（to——通常係班領導人 email）');
+  var kind = String(b.kind || 'custom').trim();
+  var districtName = getConfigValue_('districtName') || '童軍區';
+  var title = String(b.title || link.title || '').trim();
+  var by = String(b.by || '').trim();
+  var subject = '', body = '', html = '';
+  var head = '<p>你好，</p><p>呢封係<b>' + esc_(districtName) + '訓練班管理系統</b>嘅自動通知（' + esc_(title) + '）。' +
+    (by ? '<br>處理人：' + esc_(by) : '') + '</p>';
+  var foot = '<p style="color:#666;font-size:12.5px;">此郵件由 ' + esc_(districtName) + '訓練班系統自動發出——直接回覆此郵件即可聯絡區管理層。</p>';
+  if (kind === 'approved') {
+    subject = '[' + districtName + '] 訓練班已批准——' + title;
+    body = head + '<p style="color:#15803d;"><b>✅ 你嘅訓練班已經批准晒（區會批准 ✔）。</b></p>' +
+      '<p>批核途中區會有機會改咗少少嘢，改動如下（你唔使再做嘢，等區會出通告上網就得）：</p>' +
+      courseChangesHtml_(b.changes) +
+      (String(b.note || '').trim() ? '<p>備註：' + esc_(b.note) + '</p>' : '') + foot;
+  } else if (kind === 'mounted') {
+    subject = '[' + districtName + '] 訓練班通告已上網——' + title;
+    body = head + '<p style="color:#15803d;"><b>📢 通告已上網，報名正式開始。</b></p>' +
+      (String(b.noticeUrl || '').trim() ? '<p>通告網址：<a href="' + esc_(b.noticeUrl) + '">' + esc_(b.noticeUrl) + '</a></p>' : '') +
+      '<p>報名會自動流入你嘅訓練班系統（「收生」版面），收款核對由區會財務負責（💰 已核對收款會喺你個 APP 見到 ✔）。</p>' + foot;
+  } else if (kind === 'payment') {
+    var st = b.paymentStats || {};
+    subject = '[' + districtName + '] 訓練班收款核對摘要——' + title;
+    body = head + '<p><b>💰 收款核對進度：已核對 ' + Number(st.checked || 0) + ' ／ 共 ' + Number(st.total || 0) + ' 筆</b>' +
+      (Number(st.unchecked || 0) > 0 ? '（尚餘 ' + Number(st.unchecked) + ' 筆未對到）' : '（全部對完）') + '</p>' +
+      (Array.isArray(st.pending) && st.pending.length ? '<p><b>未核對：</b>' + esc_(st.pending.join('、')) + '</p>' : '') +
+      '<p>有疑問（例如入咗數但未見 ✔）請直接回覆此郵件話我哋知。</p>' + foot;
+  } else {
+    subject = '[' + districtName + '] 訓練班通知——' + title;
+    body = head + '<p>' + esc_(String(b.note || '').trim() || '（冇內容）') + '</p>' + courseChangesHtml_(b.changes) + foot;
+  }
+  var cc = String(b.cc || '').trim();
+  var replyTo = String(b.replyTo || '').trim();
+  // COURSE_EMAIL_FROM_MODE=course：寄件人直接用班信箱（須預先喺部署帳戶 Gmail
+  // 「用這個地址傳送郵件」＋班信箱 SMTP 驗證；未驗證 courseMail_ 會自動 fallback 機房地址）
+  var fromOpt = '';
+  if (String(getConfigValue_('COURSE_EMAIL_FROM_MODE') || '').trim().toLowerCase() === 'course'
+      && replyTo && replyTo.indexOf('@') > 0) fromOpt = replyTo;
+  var mail;
+  try {
+    mail = courseMail_(to, subject, body, subject + '\n\n（詳情請睇 HTML 版）', {
+      replyTo: replyTo,
+      from: fromOpt,
+      name: (districtName + '·' + title).substring(0, 60),
+    });
+    if (cc && cc.indexOf('@') >= 0) {
+      try {
+        var ccOpts = { to: cc, subject: subject, htmlBody: body,
+          name: (districtName + '·' + title).substring(0, 60), replyTo: replyTo };
+        if (fromOpt) ccOpts.from = fromOpt;
+        MailApp.sendEmail(ccOpts);
+      } catch (e) {}
+    }
+  } catch (e) { return err('寄電郵失敗：' + e); }
+  return ok({ sent: true, to: to, cc: cc, fromUsed: mail.fromUsed, warning: mail.warning, subject: subject });
+}
+
+// ===================== 收生通知（v4.17.1：接納／不接納通知寄俾申請人） ======================
+
+/** 參數分頁 label 對位讀值（direct 先用到；例「訓練班電郵」） */
+function courseParamLabelValue_(ss, label) {
+  var sh = ss.getSheetByName('參數');
+  if (!sh || sh.getLastRow() < 1) return '';
+  var v = sh.getRange(1, 1, sh.getLastRow(), 2).getValues();
+  for (var i = 0; i < v.length; i++) {
+    if (String(v[i][0] || '').trim() === label) return String(v[i][1] || '').trim();
+  }
+  return '';
+}
+
+/**
+ * 寄收生通知俾申請人：接納（節次＋報到時間／攜帶物品由班 Sheet 帶出）／不接納（客氣版）。
+ * b: { courseId, notices:[{id(=時間戳記), kind:'approved'|'rejected'}], by, replyTo? }
+ * ReplyTo＝班信箱（b.replyTo > 班 Sheet 參數「訓練班電郵」> 班領導人電郵）；副本 CC 班領導人。
+ * 寄件人跟 COURSE_EMAIL_FROM_MODE（=course 時直接用班信箱寄）。紀錄寫 CourseLinks.regNotices JSON。
+ */
+function sendCourseRegNotice_(token, b) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  b = b || {};
+  var link = courseLinkById_(b.courseId);
+  if (!link) return err('找不到此訓練班（courseId）');
+  var items = Array.isArray(b.notices) ? b.notices : [];
+  if (!items.length) return err('冇帶 notices');
+  var by = String(b.by || '區管理系統').trim();
+
+  // 1) 讀班 Sheet 全文（首選 direct；fallback 經 /exec）
+  var fileId = courseSheetFileId_(link);
+  var raw = null;
+  if (fileId) { try { raw = dumpCourseSheetRaw_(SpreadsheetApp.openById(fileId)); } catch (e) { raw = null; } }
+  if (!raw) {
+    var execUrl = courseExecUrl_(link), apiKey = courseApiKey_(link);
+    if (!execUrl) return err('開唔到班 Sheet，又冇 Script 網址——請喺「連結」分頁補返');
+    try {
+      var resp0 = UrlFetchApp.fetch(execUrl, {
+        method: 'post', contentType: 'application/json',
+        payload: JSON.stringify({ action: 'getCourseSheetRaw', apiKey: apiKey }),
+        muteHttpExceptions: true,
+      });
+      var r0 = {}; try { r0 = JSON.parse(resp0.getContentText()); } catch (e) {}
+      if (!r0.ok) return err((r0 && r0.error) || '經 Script 讀班 Sheet 失敗');
+      raw = r0.data;
+    } catch (e) { return err('經 Script 讀班 Sheet 失敗：' + e); }
+  }
+
+  // 2) 抽課程資料（Input02 B1 班名・9–16 節次・職員 23–42 班領導人・接納通知書人手格）
+  var v2 = Array.isArray(raw.input02) ? raw.input02 : [];
+  var v1 = Array.isArray(raw.input01) ? raw.input01 : [];
+  var courseName = String((v2[0] || [])[1] || '').trim() || String((v1[0] || [])[1] || '').trim() || String(link.title || '').trim();
+  var districtName = getConfigValue_('districtName') || '童軍區';
+  var sessions = [];
+  for (var sr = 8; sr < 16; sr++) {
+    var rv = v2[sr] || [];
+    var dS = String(rv[8] != null ? rv[8] : '').trim() || String(rv[1] != null ? rv[1] : '').trim();
+    var tS = String(rv[9] != null ? rv[9] : '').trim() || String(rv[3] != null ? rv[3] : '').trim();
+    var vS = String(rv[10] != null ? rv[10] : '').trim() || String(rv[4] != null ? rv[4] : '').trim();
+    if (!dS && !tS) continue;
+    if (String(rv[7] != null ? rv[7] : '').trim().toUpperCase() === 'FALSE') continue;
+    sessions.push('・' + dS + (tS ? '　' + tS : '') + (vS ? '（' + vS + '）' : ''));
+  }
+  var va = Array.isArray(raw.accept) ? raw.accept : [];
+  var acc = {
+    checkin: String((va[22] || [])[3] || '').trim(),
+    items: String((va[29] || [])[3] || '').trim(),
+    others: String((va[31] || [])[3] || '').trim(),
+    note: String((va[33] || [])[3] || '').trim(),
+  };
+  var leader = null;
+  for (var lr = 22; lr < 42; lr++) {
+    var lv = v2[lr] || [];
+    var role = String(lv[0] || '').trim(), nmL = String(lv[1] || '').trim();
+    if (role && nmL && role.indexOf('班領導人') >= 0) {
+      leader = { name: nmL, title: String(lv[2] || '').trim(), email: String(lv[6] || '').trim() };
+      break;
+    }
+  }
+  var leaderLine = leader ? (leader.name + (leader.title || '')) : '';
+  // ReplyTo：前端帶 > 班 Sheet 參數「訓練班電郵」（direct 先讀到）> 班領導人電郵
+  var replyTo = String(b.replyTo || '').trim();
+  if (!replyTo && fileId) {
+    try { replyTo = courseParamLabelValue_(SpreadsheetApp.openById(fileId), '訓練班電郵'); } catch (e) { replyTo = ''; }
+  }
+  if (!replyTo && leader) replyTo = leader.email;
+  var fromOpt = '';
+  if (String(getConfigValue_('COURSE_EMAIL_FROM_MODE') || '').trim().toLowerCase() === 'course' && replyTo) fromOpt = replyTo;
+
+  // 3) 表格回應 header 對位
+  var vresp = Array.isArray(raw.resp) ? raw.resp : [];
+  var headers = (vresp[0] || []).map(function (x) { return String(x == null ? '' : x).trim(); });
+  var iId = headers.indexOf('時間戳記') >= 0 ? headers.indexOf('時間戳記') : 0;
+  var iEmail = headers.indexOf('電郵地址'); if (iEmail < 0) iEmail = headers.indexOf('電郵');
+  var iName = headers.indexOf('中文姓名');
+
+  // 4) 逐筆組版＋寄出
+  var senderName = (districtName + '·' + courseName).substring(0, 60);
+  var results = [], sent = 0;
+  var recs = {};
+  try { recs = JSON.parse(String(link.regNotices || '') || '{}') || {}; } catch (e) { recs = {}; }
+  if (typeof recs !== 'object' || Array.isArray(recs)) recs = {};
+  items.forEach(function (it) {
+    var id = String((it && it.id) != null ? it.id : '').trim();
+    var kind = String((it && it.kind) || '').trim().toLowerCase() === 'rejected' ? 'rejected' : 'approved';
+    var hit = null;
+    for (var i = 1; i < vresp.length; i++) {
+      if (String((vresp[i] || [])[iId] || '').trim() === id) { hit = vresp[i]; break; }
+    }
+    if (!hit) { results.push({ id: id, ok: false, error: '找不到該報名' }); return; }
+    var to = iEmail >= 0 ? String(hit[iEmail] || '').trim() : '';
+    var nm = iName >= 0 ? String(hit[iName] || '').trim() : '';
+    if (!to || to.indexOf('@') < 0) { results.push({ id: id, ok: false, error: '申請人冇電郵' }); return; }
+    var sign = '<p>' + esc_(districtName) + '訓練班' + (leaderLine ? '<br>' + esc_(leaderLine) + ' 謹啟' : ' 謹啟') + '</p>';
+    var subject = kind === 'approved'
+      ? '[' + districtName + '] 訓練班接納通知——' + courseName
+      : '[' + districtName + '] 訓練班申請結果通知——' + courseName;
+    var body;
+    if (kind === 'approved') {
+      body = '<p>' + esc_(nm || '申請人') + ' 您好，</p>' +
+        '<p>多謝 閣下報名參加<b>' + esc_(courseName) + '</b>。很高興通知您：<b style="color:#15803d">閣下之申請已獲接納</b>。</p>' +
+        (sessions.length ? '<p><b>上課日期及時間：</b></p><p>' + sessions.map(function (x) { return esc_(x); }).join('<br>') + '</p>' : '') +
+        (acc.checkin ? '<p><b>報到時間：</b>' + esc_(acc.checkin) + '</p>' : '') +
+        (acc.items ? '<p><b>請攜帶物品：</b>' + esc_(acc.items) + '</p>' : '') +
+        (acc.others ? '<p>' + esc_(acc.others) + '</p>' : '') +
+        (acc.note ? '<p style="color:#666">備註：' + esc_(acc.note) + '</p>' : '') +
+        '<p>如有任何疑問，直接回覆本電郵即可（由班職員跟進）。</p>' + sign;
+    } else {
+      body = '<p>' + esc_(nm || '申請人') + ' 您好，</p>' +
+        '<p>多謝 閣下報名參加<b>' + esc_(courseName) + '</b>。由於報名人數眾多，名額所限，是次申請<b>未能獲得接納</b>，敬請原諒。</p>' +
+        '<p>日後如有其他訓練班，歡迎 閣下再報名參加。</p>' + sign;
+    }
+    try {
+      courseMail_(to, subject, body, courseName + '—' + (kind === 'approved' ? '已獲接納' : '未能接納（名額所限）'), { replyTo: replyTo, from: fromOpt, name: senderName });
+      if (leader && leader.email && leader.email !== to) {
+        try {
+          var ccOpts = { to: leader.email, subject: '[副本] ' + subject, htmlBody: body, name: senderName };
+          if (replyTo) ccOpts.replyTo = replyTo;
+          if (fromOpt) ccOpts.from = fromOpt;
+          MailApp.sendEmail(ccOpts);
+        } catch (e) {}
+      }
+      recs[id] = { kind: kind, at: new Date().toISOString(), by: by };
+      results.push({ id: id, ok: true });
+      sent++;
+    } catch (e) { results.push({ id: id, ok: false, error: String(e && e.message ? e.message : e) }); }
+  });
+
+  // 5) 紀錄寫返 CourseLinks（flatten link 先寫——同 saveCourseApproval_ 同一套防洗走）
+  var keys = Object.keys(recs);
+  if (keys.length > 300) {
+    keys.sort(function (a, c) { return String((recs[a] || {}).at || '').localeCompare(String((recs[c] || {}).at || '')); });
+    keys.slice(0, keys.length - 300).forEach(function (k) { delete recs[k]; });
+  }
+  var saved = saveCourseLink_(token, Object.assign({}, link, { regNotices: JSON.stringify(recs) }));
+  if (!saved.ok) results.push({ id: '', ok: false, error: '通知紀錄寫唔入：' + saved.error });
+  return ok({ sent: sent, results: results, regNotices: recs, replyTo: replyTo });
+}
+
+/** 開班指引（俾 CL 嘅嘢）：CourseFactory 網址＋開班碼＋訓練班郵件 alias 現狀 */
+function getCourseOpsInfo_(token) {
+  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  return ok({
+    districtName: getConfigValue_('districtName') || '童軍區',
+    factoryUrl: String(getConfigValue_('COURSE_FACTORY_URL') || '').trim(),
+    factoryCode: String(getConfigValue_('COURSE_FACTORY_CODE') || '').trim(),
+    emailFrom: String(getConfigValue_('COURSE_EMAIL_FROM') || '').trim(),
+    memberPortalUrl: String(getConfigValue_('MEMBER_PORTAL_URL') || '').trim(),
+    notifyFrom: String(getConfigValue_('notifyFrom') || '').trim(),
+  });
+}
+
 
 // ===================== 訓練班：公開報名（轉發去該班 Script） ======================
 
@@ -4812,6 +5412,11 @@ function blueprint_() {
       ['ttlockApiBase', '', '（舊名）等同 SCIENER_API_BASE'],
       ['ttlockDisabled', '', 'TRUE = 跳過寫鎖，改用模擬密碼'],
       ['notifyFrom', '', '寄件人顯示名稱（不是 Gmail 地址；留空用區名）'],
+      // v4.17.0 訓練班新版流程：CL 電郵 alias＋開班指引（CourseFactory）
+      ['COURSE_EMAIL_FROM', '', '（選填）通知寄件 alias；留空=用部署帳戶地址＋ReplyTo 班信箱（CL 回覆去班信箱，唔入機房 inbox）'],
+      ['COURSE_EMAIL_FROM_MODE', '', 'course = 寄件人直接用該班班信箱（須先喺部署帳戶 Gmail「用這個地址傳送郵件」＋班信箱 SMTP 驗證；未驗證自動 fallback）；留空=上式'],
+      ['COURSE_FACTORY_URL', '', 'CourseFactory 開班網址（/exec）——CL 喺訓練班 App「新開班」用'],
+      ['COURSE_FACTORY_CODE', '', '開班碼（明文；只交俾 CL，季度更換）'],
       // 付款 / 規定
       ['FPS_ACCOUNT_NAME', DEFAULT_FPS_ACCOUNT_NAME, '轉數快戶口名'],
       ['FPS_ACCOUNT_NUMBER', DEFAULT_FPS_ACCOUNT_NUMBER, '轉數快號碼'],
@@ -4952,7 +5557,11 @@ function blueprint_() {
         'fpsQrPayload', 'fpsAmount', 'fpsReference', 'fpsAccountName', 'fpsAccountNumber', 'fpsUpdatedAt',
         // v4.16.0 通告全文欄（由通告網址讀取帶入；成員系統直接顯示）
         'leader', 'uniform', 'remarks', 'signupText', 'feeNote',
-        'sheetId', 'setupJson'],
+        'sheetId', 'setupJson',
+        // v4.17.0 新版流程（訓練班系統先行）：GS 網址＋批核狀態＋修訂清單
+        'gsUrl', 'approval', 'approvedAt', 'approvedBy', 'revisions',
+        // v4.17.1 收生通知紀錄（JSON：{報名時間戳記:{kind,at,by}}）
+        'regNotices'],
     ] },
 
     { name: SHEET.CIRCULARS, rows: [

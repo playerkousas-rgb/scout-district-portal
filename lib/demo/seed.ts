@@ -332,9 +332,11 @@ export function demoCourseProfile(): Record<string, any> {
 export function demoCourseLinks(): Record<string, any>[] {
   const setupJson = JSON.stringify(demoCourseSetup());
   const links = [
-    { courseId: 'cl-01', sheetId: 'demo-sheet-cl01', setupJson: '__DEMO_SETUP__', title: '初級領袖訓練班（BLT）2026 年 10 月班', badgeName: '領袖委任', section: '領袖', courseNo: 'BLT-2610', sessionsText: '10 月 3、10、17 日（週六）09:00–17:00', eligibility: '18 歲以上完成中五', fee: '850', deadline: `${dateOnly(15)} `, quota: '36', filled: '22', venue: '區總部 1704 室', contact: '訓練組 ddc.training@demo', active: 'TRUE', createdAt: iso(30) },
+    { courseId: 'cl-01', sheetId: 'demo-sheet-cl01', setupJson: '__DEMO_SETUP__', title: '初級領袖訓練班（BLT）2026 年 10 月班', badgeName: '領袖委任', section: '領袖', courseNo: 'BLT-2610', sessionsText: '10 月 3、10、17 日（週六）09:00–17:00', eligibility: '18 歲以上完成中五', fee: '850', deadline: `${dateOnly(15)} `, quota: '36', filled: '22', venue: '區總部 1704 室', contact: '訓練組 ddc.training@demo', active: 'TRUE', createdAt: iso(30), gsUrl: 'https://docs.google.com/spreadsheets/d/demo-sheet-cl01/edit', approval: 'APPROVED', approvedAt: iso(6), approvedBy: '示範 ADC', revisions: JSON.stringify([{ at: iso(6), by: '示範 ADC', approval: 'APPROVED', changes: [{ label: '名額', from: '30', to: '36' }], note: '示範：批准時加返名額', cellsApplied: 1, path: 'demo' }]) },
     { courseId: 'cl-02', title: '遠足導師班（HWC）2026 年 11 月班', badgeName: '遠足', section: '領袖', courseNo: 'HWC-2611', sessionsText: '11 月 7、14 日（週六）全天', eligibility: '持有初級領袖訓練班證書', fee: '680', originalFee: '760', subsidyNote: '區方資助 $80／人', deadline: `${dateOnly(40)} `, quota: '24', filled: '9', venue: '香港童軍中心', contact: '訓練組 ddc.training@demo', leader: '陳大文先生', uniform: '整齊童軍制服／遠足裝束', remarks: '1. 學員必須全期出席訓練班，不得遲到或早退。\n2. 遠足日請自備午餐及飲用水。', signupText: '成員須填妥網上表格（成員系統內置報名表）。', feeNote: '費用：活動費用港幣 680 元正（原價 760 元，獲區方資助 $80／人）。報名費用必須以轉數快繳付。', active: 'TRUE', createdAt: iso(20) },
     { courseId: 'cl-03', title: '急救證書課程（SFA）2027 年 1 月班', badgeName: '急救', section: '跨支部', courseNo: 'SFA-2701', sessionsText: '1 月 9、16、23、30 日（週六）晚間', eligibility: '12 歲以上', fee: '1200', deadline: `${dateOnly(90)} `, quota: '30', filled: '30', venue: '聖十字架堂禮堂', contact: '區秘書處', active: 'TRUE', createdAt: iso(10) },
+    // v4.17.0 新版流程示範班：CL 喺訓練班系統開班 → 交網址 → 批核中
+    { courseId: 'cl-04', title: '野外定向章訓練班（ORC）2026 年 12 月班', badgeName: '野外定向', section: '童軍', courseNo: 'ORC-2612', sessionsText: '12 月 5、12 日（週六）09:00–16:00', eligibility: '11 歲以上童軍成員', fee: '320', deadline: `${dateOnly(55)} `, quota: '28', filled: '0', venue: '西貢東壩', contact: '黃志明（班領導人）97001122', leader: '黃志明先生', active: 'TRUE', createdAt: iso(2), scriptExecUrl: 'https://script.google.com/macros/s/AKfycbDemoCourseORC/exec', scriptApiKey: 'ck_demo_orc_0123456789', gsUrl: 'https://docs.google.com/spreadsheets/d/demo-sheet-orc/edit', approval: 'PENDING', driveFolderId: 'demo-folder-orc' },
   ];
   links[0].setupJson = setupJson;
   return links;
@@ -693,17 +695,17 @@ export function demoCourseSheetRaw(): Record<string, any> {
   const v4 = mk(46, 11);
   ['1200', '0', '300', '200', '300', '100', '50', '200', '0'].forEach((v, i) => put(v4, 43, 2 + i, v));
 
-  // ── 表格回應（37 欄） ──
+  // ── 表格回應（49 欄；coursev5 加 AS–AU 收款核對＋AV/AW STA） ──
   const respRow = (o: Record<number, any>): any[] => {
-    const r = Array.from({ length: 37 }, () => '');
+    const r = Array.from({ length: 49 }, () => '');
     Object.entries(o).forEach(([k, v]) => { r[Number(k)] = v; });
     return r;
   };
   const vr = [
-    respRow({ 1: '電郵地址', 2: '中文姓名', 4: '聯絡電話', 34: '學員編號', 35: '分組', 36: '審批狀態' }),
-    respRow({ 0: '2026/08/01', 1: 'chan@example.com', 2: '陳小文', 3: 'CHAN Siu Man', 4: '91230001', 5: '男', 7: '筲箕灣區', 8: '第123旅', 9: 'S123456', 10: '童軍', 16: '91230002', 29: '123', 34: 'SFA-01', 35: 'A', 36: 'approved' }),
-    respRow({ 0: '2026/08/02', 1: 'wong@example.com', 2: '黃小玲', 3: 'WONG Siu Ling', 4: '92340001', 5: '女', 7: '南區', 8: '第45旅', 9: 'S234567', 10: '童軍', 16: '92340002', 29: '45', 34: 'SFA-02', 35: 'A', 36: 'approved' }),
-    respRow({ 0: '2026/08/03', 1: 'lee@example.com', 2: '李小強', 3: 'LEE Siu Keung', 4: '93450001', 5: '男', 7: '筲箕灣區', 8: '第123旅', 34: '', 35: '', 36: 'pending' }),
+    respRow({ 1: '電郵地址', 2: '中文姓名', 4: '聯絡電話', 33: '已繳付訓練班費用截圖', 34: '學員編號', 35: '分組', 36: '審批狀態', 37: '批核人', 44: '已核對收款', 45: '核對人', 46: '核對時間', 47: '已交表格正本（STA）', 48: '收表記錄' }),
+    respRow({ 0: '2026/08/01', 1: 'chan@example.com', 2: '陳小文', 3: 'CHAN Siu Man', 4: '91230001', 5: '男', 7: '筲箕灣區', 8: '第123旅', 9: 'S123456', 10: '童軍', 16: '91230002', 29: '123', 33: 'https://drive.google.com/file/d/demo-receipt-1/view', 34: 'SFA-01', 35: 'A', 36: 'approved', 37: '陳職員', 44: '✔', 45: '示範財務', 46: '2026/08/05 10:00' }),
+    respRow({ 0: '2026/08/02', 1: 'wong@example.com', 2: '黃小玲', 3: 'WONG Siu Ling', 4: '92340001', 5: '女', 7: '南區', 8: '第45旅', 9: 'S234567', 10: '童軍', 16: '92340002', 29: '45', 33: 'https://drive.google.com/file/d/demo-receipt-2/view', 34: 'SFA-02', 35: 'A', 36: 'approved' }),
+    respRow({ 0: '2026/08/03', 1: 'lee@example.com', 2: '李小強', 3: 'LEE Siu Keung', 4: '93450001', 5: '男', 7: '筲箕灣區', 8: '第123旅', 33: 'https://drive.google.com/file/d/demo-receipt-3/view', 34: '', 35: '', 36: 'pending' }),
   ];
 
   // ── 參數 W1:X5 ──

@@ -9,6 +9,8 @@ import { budgetTotals, money, SETUP_TRANSPORT_GROUPS } from '@/lib/course-setup'
 interface Props {
   setup: CourseSetup;
   onChange: (s: CourseSetup) => void;
+  /** 批核模式（v4.17.0）：收起唔准管理層改嘅部分（職員表／時間表） */
+  hide?: { staff?: boolean; timetable?: boolean };
 }
 
 const inp: React.CSSProperties = { padding: '5px 7px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13 };
@@ -24,7 +26,7 @@ function A(props: { value: string; onChange: (v: string) => void; rows?: number;
     onChange={e => props.onChange(e.target.value)} style={{ ...inp, width: props.width || '100%' }} />;
 }
 
-export default function CourseSetupForm({ setup: s, onChange }: Props) {
+export default function CourseSetupForm({ setup: s, onChange, hide }: Props) {
   const set = <K extends keyof CourseSetup>(k: K, v: CourseSetup[K]) => onChange({ ...s, [k]: v });
   const setExp = (k: keyof SetupExpenses, v: SetupExpenses[keyof SetupExpenses]) =>
     onChange({ ...s, expenses: { ...s.expenses, [k]: v } });
@@ -167,6 +169,7 @@ export default function CourseSetupForm({ setup: s, onChange }: Props) {
           ))}</tbody>
         </table></div>
         <b style={{ fontSize: 13 }}>職員資料（20 行）</b>
+        {!hide?.staff && (
         <div style={{ overflowX: 'auto' }}><table>
           <thead><tr>{['職位', '姓名', '稱謂', '所屬單位/職銜', '資格標註', '電話', '電郵'].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
           <tbody>{s.staff.map((st, i) => (
@@ -178,9 +181,12 @@ export default function CourseSetupForm({ setup: s, onChange }: Props) {
             </tr>
           ))}</tbody>
         </table></div>
+        )}
+        {hide?.staff && <p className="muted" style={{ fontSize: 12.5, margin: '4px 0 0' }}>🔒 職員表喺批核模式唔准改（要改請叫 CL 喺訓練班系統度改）。</p>}
       </details>
 
       {/* ── D. 時間表 ── */}
+      {!hide?.timetable && (
       <details style={secStyle}>
         <summary style={hStyle}>🕒 D. 時間表（Input03；日期地點時間自動跟 Input02）</summary>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
@@ -200,6 +206,7 @@ export default function CourseSetupForm({ setup: s, onChange }: Props) {
           ))}
         </div>
       </details>
+      )}
 
       {/* ── E. 通告內文 ── */}
       <details open style={secStyle}>

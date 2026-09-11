@@ -5,6 +5,25 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.17.0 — ⭐ 訓練班新版流程：訓練班系統先行，區會話事批核＋出通告＋收款核對</h3>
+        <ul>
+          <li>🔄 <b>流程倒轉晒</b>：CL 喺訓練班系統（course repo）開班（即刻起真 GS）＋填晒開班文件 → 交「GS＋SCRIPT 網址」→ 區管理系統接手批核。<b>「🆕 新制直入」分頁已改造成「⭐ 新版流程」指揮台</b>（舊直入版收埋做後備 tab，開班登記舊制原封不動）</li>
+          <li>🔎 <b>批核一版睇晒</b>：貼上 CL 交嚟嘅網址（一格過貼 Script／Key／GS 都識分）→ 自動拉 coursev5 <code>getCourseSummary</code>：課程資料・節次・職員・預算 8 大類・通告要點・批准狀態・報名數</li>
+          <li>✏️ <b>管理層改得到核心資料</b>（主要係預算＋通告會出現嘅內文；職員表／時間表鎖住唔准改）：每處改動記錄「原值 → 新值」<b>標亮</b>，寫返班 Sheet＋寫入「區會修訂」行＋CourseLinks 修訂紀錄——CL 喺 App／開 GS／email 都見到改咗咩</li>
+          <li>✔ <b>批准＝寫「區會批准」格</b>（參數分頁 label 對位）＋順手填「訓練班電郵」，CL 個 APP 即時見 ✔；開唔到班 Sheet（唔同帳戶）自動改經 <code>/exec</code> 寫＋提示人手 tick</li>
+          <li>📢 <b>通告由管理層出（唔再煩 CL）</b>：批完喺「📢 通告＋掛載」列印／存 PDF 交網頁管理員 → 上網後貼 URL 撳「🚀 掛載」自動讀料＋啟用 → 報名流入</li>
+          <li>💰 <b>收款核對分頁</b>：報名截止後，對完區帳戶逐筆 tick（寫入班 Sheet AS–AU 已核對收款／核對人／時間；CL 個 APP 即時見 💰✔）；一鍵寄核對摘要俾 CL</li>
+          <li>✉️ <b>CL 電郵通知</b>（批准／掛載／收款）：寄俾班領導人，<b>ReplyTo＝班信箱</b>（例 <code>blt2601@skwscout.org.hk</code>）——CL 回覆去班信箱，機房信箱（<code>skw@hkirscout.org.hk</code>）零班務信。班信箱管理建議 Gmail 委派存取＋Google Group（睇 <code>docs/course-email-drive-architecture.md</code>），唔再轉寄 CL 個人電郵</li>
+          <li>🔗 <b>連結分頁</b>：GS／Script／Key／Drive 一版管晒＋「📨 俾 CL 嘅開班指引」一鍵複製（開班網址＋開班碼由 Config 帶出）</li>
+          <li>🆕 後台新 action：<code>pullCourseSummary</code>／<code>saveCourseApproval</code>／<code>setCoursePaymentCheck</code>／<code>sendCourseEmail</code>／<code>getCourseOpsInfo</code>；CourseLinks 加 <code>gsUrl／approval／approvedAt／approvedBy／revisions</code> 5 欄（<code>setupSheets()</code> 自動補）；Config 加 <code>COURSE_EMAIL_FROM／COURSE_FACTORY_URL／COURSE_FACTORY_CODE</code>。測試：<code>node scripts/test-course-ops-gs.js</code>（15 項）</li>
+          <li>↩ <b>已退款 tick（v4.17.2）</b>：<b>分工更正——管理層只理錢（核對收款＋標記退款），接納／唔接納由 CL 喺 App 決定</b>。收款核對每筆加「↩ 已退款」tick（寫班 Sheet AX/AY 已退款／退款核對人，可取消重 tick）——CL 個 APP 見到 ↩ 就知已退錢；班 Script 貼 <code>Refund.gs</code> 就支援 exec 模式</li>
+          <li>✉ <b>CL App 寄通知書模組</b>：<code>RegNotice.gs</code> 已備好（course repo）——CL 喺 roster 按「發出接納及不接納通知書」→ 班 Script 自動組版（節次＋報到＋物品）MailApp 寄，ReplyTo＝班信箱，紀錄寫班 Sheet AZ/BA 防重複寄；portal「📬 收生通知」轉做<b>代寄後備</b></li>
+          <li>📬 <b>收生通知（v4.17.1）</b>：CL 喺 App 批完收生，「📬 收生通知」分頁一撳寄<b>接納／不接納通知</b>俾申請人——節次＋報到時間＋攜帶物品自動由班 Sheet 帶出，ReplyTo＝班信箱＋副本 CC 班領導人，有通知紀錄＋批量寄</li>
+          <li>📧 <b>班信箱唔使係 Gmail</b>：區 domain（skwscout.org.hk）寄存信箱照用——ReplyTo 天然有效；管理＝webmail/IMAP 共用密碼／免費 Gmail POP3（<code>docs/course-email-drive-architecture.md</code> 有逐步）；Config <code>COURSE_EMAIL_FROM_MODE=course</code> 可以連寄件人都用班信箱</li>
+          <li>⚠️ 部署：換 <code>Code.gs</code>（v4.17.2）→ <code>setupSheets()</code>（補欄唔清空）→ 重新部署；Config 填 CourseFactory 網址＋開班碼</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.16.0 — 📋 通告全文欄：貼通告連結一次填晒＋成員睇到齊料</h3>
         <ul>
           <li>📋 <b>「由通告網址讀取」升級</b>：除咗原有嘅 通告名／收費（連原價）／名額／截止／資格／節次／場地／聯絡，加讀 <b>班領導人／服裝／備註全文／報名辦法／費用全文（連轉數快戶口）／資助說明</b>，再由標題同網頁標籤拆出<b>徽章／支部</b>——區通告有嘅項目系統齊晒</li>

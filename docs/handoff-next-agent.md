@@ -1,5 +1,63 @@
 # 下一手 Agent 交接備忘（v4.8.1）
 
+> 2026-09-11（第九輪）v4.17.0：**⭐ 訓練班新版流程（訓練班系統先行）**。用戶拍板：全部由
+> [course repo（訓練班系統）](https://github.com/playerkousas-rgb/course)開始——CL 喺 App 開班
+> （CourseFactory 即起真 GS）＋填晒文件 → 交「GS＋SCRIPT 網址」→ 區系統批核（**話事權喺區會**）。
+> 改動：
+> - **「🆕 新制直入」tab 改造成「⭐ 新版流程」指揮台**（`components/CourseOpsTab.tsx` 新寫；
+>   原直入版搬去 `CourseSetupLegacy.tsx` 收埋做後備 tab，`CourseSetupTab.tsx` 變切換 wrapper；
+>   外面「📋 開班登記（舊制 Sheet 先行）」原封不動）。五個子分頁：🔎批核／📢通告＋掛載／💰收款核對／🎓完成／🔗連結。
+> - 後台 5 個新 action（全部 `canCourse`）：`pullCourseSummary`（經該班 /exec 拉 coursev5
+>   `getCourseSummary`）、`saveCourseApproval`（cells＋「區會批准」tick＋「訓練班電郵」＋「區會修訂」行
+>   一次過寫班 Sheet，首選 direct `openById`（gsUrl/sheetId）→ fallback `/exec saveCourseBatch`，
+>   bump rev，同步 CourseLinks `approval/approvedAt/approvedBy/revisions`（JSON 近 30 筆））、
+>   `setCoursePaymentCheck`（批量時間戳記 tick AS–AU；direct 首選→exec fallback；照 PaymentCheck.gs
+>   語義唔 bump rev）、`sendCourseEmail`（kind=approved/mounted/payment/custom；**ReplyTo＝班信箱**）、
+>   `getCourseOpsInfo`（CourseFactory 網址＋開班碼＋email alias 現狀）。
+> - CourseLinks 加 5 欄：`gsUrl/approval/approvedAt/approvedBy/revisions`（setupSheets 自動補）；
+>   Config 加 `COURSE_EMAIL_FROM`（選填 alias；留空＝部署帳戶地址＋ReplyTo 班信箱）、
+>   `COURSE_FACTORY_URL`、`COURSE_FACTORY_CODE`。`getConfig` 回 `courseEmailFrom/courseFactoryUrl`。
+> - 批核改核心資料＝`lib/course-setup.ts` 新 `setupCellsWithLabels`（每格有人類可讀 label）＋
+>   `diffSetups`（原值→新值，俾 email／修訂紀錄「標亮」用）＋`parseRawToPaymentRows`
+>   （表格回應 header 名對位做收款核對列）。`CourseSetupForm` 加 `hide` props（批核時鎖職員表＋時間表）。
+> - **電郵架構定案（用戶提供實況）**：區 domain `skwscout.org.hk`，**每班開班信箱
+>   `XXX@skwscout.org.hk`**；機房（班 GS/Script）＋教材 Drive 喺 `skw@hkirscout.org.hk`（唔可以
+>   俾班職員掂）。所以通知 From=機房帳戶、**ReplyTo=班信箱**（CL 回覆去班信箱，機房 inbox 零班務信）；
+>   班信箱管理＝Gmail 委派存取（核心）＋Google Group（全體），唔再轉寄 CL 個人 email。
+>   全部寫晒喺 **`docs/course-email-drive-architecture.md`**（含 CourseFactory 建議改動清單：
+>   `addEditor(OPS_EMAIL)` 自動 share 班 GS 俾區後台＋coursev5 `setParamLabel` action）。
+> - 測試：新 `scripts/test-course-ops-gs.js`（15 項，vm emulator 覆蓋 5 個新 action＋direct/exec
+>   兩條路＋「普通 saveCourseLink 唔會洗走 approval/revisions」）。全套（course-links 10／
+>   demo-engine 22／news 38／visit 27／awards 27…）全綠；`tsc`＋`next build` 過。
+> - ⚠️ 部署：換 `Code.gs` 4.17.0 → `setupSheets()` → 重新部署；Config 填 CourseFactory 網址＋開班碼。
+>   未做（等用戶叫）：course repo 嗰邊嘅 CourseFactory share＋setParamLabel；deep link 報名
+>   （用戶話唔使 patch——通告印成員系統 `/training` 公開報名表已夠，掛載列表係畀已用開系統嘅人）。
+> - **更正（同日）：班信箱 `XXX@skwscout.org.hk` 唔係 Gmail**（區自己 domain 嘅寄存郵箱）——
+>   Gmail 委派存取／同 domain Google Group 都行唔通。定案：ReplyTo 照樣有效（MailApp replyTo
+>   唔使 Gmail）；班信箱管理＝webmail／IMAP＋共用密碼（同 App 同文化，課程完換密碼歸檔）＋
+>   個人 Gmail send-as（SMTP 班信箱）做代班回覆；零成本升級位＝免費 Gmail POP3 拉信；
+>   Workspace 每班一授權太貴唔建議。新增 Config `COURSE_EMAIL_FROM_MODE=course`
+>   （寄件人直接用班信箱，須部署帳戶 Gmail send-as 驗證；未驗證自動 fallback）。
+>   Sheet 唔使搬去班信箱：職員經 App（共用密碼）存取，GS 留機房歸檔。全部見
+>   `docs/course-email-drive-architecture.md`（已重寫非 Gmail 版）。測試 16 項。
+> - **v4.17.1（同日）：📬 收生通知**——用戶核心需求「發接納／不接納通知＋查詢信職員要收到」。
+>   新後台 action `sendCourseRegNotice`（notices[{id,kind}]；內容由班 Sheet 帶：Input02 B1 班名／
+>   9–16 節次（H=FALSE skip）／Print_接納通知書 23/30/32/34 人手格／職員 23–42 班領導人署名；
+>   ReplyTo 優先序 b.replyTo > 參數「訓練班電郵」（direct 先讀到）> 領導人電郵；副本 CC 領導人；
+>   紀錄寫 CourseLinks 新欄 `regNotices` JSON {id:{kind,at,by}}，flatten link 先寫防洗走）；
+>   CourseOpsTab 新「📬 收生通知」分頁（未寄／已接納／已拒絕篩選＋批量寄＋逐筆重寄＋限額提示）；
+>   demo engine 有 case；mock server getCourseSheetRaw 改用 CourseRegs 真數據＋seed 4 筆示範報名；
+>   測試 19 項（+⑨⑩⑩b）。A/B（webmail/IMAP/轉寄）5 分鐘驗證法＋C（Gmail POP3）逐步已寫入架構文件。
+> - **v4.17.2（同日）：分工更正＋已退款 tick**——用戶更正：管理層只理錢（收款核對＋退款），
+>   接納／唔接納由 CL 決定；寄通知書正路係 CL 喺 App 按（course repo `RegNotice.gs` 已備好——
+>   班 Script 讀自己 Sheet 組版 MailApp 寄，ReplyTo 班信箱，紀錄寫表格回應 AZ/BA 防重寄；
+>   portal「📬 收生通知」轉做代寄後備，UI 加分工說明）。新：收款核對每筆「↩ 已退款」tick
+>   （`setCourseRefund` action＋router case；direct 寫表格回應 AX/AY 已退款/退款核對人＋自動補表頭；
+>   exec 經班 Script `Refund.gs`——已備好；parseRawToPaymentRows 讀 AX/AY；CourseOpsTab 退款欄＋
+>   refunded 篩選；demo engine case；mock setCourseRefund 真寫 CourseRegs）。測試 23 項（+⑪⑪b⑪c⑪d）。
+>   另修 mock readSheet 副本寫唔入嘅 bug（要經 getRange 寫儲存格）。
+>
+
 > 2026-09-09（第八輪）v4.16.0：**📋 訓練班通告全文欄**（用戶問：PDF 定網頁擇要用邊個＋系統格式同區通告唔同、有項目冇）。
 > 答咗用戶：**2607.pdf 已驗證係「文字版」**（pdf-parse 抽到全文，fixture `scripts/notice-2607-a.txt` 就係咁嚟）；
 > 網頁管理員嘅帖文係**刪減擇要**（冇名額／班領導人／服裝／備註／查詢），所以 **PDF 係正本**。改動：

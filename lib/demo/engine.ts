@@ -672,7 +672,136 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const r = requireUser(token, 2); if (isErr(r)) return r;
       const execUrl = String(payload.scriptExecUrl || payload.apiBase || '').trim();
       if (!execUrl && !payload.courseId) return fail('缺少訓練班 Script 網址（scriptExecUrl）');
-      return ok(demoCourseSheetRaw());
+      const raw = demoCourseSheetRaw();
+      // v4.17.0 收款核對：將示範版 tick 過嘅「已核對收款」套返入表格回應（col 45–47）
+      const checks = (d as AnyObj).coursePayChecks as Record<string, AnyObj> | undefined;
+      if (checks && Array.isArray(raw.resp) && raw.resp.length > 1) {
+        const resp = raw.resp as any[][];
+        for (let i = 1; i < resp.length; i++) {
+          const id = String(resp[i]?.[0] ?? '').trim();
+          const hit = checks[id];
+          if (!hit) continue;
+          while (resp[i].length < 47) resp[i].push('');
+          resp[i][44] = hit.verified ? '✔' : '';
+          resp[i][45] = hit.verified ? String(hit.by || '') : '';
+          resp[i][46] = hit.verified ? String(hit.at || '') : '';
+        }
+      }
+      return ok(raw);
+    }
+    // ── 新版流程（v4.17.0）：批核／修訂／收款核對／CL 電郵／開班指引 ──
+    case 'pullCourseSummary': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const row = d.courseLinks.find(x => x.courseId === payload.courseId);
+      if (!row && !payload.scriptExecUrl) return fail('呢班未有訓練班 Script 網址（新版流程班請貼 CL 交嚟嘅網址）');
+      const S = demoCourseSetup();
+      return ok({
+        courseName: S.courseName, edition: S.edition, section: S.section, badge: S.badge,
+        customName: S.customName, type1: S.form1, type2: S.form2,
+        intake: Number(S.expectedIntake) || 0, fee: Number(S.fee) || 0, quota: Number(S.quota) || 0,
+        staffCount: (S.staff || []).filter((x: AnyObj) => String(x.name || '').trim()).length,
+        deadline: S.deadline, publish: S.publishDate,
+        sessions: (S.sessions || []).filter((x: AnyObj) => x.date || x.time),
+        leader: (S.staff || []).find((x: AnyObj) => String(x.role || '').includes('班領導人')) || null,
+        staff: (S.staff || []).filter((x: AnyObj) => String(x.name || '').trim()).map((x: AnyObj) => ({ role: x.role, name: x.name, title: x.title })),
+        budget: { sections: [], total: 0 },
+        notice: { fileNo: S.fileNo, issueDate: S.issueDate, eligibility: S.eligibility, feeNote: S.feeNote, uniform: S.uniform },
+        courseEmail: 'blt2601@skwscout.org.hk',
+        approved: String(row?.approval || '') === 'APPROVED',
+        regCount: 3, pulledAt: nowIso(),
+      });
+    }
+    case 'saveCourseApproval': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const row = d.courseLinks.find(x => x.courseId === payload.courseId);
+      if (!row) return fail('找不到此訓練班（courseId）');
+      const by = String(payload.by || '區管理系統');
+      const appr = String(payload.approval || '').trim().toUpperCase();
+      if (appr === 'APPROVED') { row.approval = 'APPROVED'; row.approvedAt = nowIso(); row.approvedBy = by; }
+      else if (appr === 'PENDING') { row.approval = 'PENDING'; row.approvedAt = ''; row.approvedBy = ''; }
+      const prev: AnyObj[] = (() => { try { return JSON.parse(String(row.revisions || '') || '[]') || []; } catch { return []; } })();
+      if ((Array.isArray(payload.changes) && payload.changes.length) || appr) {
+        prev.unshift({
+          at: nowIso(), by, approval: appr === 'APPROVED' ? 'APPROVED' : (appr === 'PENDING' ? 'PENDING' : ''),
+          changes: payload.changes || [], note: String(payload.revisionNote || ''),
+          cellsApplied: Array.isArray(payload.cells) ? payload.cells.length : 0, path: 'demo',
+        });
+        row.revisions = JSON.stringify(prev.slice(0, 30));
+      }
+      if (payload.link) Object.assign(row, payload.link);
+      persistDb();
+      return ok({
+        saved: true, courseId: row.courseId, path: 'demo',
+        approvalDone: appr === 'APPROVED' || appr === 'PENDING',
+        cellsApplied: Array.isArray(payload.cells) ? payload.cells.length : 0, skippedTabs: [],
+        warnings: [], revisions: JSON.parse(String(row.revisions || '[]')),
+      });
+    }
+    case 'setCoursePaymentCheck': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const checks = ((d as AnyObj).coursePayChecks as Record<string, AnyObj> || {}) as Record<string, AnyObj>;
+      const results: AnyObj[] = [];
+      (Array.isArray(payload.checks) ? payload.checks : []).forEach((c: AnyObj) => {
+        const id = String(c.id || '').trim();
+        if (!id) { results.push({ id, ok: false, error: 'missing id' }); return; }
+        const verified = c.verified !== false;
+        checks[id] = { verified, by: String(payload.by || ''), at: nowIso() };
+        results.push({ id, ok: true, verified });
+      });
+      (d as AnyObj).coursePayChecks = checks;
+      persistDb();
+      return ok({ saved: results.every(x => x.ok), results, path: 'demo' });
+    }
+    case 'setCourseRefund': { // 🎭 demo：已退款 tick（寫 demo db，唔真寫班 Sheet）
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const refunds = ((d as AnyObj).courseRefunds as Record<string, AnyObj> || {}) as Record<string, AnyObj>;
+      const results: AnyObj[] = [];
+      (Array.isArray(payload.refunds) ? payload.refunds : []).forEach((c: AnyObj) => {
+        const id = String(c.id || '').trim();
+        if (!id) { results.push({ id, ok: false, error: 'missing id' }); return; }
+        const refunded = c.refunded !== false;
+        refunds[id] = { refunded, by: String(payload.by || ''), at: nowIso() };
+        results.push({ id, ok: true, refunded });
+      });
+      (d as AnyObj).courseRefunds = refunds;
+      persistDb();
+      return ok({ saved: results.every(x => x.ok), results, path: 'demo' });
+    }
+    case 'sendCourseEmail': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const to = String(payload.to || '').trim();
+      if (!to || !to.includes('@')) return fail('缺少收件人電郵（to——通常係班領導人 email）');
+      return ok({ sent: true, to, cc: String(payload.cc || ''), fromUsed: 'demo@skwscout.org.hk', warning: '🎭 示範版：唔會真係寄電郵。', subject: '[示範] ' + String(payload.kind || 'custom') });
+    }
+    case 'sendCourseRegNotice': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const row = d.courseLinks.find(x => x.courseId === payload.courseId);
+      if (!row) return fail('找不到此訓練班（courseId）');
+      const items = Array.isArray(payload.notices) ? payload.notices : [];
+      const recs: AnyObj = (() => { try { return JSON.parse(String(row.regNotices || '') || '{}') || {}; } catch { return {}; } })();
+      const results: AnyObj[] = [];
+      let sent = 0;
+      items.forEach((it: AnyObj) => {
+        const id = String(it.id || '').trim();
+        if (!id) { results.push({ id, ok: false, error: 'missing id' }); return; }
+        recs[id] = { kind: String(it.kind || 'approved'), at: nowIso(), by: String(payload.by || '') };
+        results.push({ id, ok: true });
+        sent++;
+      });
+      row.regNotices = JSON.stringify(recs);
+      persistDb();
+      return ok({ sent, results, regNotices: recs, replyTo: String(payload.replyTo || ''), warning: '🎭 示範版：唔會真係寄電郵。' });
+    }
+    case 'getCourseOpsInfo': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      return ok({
+        districtName: d.config.districtName,
+        factoryUrl: 'https://script.google.com/macros/s/AKfycbDemoCourseFactory/exec',
+        factoryCode: 'SKW-DEMO-2627',
+        emailFrom: 'skw@hkirscout.org.hk',
+        memberPortalUrl: String(d.config.memberPortalUrl || ''),
+        notifyFrom: '',
+      });
     }
     case 'getCourseSetup': {
       const r = requireUser(token, 2); if (isErr(r)) return r;
