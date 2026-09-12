@@ -229,6 +229,24 @@ member-portal  GET listCourseLinks  → 每個 course 多呢 5 個 key（未填 
 **多班同掛冇問題**：每班各自指向自己嘅收表 Script，`submitCourseReg` 按 `courseId`
 對號轉發（apiKey／driveFolderId 各自歸屬），報名互唔干擾。
 
+**v6.2.1 對接（報名欄位轉發，唔再靜默丟失）：** 區系統 `submitCourseReg` 而家會將報名表
+**全部欄位**轉發去訓練班後端（canonical 名＋舊制別名兩套都送）：
+
+| 欄位 | 入參（canonical） | 舊制別名（照送） |
+|---|---|---|
+| 童軍成員編號／職位 | `scoutId`／`scoutPosition` | `scoutRank` |
+| 附加資料 | `reason` | `extra` |
+| 家長同意＋資料 | `consentParent`＋`gName/gRelation/gEmail/gPhone` | `guardianConsent`＋`guardian*` |
+| 領袖同意＋資料 | `consentLeader`＋`leaderName/leaderTitle/leaderEmail` | `leaderConsent`＋`leaderPosition` |
+| 付款 | `payMethod`／`payer`／`payAccount` | `payerName` |
+| 截圖 | `receiptDataUrl`／`formDataUrl` | `formShotDataUrl`／`formScreenshot`／`formUrl` |
+| 收據／備註 | `needReceipt`／`remark` | `comment`／`note` |
+
+- 同意／收據 truthy 由**訓練班後端**自動變 `✔`；兩類截圖 `data:URL` 由**訓練班後端**自動存 Drive
+  （「{班名}_付款證明」／「{班名}_表格截圖」分開資料夾）——成員系統**唔使自己上載 Drive**。
+- 新制 hub 班：`submitCourseReg` 會改用**公開課程ID**（`publicCourseId`，write-only、唔送 key）轉發去
+  hub /exec 嘅 `addReg`；舊班照舊用逐班 `apiKey`。成員系統報名表**唔使改**——區系統會自動對應欄名。
+
 ## 活動知會（已核對雙向打通）
 
 ```

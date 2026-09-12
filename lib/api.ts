@@ -10,7 +10,7 @@ import type {
   CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
   Circular, CircularsBoard, CircularStatus, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
-  CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec,
+  CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec, HubCoursesResult,
 } from './types.ts';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers.ts';
 import type { IcsEvent } from './ics.ts';
@@ -156,7 +156,7 @@ export const api = {
     callPost('saveCourseLink', { token, link }),
   deleteCourseLink: (token: string, courseId: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteCourseLink', { token, courseId }),
-  pullCourseProfile: (token: string, req: { courseId?: string; scriptExecUrl?: string; scriptApiKey?: string }): Promise<ApiResult<CourseProfile>> =>
+  pullCourseProfile: (token: string, req: { courseId?: string; scriptExecUrl?: string; scriptApiKey?: string; gsUrl?: string; publicCourseId?: string }): Promise<ApiResult<CourseProfile>> =>
     callPost('pullCourseProfile', { token, ...req }),
   /** 📥 通告 URL 自動讀料（舊制開班登記）：伺服器抓 PDF 抽字解析，唔經 /api/proxy */
   parseNotice: (url: string): Promise<ApiResult<{ fields: NoticeFields; source: { url: string; kind: string; pages?: number; via?: string }; text: string }>> => {
@@ -185,7 +185,7 @@ export const api = {
   getCourseSetup: (token: string, courseId: string): Promise<ApiResult<{ courseId: string; sheetId: string; setup: CourseSetup | null }>> =>
     callPost('getCourseSetup', { token, courseId }),
   // ── 新版流程（v4.17.0：訓練班系統先行）── 批核／修訂／收款核對／CL 電郵／開班指引
-  pullCourseSummary: (token: string, req: { courseId?: string; scriptExecUrl?: string; scriptApiKey?: string }): Promise<ApiResult<Record<string, unknown>>> =>
+  pullCourseSummary: (token: string, req: { courseId?: string; scriptExecUrl?: string; scriptApiKey?: string; gsUrl?: string; publicCourseId?: string }): Promise<ApiResult<Record<string, unknown>>> =>
     callPost('pullCourseSummary', { token, ...req }),
   saveCourseApproval: (token: string, req: {
     courseId: string; by: string;
@@ -210,6 +210,9 @@ export const api = {
     callPost('sendCourseEmail', { token, ...req }),
   getCourseOpsInfo: (token: string): Promise<ApiResult<CourseOpsInfo>> =>
     callPost('getCourseOpsInfo', { token }),
+  // v6.2.1 對接：讀訓練班系統（hub）公開班列表，攞班名＋公開課程ID 配對
+  listHubCourses: (token: string): Promise<ApiResult<HubCoursesResult>> =>
+    callPost('listHubCourses', { token }),
   // v4.17.1 收生通知：接納／不接納通知寄俾申請人（內容由班 Sheet 帶出；ReplyTo 班信箱＋CC 班領導人）
   sendCourseRegNotice: (token: string, req: {
     courseId: string; notices: Array<{ id: string; kind: 'approved' | 'rejected' }>; by: string; replyTo?: string;

@@ -39,6 +39,50 @@ type SubTab = 'review' | 'notice' | 'reg' | 'payment' | 'done' | 'connect';
 
 const STATUS_LABEL: Record<string, string> = { approved: '已接納', rejected: '已拒絕', cancelled: '已取消', pending: '待批' };
 
+/** v6.2.1：hub 班開唔到班 Sheet（getCourseSheetRaw 唔喺 opsKey 白名單）時，由 getCourseSummary 砌隻讀 baseline */
+function summaryToSetup(d: Record<string, unknown>, courseId: string): CourseSetup {
+  const s = emptySetup();
+  s.courseId = courseId;
+  s.courseName = String(d.courseName ?? '').trim();
+  s.edition = String(d.edition ?? '').trim();
+  s.section = String(d.section ?? '').trim();
+  s.badge = String(d.badge ?? '').trim();
+  s.customName = String(d.customName ?? '').trim();
+  s.form1 = String(d.type1 ?? '').trim();
+  s.form2 = String(d.type2 ?? '').trim();
+  s.expectedIntake = String(d.intake ?? '').trim();
+  s.expectedFee = String(d.fee ?? '').trim();
+  s.expectedStaff = String(d.staffCount ?? '').trim();
+  s.quota = String(d.quota ?? '').trim();
+  s.fee = String(d.fee ?? '').trim();
+  s.deadline = normDate(String(d.deadline || ''));
+  s.publishDate = normDate(String(d.publish || ''));
+  s.sessions = (Array.isArray(d.sessions) ? d.sessions : []).map(x => {
+    const o = (x || {}) as Record<string, unknown>;
+    return {
+      date: normDate(String(o.date || '')), spanNext: false,
+      time: String(o.time || ''), venue: String(o.venue || ''),
+      displayDate: '', displayTime: String(o.time || ''), displayVenue: String(o.venue || ''),
+      show: !!o.onNotice,
+    } as CourseSetup['sessions'][number];
+  });
+  s.staff = (Array.isArray(d.staff) ? d.staff : []).map(x => {
+    const o = (x || {}) as Record<string, unknown>;
+    return { role: String(o.role || ''), name: String(o.name || ''), title: String(o.title || ''), unit: '', qualification: '', phone: String(o.phone || ''), email: String(o.email || '') };
+  });
+  const leader = (d.leader || {}) as Record<string, unknown>;
+  if (leader.name) {
+    s.staff.unshift({ role: '班領導人', name: String(leader.name || ''), title: String(leader.title || ''), unit: '', qualification: '', phone: String(leader.phone || ''), email: String(leader.email || '') });
+  }
+  const notice = (d.notice || {}) as Record<string, unknown>;
+  s.fileNo = String(notice.fileNo || '').trim();
+  s.issueDate = String(notice.issueDate || '').trim();
+  s.eligibility = String(notice.eligibility || '').trim();
+  s.feeNote = String(notice.feeNote || '').trim();
+  s.uniform = String(notice.uniform || '').trim();
+  return s;
+}
+
 /** 貼上文字抽網址／Key（CL 交嚟嘅嘢一格過貼晒都得） */
 export function parseCoursePaste(text: string): { execUrl: string; apiKey: string; gsUrl: string } {
   const t = String(text || '');
@@ -60,6 +104,7 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
   const [raw, setRaw] = useState<CourseSheetRaw | null>(null);
   const [setup, setSetup] = useState<CourseSetup>(emptySetup());
   const [baseline, setBaseline] = useState<CourseSetup | null>(null);
+  const [summaryOnly, setSummaryOnly] = useState(false);  // v6.2.1：hub 班開唔到班 Sheet → 只讀摘要
   const [courseEmail, setCourseEmail] = useState('');
   const [baseCourseEmail, setBaseCourseEmail] = useState('');
   const [summaryOk, setSummaryOk] = useState(false);
@@ -93,21 +138,30 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
 
   /** 讀班：有 setupJson（直入草稿）就用，冇就 parse 班 Sheet raw；順手拉 getCourseSummary（courseEmail／批准現狀） */
   async function load(id: string) {
-    setBusy('load'); setError(''); setMsg('');
-    const [g, sRes] = await Promise.all([
+    setBusy('load'); setError(''); setMsg(''); setSummaryOnly(false);
+    const [g, sRes, sm] = await Promise.all([
       api.getCourseSetup(session.token, id),
       api.pullCourseSheetRaw(session.token, { courseId: id }),
+      api.pullCourseSummary(session.token, { courseId: id }),
     ]);
     let s: CourseSetup | null = g.ok && g.data?.setup ? normalizeSetup(g.data.setup) : null;
+    let summaryOnlyLocal = false;
     if (sRes.ok && sRes.data) {
       setRaw(sRes.data);
       if (!s) s = parseRawToSetup(sRes.data, id);
       setSetup(s); setBaseline(JSON.parse(JSON.stringify(s)) as CourseSetup);
     } else if (!s) {
-      setBusy(''); setError(sRes.error || '讀唔到班 Sheet——請檢查連結分頁嘅 Script 網址／Key'); return;
+      // v6.2.1：hub 班開唔到班 Sheet（getCourseSheetRaw 唔喺 opsKey 白名單）→ 由 getCourseSummary 砌隻讀摘要
+      if (sm.ok && sm.data) {
+        s = summaryToSetup(sm.data as Record<string, unknown>, id);
+        setSetup(s); setBaseline(JSON.parse(JSON.stringify(s)) as CourseSetup);
+        summaryOnlyLocal = true;
+      } else {
+        setBusy(''); setError(sRes.error || '讀唔到班 Sheet——請檢查連結分頁嘅 Script 網址／Key'); return;
+      }
     } else { setSetup(s); setBaseline(JSON.parse(JSON.stringify(s)) as CourseSetup); }
+    setSummaryOnly(summaryOnlyLocal);
     // courseEmail／批准狀態（coursev5 getCourseSummary；舊後端冇就靜靜地略過）
-    const sm = await api.pullCourseSummary(session.token, { courseId: id });
     if (sm.ok && sm.data) {
       const d = sm.data as Record<string, unknown>;
       const ce = String(d.courseEmail ?? '').trim();
@@ -115,7 +169,7 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
       setSummaryOk(true);
     }
     setBusy('');
-    if (!sRes.ok) setMsg('已載入儲存過嘅設定（班 Sheet 讀唔到：' + (sRes.error || '') + '）');
+    if (!sRes.ok && !summaryOnlyLocal) setMsg('已載入儲存過嘅設定（班 Sheet 讀唔到：' + (sRes.error || '') + '）');
   }
 
   const dirty = useMemo(() => (baseline ? diffSetups(baseline, setup) : { changes: [] as CourseChange[], cells: [] }), [baseline, setup]);
@@ -311,22 +365,48 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
   // ── 🔗 連結 ──
   const [gsUrl, setGsUrl] = useState(''); const [execUrl, setExecUrl] = useState('');
   const [apiKey, setApiKey] = useState(''); const [driveFolderId, setDriveFolderId] = useState('');
+  const [publicCourseId, setPublicCourseId] = useState('');
   const [showKey, setShowKey] = useState(false);
   function fillConnect() {
     if (!link) return;
     setGsUrl(String(link.gsUrl || '')); setExecUrl(String(link.scriptExecUrl || ''));
     setApiKey(String(link.scriptApiKey || '')); setDriveFolderId(String(link.driveFolderId || ''));
+    setPublicCourseId(String(link.publicCourseId || ''));
   }
   useEffect(fillConnect, [courseId]); // eslint-disable-line react-hooks/exhaustive-deps
   async function saveConnect() {
     if (!courseId || !link) return;
     setBusy('connect'); setError('');
     const r = await api.saveCourseLink(session.token, {
-      ...link, gsUrl: gsUrl.trim(), scriptExecUrl: execUrl.trim(), scriptApiKey: apiKey.trim(), driveFolderId: driveFolderId.trim(),
+      ...link, gsUrl: gsUrl.trim(), scriptExecUrl: execUrl.trim(), scriptApiKey: apiKey.trim(),
+      driveFolderId: driveFolderId.trim(), publicCourseId: publicCourseId.trim(),
     });
     setBusy('');
     if (!r.ok) { setError(r.error || '儲存失敗'); return; }
     await reloadLinks(); setMsg('連結資料已儲存 ✓');
+  }
+  /** v6.2.1：由訓練班系統（hub）公開班列表，按班名配對公開課程ID（addReg 公開報名用） */
+  async function matchPublicId() {
+    if (!link) return;
+    setBusy('match'); setError('');
+    const r = await api.listHubCourses(session.token);
+    setBusy('');
+    if (!r.ok || !r.data) { setError('讀唔到訓練班系統班列表：' + (r.error || '未知錯誤')); return; }
+    const d = r.data;
+    if (d.hubVersion && !d.hubReady) { setError('訓練班系統（hub）未 setup（ready=false）'); return; }
+    const name = String(link.title || '').trim();
+    const exact = d.courses.filter(c => String(c.name || '').trim() === name);
+    if (exact.length === 1) {
+      setPublicCourseId(exact[0].publicCourseId);
+      setMsg(`已按班名配對公開課程ID ✓（${exact[0].publicCourseId}）——記得撳「💾 儲存連結」`);
+    } else if (exact.length > 1) {
+      setError('班名有多個一模一樣嘅班——請人手喺下面揀公開課程ID');
+    } else {
+      const fuzzy = d.courses.filter(c => String(c.name || '').includes(name) || name.includes(String(c.name || '')));
+      setError(fuzzy.length
+        ? `搵唔到完全同名嘅班（hubVersion ${d.hubVersion || '?'}）。近似：${fuzzy.map(c => `${c.name}（${c.publicCourseId}）`).join('、')}`
+        : `搵唔到同名嘅班（hubVersion ${d.hubVersion || '?'}，共 ${d.courses.length} 班）——請確認班名一致或人手填公開課程ID`);
+    }
   }
   function clLink(): string {
     const e = execUrl.trim(); if (!e) return '';
@@ -362,7 +442,8 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
     const p = parseCoursePaste(pasteText);
     if (!p.execUrl) { setError('貼上文字搵唔到 Script /exec 網址'); return; }
     setBusy('preview'); setError(''); setPreview(null);
-    const r = await api.pullCourseSummary(session.token, { scriptExecUrl: p.execUrl, scriptApiKey: p.apiKey });
+    // v6.2.1：hub 班冇逐班 apiKey——照傳 gsUrl（後端由 fileId＋opsKey 對班）
+    const r = await api.pullCourseSummary(session.token, { scriptExecUrl: p.execUrl, scriptApiKey: p.apiKey, gsUrl: p.gsUrl });
     setBusy('');
     if (r.ok && r.data) setPreview(r.data as Record<string, unknown>);
     else setMsg('讀唔到批核摘要（' + (r.error || '') + '）——照可以儲存，之後喺批核分頁再讀');
@@ -375,12 +456,23 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
     setBusy('saveNew');
     const leader = (sm?.leader || {}) as Record<string, unknown>;
     const contact = [`${String(leader.name || '')}${String(leader.title || '')}`.trim(), String(leader.phone || ''), String(leader.email || '')].filter(Boolean).join(' ');
+    // v6.2.1：貼嘅 Script 網址 = 新制 hub → 按班名自動配對公開課程ID（公開報名連結用；配唔到唔阻開班）
+    let publicCourseId = '';
+    if (opsInfo?.hubUrl && p.execUrl === opsInfo.hubUrl) {
+      try {
+        const hub = await api.listHubCourses(session.token);
+        if (hub.ok && hub.data) {
+          const m = hub.data.courses.filter(c => String(c.name || '').trim() === title);
+          if (m.length === 1) publicCourseId = m[0].publicCourseId;
+        }
+      } catch { /* 配唔到唔阻開班 */ }
+    }
     const r = await api.saveCourseLink(session.token, {
       courseId: '', title, badgeName: String(sm?.badge || ''), section: String(sm?.section || ''),
       fee: String(sm?.fee ?? ''), quota: String(sm?.quota ?? ''), deadline: normDate(String(sm?.deadline || '')),
       contact, leader: `${String(leader.name || '')}${String(leader.title || '')}`.trim(),
       scriptExecUrl: p.execUrl, scriptApiKey: p.apiKey, gsUrl: p.gsUrl,
-      approval: 'PENDING', active: 'TRUE',
+      publicCourseId, approval: 'PENDING', active: 'TRUE',
     } as CourseLink);
     setBusy('');
     if (!r.ok || !r.data) { setError(r.error || '儲存失敗'); return; }
@@ -523,6 +615,7 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
                 ))}</tbody>
               </table></div>
               <h3 style={{ marginTop: 12 }}>💰 預算 8 大類（總支出 <b>${bt.total.toLocaleString()}</b>）</h3>
+              {summaryOnly && <p className="muted" style={{ fontSize: 12.5, margin: '2px 0 0' }}>（只讀摘要——預算明細開唔到班 Sheet 讀唔到；要改請 CL 喺 App 改）</p>}
               <table className="data-table">
                 <tbody>{budgetRows.map(r => (
                   <tr key={r.label}><td>{r.label}</td><td style={{ textAlign: 'right' }}>${r.v.toLocaleString()}</td></tr>
@@ -541,7 +634,15 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
                   印喺通告查詢行；系統通知嘅「回覆」都會去呢個班信箱（唔會入機房信箱）。班信箱唔使係 Gmail——職員用 webmail／手機 IMAP＋共用密碼收發（同訓練班 App 同一套文化，課程完換密碼歸檔）；想喺自己信箱順手回就用班地址做 send-as。細節睇 <code>docs/course-email-drive-architecture.md</code>。
                 </p>
               </div>
-              <CourseSetupForm setup={setup} onChange={setSetup} hide={{ staff: true, timetable: true }} />
+              {summaryOnly
+                ? <div className="info-card" style={{ borderLeft: '4px solid #0ea5e9', background: '#f0f9ff' }}>
+                    <p style={{ margin: 0, fontSize: 13.5 }}>
+                      🔑 <b>呢班係新制 hub 班（開唔到班 Sheet——getCourseSheetRaw 唔喺 opsKey 白名單）</b>：
+                      下面係 <code>getCourseSummary</code> 嘅只讀摘要（名額／收費／節次／職員／批准現狀），
+                      預算明細同「改核心資料」要 CL 喺 App 改或直接開 GS。<b>批准 tick 照做得</b>——會經 <code>setParamLabel</code>（opsKey＋fileId）寫入。
+                    </p>
+                  </div>
+                : <CourseSetupForm setup={setup} onChange={setSetup} hide={{ staff: true, timetable: true }} />}
             </section>
 
             <section className="info-card" style={{ borderLeft: '4px solid #f59e0b' }}>
@@ -802,12 +903,24 @@ export default function CourseOpsTab({ session, links, reloadLinks, districtName
             <label style={{ fontSize: 13.5 }}>Drive 資料夾 ID（入數紙／付款證明）
               <input value={driveFolderId} onChange={e => setDriveFolderId(e.target.value)} style={{ width: '100%', padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }} />
             </label>
+            <label style={{ fontSize: 13.5 }}>公開課程ID（v6.2.1；成員系統公開報名連結用）
+              <span style={{ display: 'flex', gap: 6 }}>
+                <input value={publicCourseId} onChange={e => setPublicCourseId(e.target.value)} style={{ flex: 1, padding: '6px 8px', border: '1px solid #cbd5e1', borderRadius: 6 }} placeholder="crs_…（由班名自動配對）" />
+                <button className="mini-btn" disabled={!!busy} onClick={matchPublicId}>{busy === 'match' ? '配對中…' : '🔍 由班名配對'}</button>
+              </span>
+            </label>
+            {opsInfo?.hubUrl && (
+              <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
+                新制 hub 已接駁：{opsInfo.hubUrl}（區系統密匙 {opsInfo.opsKeySet ? '✅ 已設' : '❌ 未設——Config 填 COURSE_OPS_KEY'}）
+                ——設好之後，靠 CL 條 GS 網址（fileId）＋opsKey 就對到班、批到核，唔使逐班搵公開課程ID。
+              </p>
+            )}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn-sm" disabled={!!busy} onClick={saveConnect}>{busy === 'connect' ? '儲存中…' : '💾 儲存連結'}</button>
               {clLink() && <button className="mini-btn" onClick={() => { void navigator.clipboard.writeText(clLink()); setMsg('已複製職員連結 ✓'); }}>🔗 複製職員連結（exec?key=…）</button>}
               {gsUrl && <a className="mini-btn" href={gsUrl} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>↗ 開班 Sheet</a>}
             </div>
-            <p className="muted" style={{ fontSize: 12.5 }}>批核寫入首選直接開班 Sheet（同區後台同帳戶就開到）；開唔到會自動改經 Script 寫——「區會批准」格嗰陣就要人手開 GS tick。</p>
+            <p className="muted" style={{ fontSize: 12.5 }}>批核寫入首選直接開班 Sheet（同區後台同帳戶就開到）；開唔到會自動改經 Script 寫——新制 hub 班「區會批准」會經 setParamLabel（opsKey＋fileId）寫入，舊班先要人手開 GS tick。</p>
           </div>
         </section>
       )}

@@ -100,6 +100,25 @@ export interface CourseOpsInfo {
   emailFrom: string;                  // 訓練班郵件 alias（空 = 用部署帳戶地址）
   memberPortalUrl: string;
   notifyFrom: string;
+  hubUrl?: string;                    // v6.2.1：新制 CourseHub /exec（全部班共用）
+  opsKeySet?: boolean;                // v6.2.1：區系統密匙（opsKey）有冇設
+}
+
+/** v6.2.1：hub 公開班列表一筆（listHubCourses 配對公開課程ID 用） */
+export interface HubCourse {
+  courseId: string;
+  publicCourseId: string;
+  name: string;
+  status: string;
+  cl: string;
+}
+
+/** v6.2.1：listHubCourses 回傳（hubVersion／ready＋班列表） */
+export interface HubCoursesResult {
+  hubUrl: string;
+  hubVersion: string;
+  hubReady: boolean;
+  courses: HubCourse[];
 }
 
 /** 收款核對一列（收款核對分頁用；由表格回應 header 對位） */
@@ -193,6 +212,7 @@ export interface CourseLink {
   approvedAt?: string;        // 批准時間（ISO）
   approvedBy?: string;        // 批准人
   revisions?: string;         // 修訂清單 JSON（CourseRevision[]；list 唔回原字串）
+  publicCourseId?: string;    // v6.2.1：公開課程ID（hub 公開報名／opsKey 舊路用；由班名經 listHubCourses 配對）
 }
 
 /** 批核修訂一項（v4.17.0）：管理層改咗嘅嘢——標亮俾 CL 知 */
