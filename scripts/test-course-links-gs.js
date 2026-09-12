@@ -299,11 +299,11 @@ check('舊 CourseLinks（v4.15 欄位）→ ensureSheetColumns_ 補 5 欄喺最�
   // 搵 CourseLinks 嗰份藍圖行 ensureSheetColumns_
   const bp = ctx.blueprint_().filter(function (b) { return b.name === 'CourseLinks'; })[0];
   const added = ctx.ensureSheetColumns_(bp);
-  // v4.16.0 5 欄＋v4.17.0 5 欄（新版流程），全部追加喺表尾
-  assert.strictEqual(added.join(','), 'leader,uniform,remarks,signupText,feeNote,gsUrl,approval,approvedAt,approvedBy,revisions,regNotices');
+  // v4.16.0 5 欄＋v4.17.0 5 欄（新版流程）＋v6.2.1 publicCourseId，全部追加喺表尾
+  assert.strictEqual(added.join(','), 'leader,uniform,remarks,signupText,feeNote,gsUrl,approval,approvedAt,approvedBy,revisions,regNotices,publicCourseId');
   const headers = oldSheet._data[0];
-  // 補欄按表尾追加（舊表 sheetId/setupJson 已喺度，所以 11 個新欄排最尾）
-  assert.strictEqual(headers.slice(-11).join(','), 'leader,uniform,remarks,signupText,feeNote,gsUrl,approval,approvedAt,approvedBy,revisions,regNotices');
+  // 補欄按表尾追加（舊表 sheetId/setupJson 已喺度，所以 12 個新欄排最尾）
+  assert.strictEqual(headers.slice(-12).join(','), 'leader,uniform,remarks,signupText,feeNote,gsUrl,approval,approvedAt,approvedBy,revisions,regNotices,publicCourseId');
   // 舊資料仲喺度
   const rows = ctx.readSheet_('CourseLinks');
   assert.strictEqual(rows.length, 4);

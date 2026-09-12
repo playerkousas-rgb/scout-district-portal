@@ -336,7 +336,7 @@ export function demoCourseLinks(): Record<string, any>[] {
     { courseId: 'cl-02', title: '遠足導師班（HWC）2026 年 11 月班', badgeName: '遠足', section: '領袖', courseNo: 'HWC-2611', sessionsText: '11 月 7、14 日（週六）全天', eligibility: '持有初級領袖訓練班證書', fee: '680', originalFee: '760', subsidyNote: '區方資助 $80／人', deadline: `${dateOnly(40)} `, quota: '24', filled: '9', venue: '香港童軍中心', contact: '訓練組 ddc.training@demo', leader: '陳大文先生', uniform: '整齊童軍制服／遠足裝束', remarks: '1. 學員必須全期出席訓練班，不得遲到或早退。\n2. 遠足日請自備午餐及飲用水。', signupText: '成員須填妥網上表格（成員系統內置報名表）。', feeNote: '費用：活動費用港幣 680 元正（原價 760 元，獲區方資助 $80／人）。報名費用必須以轉數快繳付。', active: 'TRUE', createdAt: iso(20) },
     { courseId: 'cl-03', title: '急救證書課程（SFA）2027 年 1 月班', badgeName: '急救', section: '跨支部', courseNo: 'SFA-2701', sessionsText: '1 月 9、16、23、30 日（週六）晚間', eligibility: '12 歲以上', fee: '1200', deadline: `${dateOnly(90)} `, quota: '30', filled: '30', venue: '聖十字架堂禮堂', contact: '區秘書處', active: 'TRUE', createdAt: iso(10) },
     // v4.17.0 新版流程示範班：CL 喺訓練班系統開班 → 交網址 → 批核中
-    { courseId: 'cl-04', title: '野外定向章訓練班（ORC）2026 年 12 月班', badgeName: '野外定向', section: '童軍', courseNo: 'ORC-2612', sessionsText: '12 月 5、12 日（週六）09:00–16:00', eligibility: '11 歲以上童軍成員', fee: '320', deadline: `${dateOnly(55)} `, quota: '28', filled: '0', venue: '西貢東壩', contact: '黃志明（班領導人）97001122', leader: '黃志明先生', active: 'TRUE', createdAt: iso(2), scriptExecUrl: 'https://script.google.com/macros/s/AKfycbDemoCourseORC/exec', scriptApiKey: 'ck_demo_orc_0123456789', gsUrl: 'https://docs.google.com/spreadsheets/d/demo-sheet-orc/edit', approval: 'PENDING', driveFolderId: 'demo-folder-orc' },
+    { courseId: 'cl-04', title: '野外定向章訓練班（ORC）2026 年 12 月班', badgeName: '野外定向', section: '童軍', courseNo: 'ORC-2612', sessionsText: '12 月 5、12 日（週六）09:00–16:00', eligibility: '11 歲以上童軍成員', fee: '320', deadline: `${dateOnly(55)} `, quota: '28', filled: '0', venue: '西貢東壩', contact: '黃志明（班領導人）97001122', leader: '黃志明先生', active: 'TRUE', createdAt: iso(2), scriptExecUrl: 'https://script.google.com/macros/s/AKfycbDemoCourseORC/exec', scriptApiKey: 'ck_demo_orc_0123456789', gsUrl: 'https://docs.google.com/spreadsheets/d/demo-sheet-orc/edit', approval: 'PENDING', driveFolderId: 'demo-folder-orc', publicCourseId: 'crs_demo_orc_0123456789' },
   ];
   links[0].setupJson = setupJson;
   return links;
@@ -481,6 +481,8 @@ export function freshDemoDb(): DemoDb {
       budgetSheetUrl: '',
       memberPortalUrl: 'https://member-portal-demo.vercel.app',
       courseTemplateSet: true,
+      courseHubUrl: 'https://script.google.com/macros/s/AKfycbDemoCourseHub/exec',
+      courseOpsKeySet: true,
     },
     system: { locked: false, lockMessage: '' },
     cards: JSON.parse(JSON.stringify(DEMO_CARDS)),

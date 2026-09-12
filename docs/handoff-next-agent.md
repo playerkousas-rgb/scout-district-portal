@@ -1,5 +1,35 @@
 # 下一手 Agent 交接備忘（v4.8.1）
 
+> 2026-09-12（第十輪）v4.18.0：**🔑 6.2.1 對接（區系統對接訓練班系統 CourseHub）**。
+> 用戶交咗一份「區管理系統要跟進嘅嘢（6.2.1 對接清單）」，全部喺呢輪做咗：
+> - **1️⃣ fileId 對班（最主要）**：區系統存 CL 交嚟嘅班 GS 網址 → 後台抽 `fileId` →
+>   用 `opsKey`＋`fileId` 對班（`courseTarget_` 三路自動揀：opsKey+fileId（hub≥6.2.1）→
+>   opsKey+publicCourseId（兩路並存）→ 逐班 apiKey（舊制／舊後端））。白名單 action 全部通行：
+>   `getCourseProfile／getCourseSummary／listRegs／listBudgetVersions／setPaymentCheck／
+>   setCourseRefund／approveBudgetVersion`。`setParamLabel`（tick「區會批准」）傳 fileId。
+>   能力檢查：`GET /exec` 讀 `hubVersion`（`courseHubInfo_` Cache 1 小時），舊後端唔識 fileId 自動退回 apiKey。
+> - **2️⃣ 報名表全欄轉發**：`submitCourseReg_` 而家送晒 canonical 欄（`scoutId/scoutPosition/reason/
+>   consentParent+gName/gRelation/gEmail/gPhone/consentLeader+leaderName/leaderTitle/leaderEmail/
+>   payMethod/payer/payAccount/receiptDataUrl/formDataUrl/needReceipt/remark`）＋舊制別名（等 v4.13.0 舊班
+>   都收到），唔再靜默丟失；hub 班公開 addReg 只憑 `publicCourseId`（write-only，唔送 key／folder），
+>   `refCode` 兼容 `{ok,data:{refCode}}` 同 `{ok,refCode}` 兩種形狀。
+> - **3️⃣ 唔使郁嘅嘢**：`/exec` 網址、回應格式、批核／財務 action 入參全部照舊；opsKey 本身喺訓練班系統
+>   「設定」分頁（區系統 Config 加 `COURSE_OPS_KEY` 抄一份，另加 `COURSE_HUB_URL`）。
+> - 新 action `listHubCourses`（公開 `listCourses` 攞班名＋公開課程ID，連 hubVersion/ready）；
+>   CourseLinks 加 `publicCourseId` 欄（`setupSheets()` 自動補）；`getCourseOpsInfo`／`getConfig`
+>   回 `hubUrl`/`opsKeySet`（唔洩漏 opsKey 明文）。
+> - 前端：`components/CourseOpsTab.tsx`「🔗 連結」加「公開課程ID＋🔍 由班名配對」＋hub 接駁狀態；
+>   「➕ 連結新班」貼 hub 網址會自動按班名配對 publicCourseId；`previewPaste` 帶 gsUrl（hub 冇逐班 key）。
+> - 測試：新 `scripts/test-course-621-gs.js`（11 項：能力檢查／三路 target／opsKey+fileId 批核收款退款／
+>   setParamLabel 批准 tick／listHubCourses／addReg 全欄＋hub 公開路）；`test-course-links-gs.js` 舊表補欄
+>   期望加返 publicCourseId（12 欄）。全套全綠；`tsc`＋`next build` 過。
+> - ⚠️ 部署：換 `Code.gs` 4.18.0 → `setupSheets()`（補 `publicCourseId` 欄＋Config `COURSE_HUB_URL`/
+>   `COURSE_OPS_KEY` 兩列）→ 重新部署；Config 填 hub 網址＋opsKey（喺訓練班系統「設定」分頁攞）。
+> - ⏭ 下一步（未做，等用戶叫）：hub 班嘅「改核心資料 cells」喺開唔到班 Sheet 又冇逐班 apiKey 時寫唔到
+>   （saveCourseBatch 唔喺 opsKey 白名單——批准 tick 已用 setParamLabel 解決，cells 編輯要靠直接開 GS 或
+>   班職員喺 App 改）；`sendCourseRegNotice`（代寄後備）讀 getCourseSheetRaw 唔喺白名單，hub 班開唔到 GS 時
+>   用唔到（CL 喺 App 寄係正路）。如需完全唔使直接開 GS，要同 course repo 傾加 getCourseSheetRaw 落白名單。
+
 > 2026-09-11（第九輪）v4.17.0：**⭐ 訓練班新版流程（訓練班系統先行）**。用戶拍板：全部由
 > [course repo（訓練班系統）](https://github.com/playerkousas-rgb/course)開始——CL 喺 App 開班
 > （CourseFactory 即起真 GS）＋填晒文件 → 交「GS＋SCRIPT 網址」→ 區系統批核（**話事權喺區會**）。

@@ -254,6 +254,13 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 - **12 張網頁列印**：通告／取錄／合格／學員／出席／接納／班職員／收支／財政預算／資助／完成報告／領取證書，直接印 PDF。
 - 舊制（CL 填 Sheet）原封不動並存；舊班喺新頁只讀＋列印。部署：`Code.gs` → `setupSheets()` → 設 `COURSE_TEMPLATE_ID`。詳見 [`docs/course-sheet-pull.md`](docs/course-sheet-pull.md) 新制一節。
 
+## 🔑 6.2.1 對接：靠班 GS 網址（fileId）＋區系統密匙（opsKey）對班、批核（v4.18.0）
+
+- **唔使再逐班搵／存公開課程ID**：區系統存 CL 交嚟嘅班 GS 網址 → 後台抽 `fileId` → `opsKey`＋`fileId` 對班（白名單：`getCourseProfile／getCourseSummary／listRegs／listBudgetVersions／setPaymentCheck／setCourseRefund／approveBudgetVersion`＋`setParamLabel`）；舊路 `opsKey`＋`publicCourseId` 照用得。
+- **能力檢查**：接駁時 `GET /exec` 確認 `hubVersion ≥ 6.2.1` 先行 fileId 路；舊後端唔識 fileId 自動退回逐班 `apiKey`。
+- **報名表全欄轉發**（`submitCourseReg`）：`scoutId／scoutPosition／reason／consentParent＋gName/gRelation/gEmail/gPhone／consentLeader＋leaderName/leaderTitle/leaderEmail／payMethod/payer/payAccount／receiptDataUrl／formDataUrl／needReceipt／remark` 全部送；新制 hub 班改用 `publicCourseId`（write-only）轉發。逐欄對照見 `docs/member-gs-handshake.md`。
+- Config 加 `COURSE_HUB_URL`＋`COURSE_OPS_KEY`；`listHubCourses`（班名配對公開課程ID）；CourseLinks 加 `publicCourseId` 欄。測試：`node scripts/test-course-621-gs.js`（11 項）。
+
 ## 📋 通告全文欄：貼通告連結→一次填晒（v4.16.0）
 
 - **用邊個連結？** 貼 **PDF**（正本，名額／班領導人／服裝／備註／查詢齊晒）最好；貼**帖文頁**都得——會自動跟去 PDF 讀正本，仲讀埋網頁標籤（徽章／支部）。網頁管理員嘅擇要係刪減版，少咗一堆項目，所以唔好齋靠佢。

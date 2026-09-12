@@ -801,6 +801,26 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
         emailFrom: 'skw@hkirscout.org.hk',
         memberPortalUrl: String(d.config.memberPortalUrl || ''),
         notifyFrom: '',
+        hubUrl: String(d.config.courseHubUrl || ''),
+        opsKeySet: !!d.config.courseOpsKeySet,
+      });
+    }
+    case 'listHubCourses': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const hubUrl = String(d.config.courseHubUrl || '');
+      if (!hubUrl) return fail('未設定 COURSE_HUB_URL（新制訓練班 CourseHub /exec）');
+      // 🎭 示範：用 demo course links 組班列表（唔打真 hub）
+      return ok({
+        hubUrl,
+        hubVersion: '6.2.1',
+        hubReady: true,
+        courses: d.courseLinks.filter(c => String(c.gsUrl || '')).map(c => ({
+          courseId: c.courseId,
+          publicCourseId: String(c.publicCourseId || ''),
+          name: String(c.title || ''),
+          status: 'active',
+          cl: String(c.leader || ''),
+        })),
       });
     }
     case 'getCourseSetup': {

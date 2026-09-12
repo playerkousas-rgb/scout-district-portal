@@ -5,6 +5,18 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.18.0 — 🔑 6.2.1 對接：靠班 GS 網址（fileId）＋區系統密匙（opsKey）對班、批核</h3>
+        <ul>
+          <li>🔑 <b>唔使再逐班搵／存公開課程ID</b>：CL 交嚟班 GS 網址 → 後台自動抽 <code>fileId</code> → 用 <code>opsKey</code>＋<code>fileId</code> 對班（白名單 action：<code>getCourseProfile／getCourseSummary／listRegs／listBudgetVersions／setPaymentCheck／setCourseRefund／approveBudgetVersion</code>）；舊路 <code>opsKey</code>＋<code>publicCourseId</code> 照用得，兩條路並存</li>
+          <li>✔ <b>「區會批准」tick 自動化</b>：開唔到班 Sheet 嘅新制 hub 班，批准會經 <code>setParamLabel</code>（<code>opsKey</code>＋<code>fileId</code>）直接寫入——唔使再人手開 GS tick</li>
+          <li>🩺 <b>能力檢查</b>：接駁時 <code>GET /exec</code> 確認 <code>hubVersion ≥ 6.2.1</code> 先行 fileId 路；舊後端唔識 fileId 會自動退回逐班 <code>apiKey</code>（零影響）</li>
+          <li>🔍 <b>班列表配對</b>：新 action <code>listHubCourses</code>（公開 <code>listCourses</code> 攞班名＋公開課程ID）；「🔗 連結」分頁一撳「🔍 由班名配對」自動填公開課程ID（成員系統公開報名連結照舊用佢，冇變）</li>
+          <li>📝 <b>報名表全欄轉發</b>（<code>submitCourseReg</code>）：<code>scoutId／scoutPosition／reason／consentParent＋gName/gRelation/gEmail/gPhone／consentLeader＋leaderName/leaderTitle/leaderEmail／payMethod/payer/payAccount／receiptDataUrl／formDataUrl／needReceipt／remark</code> 全部送（舊欄名照送，兩邊後端都收到，唔再靜默丟失）；截圖 <code>data:URL</code> 由訓練班系統自動存 Drive，成員系統唔使自己上載</li>
+          <li>⚙️ Config 加 <code>COURSE_HUB_URL</code>（新制 hub /exec）＋<code>COURSE_OPS_KEY</code>（區系統密匙，喺訓練班系統「設定」分頁攞）。測試：<code>node scripts/test-course-621-gs.js</code>（11 項）＋全套全綠</li>
+          <li>⚠️ 部署：換 <code>Code.gs</code>（v4.18.0）→ <code>setupSheets()</code>（補 CourseLinks <code>publicCourseId</code> 欄＋Config 兩列）→ 重新部署；Config 填 <code>COURSE_HUB_URL</code>＋<code>COURSE_OPS_KEY</code></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.17.0 — ⭐ 訓練班新版流程：訓練班系統先行，區會話事批核＋出通告＋收款核對</h3>
         <ul>
           <li>🔄 <b>流程倒轉晒</b>：CL 喺訓練班系統（course repo）開班（即刻起真 GS）＋填晒開班文件 → 交「GS＋SCRIPT 網址」→ 區管理系統接手批核。<b>「🆕 新制直入」分頁已改造成「⭐ 新版流程」指揮台</b>（舊直入版收埋做後備 tab，開班登記舊制原封不動）</li>
