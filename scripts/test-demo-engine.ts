@@ -139,6 +139,15 @@ check('借場：approve 出入場密碼；公開申請入 pending inbox', () => 
   const inbox = demoCall('getPendingInbox', { token: T.adc }, 'GET');
   assert.ok(inbox.data.venue.some((v: any) => v.id === sub.data.id));
 });
+check('借場 Phase 1：確認（唔設鎖）設為 approved，但不產生密碼', () => {
+  const sub = demoCall('submitVenueRequest', { venueId: 'v-02', purpose: 'Phase 1 測試', startDate: '2026-12-02', name: '確認測試人', phone: '9xxx', troop: '60' }, 'POST');
+  assert.ok(sub.ok && sub.data.id);
+  const confirmed = demoCall('confirmVenueBooking', { token: T.adc, id: sub.data.id }, 'POST');
+  assert.ok(confirmed.ok && confirmed.data.saved);
+  const booking = demoCall('getVenueBookings', { token: T.adc }, 'GET').data.find((v: any) => v.id === sub.data.id);
+  assert.strictEqual(booking.status, 'approved');
+  assert.ok(!booking.passcode, 'Phase 1 確認不得產生電子鎖／電郵密碼');
+});
 check('借物資：批次狀態一次過更新兩筆（同一 batchRef）', () => {
   const r = demoCall('setStockBatchStatus', { token: T.adc, batchRef: 'B-26090201', status: 'approved' }, 'POST');
   assert.ok(r.ok && r.data.count === 2);

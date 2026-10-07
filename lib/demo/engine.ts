@@ -477,7 +477,9 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const r = requireUser(token, 2); if (isErr(r)) return r;
       const row = d.venueBookings.find(x => x.id === payload.id);
       if (!row) return fail('找不到申請');
-      row.status = 'confirmed'; row.reviewer = (r as DemoUser).displayName; row.reviewedAt = nowIso();
+      // 同 Apps Script 一致：Phase 1「確認（唔設鎖）」仍係 approved，
+      // 只係不寫電子鎖／不寄密碼電郵。
+      row.status = 'approved'; row.reviewer = (r as DemoUser).displayName; row.reviewedAt = nowIso();
       persistDb(); return ok({ saved: true });
     }
     case 'updateVenueBooking': {

@@ -2,7 +2,13 @@
 
 **申請人喺成員系統 (member-portal) 填表（唔使跳去 Teamup）→ GS 寫入 VenueBookings 並喺 Teamup「申請中」建事件 → 管理系統審批轉色。**
 
-而家先測呢一步。TTLock 一鍵密碼 + 電郵申請人（`approveVenueBooking`）留低稍後再接。
+## Phase 1（現行）
+
+在 `/venue-regs` 請按 **「✅ 確認（唔設鎖）」**：只改狀態和把 Teamup 轉去「確認借用」，**不寫電子鎖、不寄密碼電郵**。即使是 DDC 或以上亦可使用這個安全按鈕。
+
+**不要按「⚡ 一鍵批准（Phase 2）」。** 電子鎖未完成真機驗收時，該動作可能在建碼失敗後以後備密碼繼續處理，容易令申請人誤以為能開門。
+
+完整 Phase 1 開通資料行、Config 選填項及 Phase 2 驗收次序見 [`phase-1-launch.md`](phase-1-launch.md)。
 
 全部由同一個 Apps Script 後台（`gs/Code.gs` v4.0 統一後台：管理系統 + 成員系統共用）完成，
 唔需要另起 Vercel service。
@@ -15,7 +21,7 @@
       │  → Teamup「申請中」子日曆建【申請】事件（寫入 teamupEventId）
       ▼
 區職員登入管理系統 → 場地借用審批 (/venue-regs)
-      │  點「✅ 批准」→ 前端 call confirmVenueBooking
+      │  點「✅ 確認（唔設鎖）」→ 前端 call confirmVenueBooking
       ▼
 後台 confirmVenueBooking_（status=approved）：
    Teamup 轉色：有 teamupEventId → 搬去「確認借用」子日曆；冇就新建

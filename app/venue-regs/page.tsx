@@ -47,7 +47,7 @@ export default function VenueRegsPage() {
 
   async function oneClickApprove(b: VenueBooking) {
     if (!session) return;
-    if (!confirm('一鍵批准會嘗試寫電子鎖密碼並電郵申請人。鎖未接通會改用電話頭4位／隨機密碼，其餘流程照跑。確定？')) return;
+    if (!confirm('⚠️ 此功能只供 Phase 2（電子鎖已完整驗收）使用：會嘗試寫入電子鎖密碼並電郵申請人。Phase 1 請按「✅ 確認（唔設鎖）」；切勿用此掣。仍要繼續？')) return;
     setBusy(true); setError(''); setMsg('');
     const r = await api.approveVenueBooking(session.token, b.id);
     setBusy(false);
@@ -68,7 +68,7 @@ export default function VenueRegsPage() {
     setBusy(false);
     if (r.ok) {
       setMsg(
-        '已確認 ✓ Teamup 已轉去「確認借用」' +
+        '已確認 ✓ 未設定電子鎖、未寄密碼電郵；Teamup 已轉去「確認借用」' +
         (r.data?.teamupEventId ? `（事件 ${r.data.teamupEventId}）` : '') +
         (r.data?.warn ? `（提示：${r.data.warn}）` : '')
       );
@@ -188,9 +188,10 @@ export default function VenueRegsPage() {
       <h1 className="page-title">🏛 場地借用審批</h1>
       <p className="page-sub">
         申請人於 member-portal 填表 → VenueBookings + Teamup「申請中」。
+        現行 Phase 1 請一律用「✅ 確認（唔設鎖）」：只確認借用及轉 Teamup，唔會寫鎖、唔會寄密碼電郵。
         {hq
-          ? ' DDC 或以上可用「一鍵批准」（試寫鎖＋電郵，鎖未通會自動改密碼）、職員代借、編輯、拒絕。'
-          : ' 你可以確認（唔設鎖）、編輯、拒絕；一鍵寫鎖批准需 DDC 或以上。'}
+          ? ' 「⚡ 一鍵批准（Phase 2）」只限電子鎖及電郵已完整驗收後使用。'
+          : ' 你可確認、編輯、拒絕；一鍵寫鎖批准只開放予 DDC 或以上。'}
       </p>
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}
@@ -199,7 +200,7 @@ export default function VenueRegsPage() {
         <div className="section-head">
           <div>
             <h3>申請審批 <small>({bookings.length} · 待批 {pendingN})</small></h3>
-            <p>一鍵批准＝狀態 + Teamup + 嘗試 Sciener 密碼 + 電郵。鎖未接通唔會卡住整單。</p>
+            <p><b>Phase 1：</b>按「✅ 確認（唔設鎖）」＝狀態 + Teamup 轉色，唔寫鎖、唔寄密碼。<br /><b>Phase 2：</b>電子鎖已驗收後，先可用一鍵批准（寫鎖 + Teamup + 電郵）。</p>
           </div>
           <button className="btn-sm" onClick={() => setShowBorrow(v => !v)}>{showBorrow ? '收起借用表' : '＋ 借用'}</button>
         </div>
@@ -237,11 +238,16 @@ export default function VenueRegsPage() {
               )}
               <span className={`state ${b.status === 'approved' ? 'on' : b.status === 'pending' ? '' : 'off'}`}>{STATUS[b.status || 'pending'] || b.status}</span>
               <div className="user-actions" style={{ display: 'inline-flex', gap: 6, flexWrap: 'wrap' }}>
-                {String(b.status || 'pending') === 'pending' && hq && (
-                  <button className="mini-btn" disabled={busy} onClick={() => oneClickApprove(b)}>⚡ 一鍵批准</button>
-                )}
-                {String(b.status || 'pending') === 'pending' && !hq && (
+                {String(b.status || 'pending') === 'pending' && (
                   <button className="mini-btn" disabled={busy} onClick={() => confirmOnly(b)}>✅ 確認（唔設鎖）</button>
+                )}
+                {String(b.status || 'pending') === 'pending' && hq && (
+                  <button
+                    className="mini-btn"
+                    disabled={busy}
+                    title="只供 Phase 2：電子鎖及密碼電郵已完成驗收後使用"
+                    onClick={() => oneClickApprove(b)}
+                  >⚡ 一鍵批准（Phase 2）</button>
                 )}
                 {String(b.status || 'pending') === 'pending' && (
                   <button className="mini-btn" disabled={busy} onClick={() => startEdit(b)}>✎ 編輯</button>

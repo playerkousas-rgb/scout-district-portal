@@ -5,6 +5,8 @@
 
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
+> **目前啟動方式（Phase 1）**：只需在 `Venues` 新增已啟用的 `skw-hq` 場地，審批一律按「✅ 確認（唔設鎖）」。此動作會轉 Teamup，但不寫鎖、不寄密碼。詳細資料行、Items、Config 及 Phase 2 前置條件見 [`docs/phase-1-launch.md`](docs/phase-1-launch.md)。
+
 ---
 
 ## 🏛 借場系統 — 起動步驟（最常要做，照住做就得）
@@ -60,8 +62,10 @@
 
 ### 第 6 步：端到端測試
 1. 用申請人身份喺 member-portal 交表 → 後台「VenueBookings」出現 **pending**。
-2. 登入管理平台 → `/venue-regs` → 點「✅ 批准」。
-3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
+2. 登入管理平台 → `/venue-regs` → 點「✅ 確認（唔設鎖）」。
+3. 睇結果：Teamup 出現「確認借用」事件；**不應**顯示或寄出入場密碼。
+
+> 電子鎖真機驗收完成、Apps Script 已發布新版本後，才按 `docs/phase-1-launch.md` 的 Phase 2 流程測試「⚡ 一鍵批准（Phase 2）」。
 
 ### 驗證新版已上線
 - 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.10.0"` 即代表用緊最新後台。
