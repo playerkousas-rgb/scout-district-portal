@@ -2,6 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import DistrictShell from '@/components/DistrictShell';
+import { Analytics } from '@vercel/analytics/next';
 
 export const metadata: Metadata = {
   title: '童軍區管理平台',
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Suspense fallback={<div className="center"><div className="spinner" /></div>}>
           <DistrictShell>{children}</DistrictShell>
         </Suspense>
+        <Analytics />
       </body>
     </html>
   );
