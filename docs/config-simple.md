@@ -19,7 +19,7 @@
 | `TEAMUP_PENDING_SUBCAL_ID` | Teamup「申請中」子日曆 ID |
 | `TEAMUP_APPROVED_SUBCAL_ID` | Teamup「已批准」子日曆 ID |
 
-如未接電子鎖，`ttlockDisabled` 填 `TRUE`；系統會用模擬密碼，借場其他流程仍可測試。接電子鎖時才需要填 `SCIENER_CLIENT_ID`、`SCIENER_CLIENT_SECRET`、`SCIENER_USERNAME`、`SCIENER_PASSWORD`、`SCIENER_LOCK_ID`。
+未接電子鎖時，維持 Phase 1 的「✅ 確認（唔設鎖）」即可；不用填任何鎖設定。`ttlockDisabled=TRUE` 只代表模擬鎖模式，不能用於日常「⚡ 一鍵批准（Phase 2）」。接電子鎖時才填 `SCIENER_CLIENT_ID`、`SCIENER_CLIENT_SECRET`、`SCIENER_USERNAME`、`SCIENER_PASSWORD`、`SCIENER_LOCK_ID`，並確認 `SCIENER_API_BASE=https://api.sciener.com`、`ttlockDisabled` 留空。建議另加 `PWD_MODE=random`，令每宗自動產生不同的 6 位數密碼。
 
 ## 電郵：只需理解這三個名稱
 

@@ -54,7 +54,7 @@
 ## 第 4 步：驗證（照 docs/venue-booking-flow.md）
 1. `Venues` 表加一個場地。
 2. member-portal 填表 → 後台 `submitVenueRequest` → `VenueBookings` 出現 pending。
-3. 審批頁批准 → Teamup 出現「確認借用」事件（或原有事件轉色）、申請人收到密碼電郵。
+3. Phase 1 按「✅ 確認（唔設鎖）」→ Teamup 出現「確認借用」事件（或原有事件轉色），不寄密碼；完成真機驗收後才用一鍵批准測試 TTLock 密碼和電郵。
 4. 唔通就查 `docs/keys-checklist.md` 逐條 Key 驗證。
 
 ---
@@ -62,7 +62,7 @@
 ## 常見問題
 | 現象 | 原因 | 處理 |
 |---|---|---|
-| 批准後冇密碼顯示 | TTLock 建碼失敗（金鑰/Lock ID 錯、冇網關） | 檢查 `ttlock*`；先設 `ttlockDisabled=TRUE` 聯調 |
+| 一鍵批准保持 pending | TTLock 建碼失敗（金鑰／Lock ID 錯、冇 Gateway、模擬模式） | 檢查 `SCIENER_*`、Lock ID、Gateway 及 `ttlockDisabled` 必須留空；不要寄出模擬密碼 |
 | Teamup 冇事件 | `TEAMUP_*` 金鑰錯 / 子日曆 ID 錯 | 用 `get-ids.js` 核對 |
-| 申請人收唔到電郵 | 申請冇填電郵 / GAS 帳號 MailApp 問題 | 電郵選填，冇填就唔會寄 |
+| 一鍵批准提示未有電郵 | 申請沒有電郵 | 先在審批頁補回有效電郵；為免寫鎖後無法交付密碼，申請會保持 pending |
 | setup 之後資料冇咗？ | 你行咗 v3.0 舊 code | v4.0 setup 唔清空；確認 Apps Script 已覆蓋為 v4.0 |

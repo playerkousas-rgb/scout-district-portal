@@ -335,13 +335,13 @@ member-portal 填表
         │
         ▼
 區職員 /venue-regs
-   DDC+ → approveVenueBooking（一鍵：鎖密碼 + Teamup 轉色 + 電郵；鎖失敗 fallback 密碼）
+   DDC+ → approveVenueBooking（一鍵：真鎖建碼成功後才 Teamup 轉色 + 電郵；失敗保持 pending）
    其他有權限 → confirmVenueBooking（狀態 + Teamup，唔掂鎖）
    拒絕 → rejectVenueBooking
    編輯內容 → updateVenueBooking（而家只改 Sheet，未同步 Teamup 時段）
 ```
 
-**已接前端（4.2.3）**：DDC+「⚡ 一鍵批准」行 `approveVenueBooking`。鎖未通唔擋批核。
+**已接前端（4.2.3）**：DDC+「⚡ 一鍵批准」行 `approveVenueBooking`。鎖未通、Gateway 離線或無申請人電郵時會安全地保持 pending。
 
 ### 提交欄位
 

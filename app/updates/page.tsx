@@ -274,7 +274,7 @@ export default function UpdatesPage() {
         <h3>v4.2.3 — 補建唔洗資料 + DDC 一鍵批場 + 主控台走馬燈</h3>
         <ul>
           <li><code>setupSheets()</code> 只補缺失表／欄／Config 列，唔清空、唔覆寫你已填嘅格</li>
-          <li>DDC 或以上：一鍵批准（試寫鎖＋電郵，失敗自動改密碼）、職員代借、編輯、拒絕</li>
+          <li>DDC 或以上：一鍵批准（真鎖建碼成功才轉 Teamup＋寄電郵；失敗保持 pending）、職員代借、編輯、拒絕</li>
           <li>有權限登入後，主控台 HERO 有好明顯嘅待批走馬燈</li>
         </ul>
       </div>

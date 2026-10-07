@@ -39,11 +39,12 @@
 | Teamup | `TEAMUP_CALENDAR_KEY` | 分享金鑰，形如 `ks...`（唔係 `c/` 開頭） |
 | Teamup | `TEAMUP_APPROVED_SUBCAL_ID` | 「確認借用區總部」子日曆 ID |
 | Teamup | `TEAMUP_REJECTED_SUBCAL_ID` | 選填（拒絕子日曆） |
-| TTLock | `ttlockClientId` / `ttlockClientSecret` | 通通鎖開發者應用 |
-| TTLock | `ttlockUsername` / `ttlockPassword` | TTLock App 登入帳密 |
-| TTLock | `ttlockLockId` | 大門鎖 Lock ID |
-| TTLock | `ttlockApiBase` | 預設 `https://api.ttlock.com`（eu/cn 先改） |
-| TTLock | `ttlockDisabled` | **未就緒先填 `TRUE`**（改用隨機密碼，其餘流程照跑） |
+| TTLock / Sciener | `SCIENER_CLIENT_ID` / `SCIENER_CLIENT_SECRET` | 通通鎖開放平台 App ID / Secret |
+| TTLock / Sciener | `SCIENER_USERNAME` / `SCIENER_PASSWORD` | 有權管理大門鎖的 TTLock 帳戶 |
+| TTLock / Sciener | `SCIENER_LOCK_ID` | 筲箕灣區總部唯一大門鎖的數字 Lock ID（全區共用 Config） |
+| TTLock / Sciener | `SCIENER_API_BASE` | `https://api.sciener.com` |
+| TTLock / Sciener | `PWD_MODE` | 建議 `random`，每宗產生不同 6 位數密碼 |
+| TTLock / Sciener | `ttlockDisabled` | 日常一鍵批准必須留空；`TRUE` 是模擬模式，系統會拒絕寄發假密碼 |
 | 電郵 | `notifyFrom` | 寄件人名稱（預設用區名） |
 
 > 唔記得 Key 喺邊度攞 → 睇 [`docs/keys-checklist.md`](docs/keys-checklist.md) 逐條倒返出嚟＋驗證。
@@ -60,7 +61,7 @@
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
   `venueId, name, phone, email, troop, position, purpose, startDate, endDate, agreeRules, teamupEventId`。
-- ⚠️ `email` 選填，但**冇填就收唔到批准密碼電郵**。
+- ⚠️ 一鍵批准（Phase 2）時 `email` 必須有效；沒有電郵會保持 pending，以免成功寫鎖後無法交付密碼。
 
 ### 第 6 步：端到端測試
 1. 用申請人身份喺 member-portal 交表 → 後台「VenueBookings」出現 **pending**。

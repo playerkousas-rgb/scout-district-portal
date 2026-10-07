@@ -1223,7 +1223,10 @@ function confirmVenueBooking_(token, id) {
  * 完整批核（一條龍）：TTLock 限時密碼 + Teamup 轉色 + 電郵。
  * - 已有 pending 事件（teamupEventId）→ 搬去「確認借用」子日曆
  * - 冇 → 喺「確認借用」子日曆新建事件
- * TTLock 未設定 / 停用 → 自動改用隨機密碼，其餘流程照跑。
+ *
+ * 安全原則：必須先成功寫入真實電子鎖，才可批准及寄出密碼。
+ * 鎖停用、設定不完整、網關離線或 API 建碼失敗時，申請會保持 pending，
+ * 絕不以本地／隨機密碼冒充可開門密碼。
  */
 function approveVenueBooking_(token, id) {
   var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
@@ -1232,27 +1235,32 @@ function approveVenueBooking_(token, id) {
   var booking = readSheet_(SHEET.VENUE_REQ).filter(function (x) { return String(x.id) === String(id); })[0];
   if (!booking) return err('找不到申請');
   if (String(booking.status).toLowerCase() === 'approved') return err('此申請已批核');
-
-  // 1) TTLock 限時密碼（提前/延後 15 分鐘；撞碼自動重試；失敗→隨機密碼照跑）
-  var passcode = String(booking.passcode || '').trim();
-  var warn = '';
-  if (!passcode) {
-    try {
-      var venueLock = '';
-      try {
-        var vrow = readSheet_(SHEET.VENUES).filter(function (v) {
-          return String(v.venueId).trim() === String(booking.venueId || '').trim();
-        })[0];
-        venueLock = vrow ? String(vrow.scienerLockId || '').trim() : '';
-      } catch (x) { venueLock = ''; }
-      var pc = createTtlockPasscode_(booking.phone || '0000', booking.startDate, booking.endDate || booking.startDate, booking.name || '申請人', venueLock);
-      passcode = pc.passcode;
-    } catch (e) {
-      console.error('TTLock 建碼失敗，改用隨機密碼：' + e.message);
-      passcode = genPasscode_();
-      warn = 'TTLock 建碼失敗，已改用隨機密碼';
-    }
+  if (!String(booking.email || '').trim()) {
+    return err('申請人未有電郵；為免已寫鎖但無法通知，申請保持 pending。請先補回電郵後再一鍵批准。');
   }
+
+  // 1) 寫入 TTLock 限時密碼（借用時段前後各 15 分鐘）。
+  // 只要失敗，就不可轉 Teamup／寄信／改 approved。
+  var venueLock = '';
+  try {
+    var vrow = readSheet_(SHEET.VENUES).filter(function (v) {
+      return String(v.venueId).trim() === String(booking.venueId || '').trim();
+    })[0];
+    venueLock = vrow ? String(vrow.scienerLockId || '').trim() : '';
+  } catch (x) { venueLock = ''; }
+
+  var pc;
+  try {
+    pc = createTtlockPasscode_(booking.phone || '0000', booking.startDate, booking.endDate || booking.startDate, booking.name || '申請人', venueLock);
+  } catch (e) {
+    console.error('TTLock 建碼失敗；申請保持 pending：' + e.message);
+    return err('未能寫入電子鎖，申請仍為 pending，未轉 Teamup、未寄密碼：' + String(e.message || e));
+  }
+  if (!pc || !pc.passcode || pc.simulated) {
+    return err('電子鎖目前未啟用或只在模擬模式；申請仍為 pending，未轉 Teamup、未寄密碼。請移除 Config 的 ttlockDisabled=TRUE 並完成真機連線後再試。');
+  }
+  var passcode = String(pc.passcode).trim();
+  var warn = '';
 
   // 2) Teamup 轉色
   var tup = applyTeamupApproved_(booking, '\n🔑 密碼：' + passcode);
@@ -5694,7 +5702,7 @@ function blueprint_() {
       ['ttlockPassword', '', '（舊名）等同 SCIENER_PASSWORD'],
       ['ttlockLockId', '', '（舊名）等同 SCIENER_LOCK_ID'],
       ['ttlockApiBase', '', '（舊名）等同 SCIENER_API_BASE'],
-      ['ttlockDisabled', '', 'TRUE = 跳過寫鎖，改用模擬密碼'],
+      ['ttlockDisabled', '', 'TRUE = 模擬鎖模式；一鍵批准會保持 pending，日常自動批准必須留空'],
       ['notifyFrom', '', '寄件人顯示名稱（不是 Gmail 地址；留空用區名）'],
       // v4.17.0 訓練班新版流程：CL 電郵 alias＋開班指引（CourseFactory）
       ['COURSE_EMAIL_FROM', '', '（選填）通知寄件 alias；留空=用部署帳戶地址＋ReplyTo 班信箱（CL 回覆去班信箱，唔入機房 inbox）'],
