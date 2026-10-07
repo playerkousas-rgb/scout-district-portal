@@ -43,7 +43,8 @@
 | TTLock / Sciener | `SCIENER_USERNAME` / `SCIENER_PASSWORD` | 有權管理大門鎖的 TTLock 帳戶 |
 | TTLock / Sciener | `SCIENER_LOCK_ID` | 筲箕灣區總部唯一大門鎖的數字 Lock ID（全區共用 Config） |
 | TTLock / Sciener | `SCIENER_API_BASE` | `https://api.sciener.com` |
-| TTLock / Sciener | `PWD_MODE` | 建議 `random`，每宗產生不同 6 位數密碼 |
+| TTLock / Sciener | `SCIENER_SLOT_NAMES` | 可重用的預置「限時N」密碼格名稱；系統只改已過期白名單格 |
+| TTLock / Sciener | `PWD_MODE` | `random`，每宗產生不同 6 位數密碼 |
 | TTLock / Sciener | `ttlockDisabled` | 日常一鍵批准必須留空；`TRUE` 是模擬模式，系統會拒絕寄發假密碼 |
 | 電郵 | `notifyFrom` | 寄件人名稱（預設用區名） |
 

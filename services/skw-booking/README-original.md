@@ -200,7 +200,7 @@ node get-ids.js
 | 環境變數名稱 | 範例值 | 說明 |
 | :--- | :--- | :--- |
 | `SECRET_TOKEN` | `skw_secure_token_1234` | 自訂一組安全的密鑰，防止外部惡意點擊審批連結 |
-| `TEAMUP_API_KEY` | `4032acf1e6d917809aeb334a16dd0bca82297e8f0f65cd6ec32e0d92bc37bbd2` | 你的 Teamup API Key |
+| `TEAMUP_API_KEY` | （由 Teamup 建立；不要寫入 source code） | Teamup API Key |
 | `TEAMUP_CALENDAR_ID` | `ks123456789abcdef` | **(重要)** 你的 Teamup 分享日曆 ID (非 c/ 開頭) |
 | `TEAMUP_PENDING_SUB_ID` | `12138999` | 待審批子日曆 ID (藍色) |
 | `TEAMUP_APPROVED_SUB_ID` | `12139000` | 確認借用子日曆 ID (紅色) |

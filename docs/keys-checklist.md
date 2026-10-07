@@ -16,7 +16,7 @@
 ## A. Teamup（共 3 條）
 | # | Config 欄位（v4.0） | 舊欄名（仍兼容） | 係咩 | 去邊度攞 | 點驗證 |
 |---|---|---|---|---|---|
-| A1 | `TEAMUP_API_KEY` | `teamupApiKey` | Teamup API Token | `get-ids.js` 預設值：`4032acf1e6d917809aeb334a16dd0bca82297e8f0f65cd6ec32e0d92bc37bbd2`（你話冇改過，可直接重用） | 見下面「驗證 Teamup」 |
+| A1 | `TEAMUP_API_KEY` | `teamupApiKey` | Teamup API Token | Teamup 管理帳戶或受限 Config | 見下面「驗證 Teamup」 |
 | A2 | `TEAMUP_CALENDAR_KEY` | `teamupCalendarId` | 日曆金鑰 `ks...` | Vercel env `TEAMUP_CALENDAR_ID` | 見下面「驗證 Teamup」 |
 | A3 | `TEAMUP_APPROVED_SUBCAL_ID` | `teamupApprovedSubId` | 「確認借用區總部」子日曆 ID | Vercel env `TEAMUP_APPROVED_SUB_ID` | 用 `get-ids.js` 列出子日曆核對 |
 
@@ -32,22 +32,23 @@ node get-ids.js
 
 ---
 
-## B. 通通鎖 TTLock（共 5 條）
-| # | Config 欄位 | 係咩 | 去邊度攞 | 點驗證 |
-|---|---|---|---|---|
-| B1 | `ttlockClientId` | 開發者 App ID | Vercel env `TTLOCK_CLIENT_ID` | 見「驗證 TTLock」 |
-| B2 | `ttlockClientSecret` | 開發者 App Secret | Vercel env `TTLOCK_CLIENT_SECRET` | 見「驗證 TTLock」 |
-| B3 | `ttlockUsername` | TTLock 登入帳號（lock2） | Vercel env `TTLOCK_USERNAME` | 見「驗證 TTLock」 |
-| B4 | `ttlockPassword` | TTLock 登入密碼 | Vercel env `TTLOCK_PASSWORD` | 見「驗證 TTLock」 |
-| B5 | `ttlockLockId` | 大門鎖 Lock ID | Vercel env `TTLOCK_LOCK_ID`（或重跑 `get-lock-id.js`） | 見「驗證 TTLock」 |
-| — | `ttlockApiBase` | 區域 server | 唔填就用預設 `https://api.ttlock.com` | — |
+## B. 通通鎖 TTLock（共用後台 Config）
+| # | Config 欄位 | 係咩 | 點驗證 |
+|---|---|---|---|
+| B1 | `SCIENER_CLIENT_ID` | 開放平台 App ID | 見「驗證 TTLock」 |
+| B2 | `SCIENER_CLIENT_SECRET` | 同一 App 的 Secret | 見「驗證 TTLock」 |
+| B3 | `SCIENER_USERNAME` | TTLock 登入帳號（lock2 / App） | 見「驗證 TTLock」 |
+| B4 | `SCIENER_PASSWORD` | TTLock 帳戶密碼 | 見「驗證 TTLock」 |
+| B5 | `SCIENER_LOCK_ID` | 大門鎖 Lock ID | 用「讀取鎖列表」或 `get-lock-id.js` 核對 |
+| B6 | `SCIENER_API_BASE` | 固定 `https://api.sciener.com` | 不要填 `open.sciener.com` 網站 |
+| B7 | `SCIENER_SLOT_NAMES` | 可重用的預置「限時N」密碼格名稱 | 只會重用清單中已過期的格 |
 
 ### 驗證 TTLock
 ```bash
 cd services/skw-booking
 node get-lock-id.js
 # 輸入 B1~B4 → 若登入成功會列出你嘅鎖 + Lock ID + 有冇網關
-# 對返 B5 係咪你要嗰個鎖，而且「已連接網關」= 是（先可遠端建密碼）
+# 對返 B5 係咪你要嗰個鎖，而且「已連接網關」= 是（先可遠端修改既有密碼格）
 ```
 
 > ⚠️ TTLock 區域：`get-ids.js` / `get-lock-id.js` 寫死 `https://api.ttlock.com`（global server）。
@@ -67,9 +68,9 @@ node get-lock-id.js
 
 ## 填咗點知 Work？
 1. 後台 Apps Script 貼上新 `gs/Code.gs`（v4.0）→ 執行一次 `setupSheets()`（補建唔清空）。
-2. 喺 **Config** 頁填晒 A1–A3、B1–B5。
+2. 喺 **Config** 頁填 Teamup A1–A3 及 TTLock B1–B7，並保持 `ttlockDisabled` 空白。
 3. `Venues` 表加一個場地。
-4. 成員系統申請 → 審批頁「✅ 批准」（`approveVenueBooking`）→ 如果 Teamup 出現「確認借用」事件、申請人收到密碼電郵，就代表全部 Key 啱。
+4. 用已過期的白名單「限時N」格做測試申請 → 審批頁「⚡ 一鍵批准（Phase 2）」；確認只有該已過期格被修改、Teamup 轉色、申請人收到密碼電郵。
 
 ## 最緊要：唔好喺 Chat 貼 Key
 呢啲係你系統秘密，唔好貼喺對話度。自己喺 Config 頁填就得，程式已經自動讀取。

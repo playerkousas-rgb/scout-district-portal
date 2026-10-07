@@ -1275,6 +1275,7 @@ function approveVenueBooking_(token, id) {
   if (idx > 0) {
     setCellByHeader_(sh, idx, 'status', 'approved');
     setCellByHeader_(sh, idx, 'passcode', passcode);
+    if (pc.pwdRef) setCellByHeader_(sh, idx, 'pwdRef', pc.pwdRef);
     setCellByHeader_(sh, idx, 'reviewer', t.email);
     setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
     if (booking.teamupEventId) setCellByHeader_(sh, idx, 'teamupEventId', booking.teamupEventId);
@@ -4676,33 +4677,123 @@ function getLockList_(token) {
   }
 }
 
-/** 建立限時密碼；ttlockDisabled=TRUE 時返回模擬密碼，其餘流程照跑 */
+// 筲箕灣區既有的「限時N」密碼格白名單。這些格由管理員先在 TTLock App 配對建立；
+// 日常借場只可重用已失效的格，絕不新增、刪除或覆寫其他密碼。
+var SCIENER_SLOT_NAMES_DEFAULT = '限時2,限時3,限時4,限時5,限時6,限時7,限時12,限時13,限時14,限時15,限時16,限時17,限時18,限時22,限時24,限時25,限時26,限時27,限時28,限時29,限時30';
+function ttlockSlotNames_() {
+  var raw = String(getConfigValue_('SCIENER_SLOT_NAMES') || SCIENER_SLOT_NAMES_DEFAULT).trim();
+  var seen = {}, names = [];
+  splitList_(raw).forEach(function (v) {
+    var name = String(v).trim();
+    if (name && !seen[name]) { seen[name] = true; names.push(name); }
+  });
+  return names;
+}
+
+/** 讀取鎖中所有已建立的密碼格；只在後端使用，絕不可把其他密碼值回傳給瀏覽器。 */
+function listTtlockPasscodes_(token, cfg, lockId) {
+  var res = UrlFetchApp.fetch(ttlockBase_() + '/v3/lock/listKeyboardPwd', {
+    method: 'post',
+    payload: {
+      clientId: cfg.clientId, accessToken: token, lockId: String(lockId),
+      pageNo: '1', pageSize: '100', date: String(Date.now())
+    },
+    muteHttpExceptions: true,
+  });
+  var data = {};
+  try { data = JSON.parse(res.getContentText()); } catch (e) { data = {}; }
+  if (!data.list || !Array.isArray(data.list)) {
+    throw new Error('讀取 TTLock 密碼格失敗：' + (data.errmsg || res.getContentText()));
+  }
+  return data.list.map(function (item) {
+    return {
+      id: String(item.keyboardPwdId || '').trim(),
+      name: String(item.keyboardPwdName || '').trim(),
+      passcode: String(item.keyboardPwd || '').trim(),
+      startAt: Number(item.startDate) || 0,
+      endAt: Number(item.endDate) || 0,
+    };
+  }).filter(function (item) { return !!item.id; });
+}
+
+/** 只從白名單中揀已真正失效的格；有效中、未來排期、永久碼及未知名稱一律不可碰。 */
+function findReusableTtlockSlot_(slots, nowMs) {
+  var allowed = {}, names = ttlockSlotNames_();
+  if (!names.length) throw new Error('未設定 SCIENER_SLOT_NAMES，不能判斷哪些既有密碼格可重用');
+  names.forEach(function (name) { allowed[name] = true; });
+  var candidates = (slots || []).filter(function (slot) {
+    return allowed[slot.name] && slot.endAt > 0 && slot.endAt <= nowMs;
+  }).sort(function (a, b) { return a.endAt - b.endAt || Number(a.id) - Number(b.id); });
+  if (!candidates.length) {
+    throw new Error('沒有已失效的可重用 TTLock 密碼格（只會使用：' + names.join('、') + '）。所有白名單格仍在生效或已有未來排期；申請請保持 pending。');
+  }
+  return candidates[0];
+}
+
+/** 隨機產生未出現在鎖內現有清單或 VenueBookings 的六位數密碼。 */
+function uniqueTtlockPasscode_(slots) {
+  var used = {};
+  (slots || []).forEach(function (slot) { if (slot.passcode) used[slot.passcode] = true; });
+  readSheet_(SHEET.VENUE_REQ).forEach(function (r) { if (r.passcode) used[String(r.passcode).trim()] = true; });
+  for (var i = 0; i < 300; i++) {
+    var code = String(Math.floor(100000 + Math.random() * 900000));
+    if (!used[code]) return code;
+  }
+  throw new Error('未能產生不與現有密碼重複的六位數密碼');
+}
+
+/**
+ * 將一個既有密碼格經 Gateway 改為新的限時密碼。
+ * 不使用 keyboardPwd/add：本區的鎖必須先由 TTLock App 建立並配對可修改的格。
+ */
+function changeTtlockSlot_(token, cfg, lockId, slot, passcode, start, end) {
+  var res = UrlFetchApp.fetch(ttlockBase_() + '/v3/keyboardPwd/change', {
+    method: 'post',
+    payload: {
+      clientId: cfg.clientId, accessToken: token, lockId: String(lockId),
+      keyboardPwdId: String(slot.id),
+      // 保留「限時N」名稱，白名單下次仍可精確找到同一格。
+      keyboardPwdName: slot.name,
+      newKeyboardPwd: passcode,
+      startDate: String(start.getTime()), endDate: String(end.getTime()),
+      changeType: '2', date: String(Date.now())
+    },
+    muteHttpExceptions: true,
+  });
+  var data = {};
+  try { data = JSON.parse(res.getContentText()); } catch (e) { data = {}; }
+  if (data.errcode === 0) return;
+  throw new Error('修改 TTLock 密碼格「' + slot.name + '」失敗：' + (data.errmsg || res.getContentText()));
+}
+
+/**
+ * 從既有「限時N」密碼池重用已失效密碼格。
+ * 以 Script Lock 防止兩名職員同時批准而揀到同一格；沒有空格時會失敗，不會碰未過期密碼。
+ */
 function createTtlockPasscode_(phone, startDate, endDate, name, venueLockId) {
   if (ttlockDisabled_()) return { passcode: buildKeyboardPwd_(phone), simulated: true };
-  var token = ttlockToken_();
-  var c = lockCfg_();
-  var lockId = String(venueLockId || '').trim() || c.lockId;
-  var clientId = c.clientId;
+  var cfg = lockCfg_();
+  var lockId = String(venueLockId || '').trim() || cfg.lockId;
   if (!lockId) throw new Error('未設定 SCIENER_LOCK_ID / ttlockLockId（Config 工作表 key 欄），或喺場地填 Lock ID');
-  var base = ttlockBase_();
   var start = new Date(startDate); start.setMinutes(start.getMinutes() - 15);
   var end = new Date(endDate); end.setMinutes(end.getMinutes() + 15);
-  var passcode = buildKeyboardPwd_(phone);
-  var lastErr = null;
-  for (var attempt = 0; attempt < 8; attempt++) {
-    var payload = {
-      clientId: clientId, accessToken: token, lockId: String(lockId),
-      keyboardPwd: passcode, keyboardPwdName: String(name || '申請人').substring(0, 30),
-      startDate: String(start.getTime()), endDate: String(end.getTime()),
-      addType: '2', date: String(Date.now())
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end.getTime() <= start.getTime()) throw new Error('借用時段無效，未有修改任何 TTLock 密碼格');
+
+  var scriptLock = LockService.getScriptLock();
+  if (!scriptLock.tryLock(15000)) throw new Error('另一宗借場正在配置門鎖密碼，請稍後再試');
+  try {
+    var token = ttlockToken_();
+    var slots = listTtlockPasscodes_(token, cfg, lockId);
+    var slot = findReusableTtlockSlot_(slots, Date.now());
+    var passcode = uniqueTtlockPasscode_(slots);
+    changeTtlockSlot_(token, cfg, lockId, slot, passcode, start, end);
+    return {
+      passcode: passcode, validFrom: start, validTo: end,
+      pwdRef: String(slot.id), slotName: slot.name,
     };
-    var res = UrlFetchApp.fetch(base + '/v3/keyboardPwd/add', { method: 'post', payload: payload, muteHttpExceptions: true });
-    var data; try { data = JSON.parse(res.getContentText()); } catch (e) { data = {}; }
-    if (data.keyboardPwdId || data.errcode === 0) return { passcode: passcode, validFrom: start, validTo: end };
-    lastErr = data;
-    passcode = String(parseInt(passcode, 10) + 1).padStart(String(passcode).length, '0'); // 撞碼 +1 重試
+  } finally {
+    scriptLock.releaseLock();
   }
-  throw new Error('TTLock 建碼多次失敗 ' + (lastErr.errmsg || JSON.stringify(lastErr)));
 }
 
 // ---------- Teamup ----------
@@ -5695,7 +5786,8 @@ function blueprint_() {
       ['SCIENER_PASSWORD', '', '管鎖密碼'],
       ['SCIENER_LOCK_ID', '', '大門 Lock ID（數字；Config 係「一列 key」唔係欄。可用審批頁「讀取鎖列表」）'],
       ['SCIENER_API_BASE', 'https://api.sciener.com', 'API 主機（唔好填 open.sciener.com 網站）'],
-      ['PWD_MODE', 'phone4', 'phone4=電話頭4位；phone4tail=尾4位；random=隨機6位'],
+      ['SCIENER_SLOT_NAMES', SCIENER_SLOT_NAMES_DEFAULT, '可自動重用的既有 TTLock 密碼格名稱（逗號分隔）；只會改已失效的格，絕不新增／刪除／覆寫未過期格'],
+      ['PWD_MODE', 'random', 'random=隨機6位（限時密碼池建議）；phone4=電話頭4位；phone4tail=尾4位'],
       ['ttlockClientId', '', '（舊名）等同 SCIENER_CLIENT_ID'],
       ['ttlockClientSecret', '', '（舊名）等同 SCIENER_CLIENT_SECRET'],
       ['ttlockUsername', '', '（舊名）等同 SCIENER_USERNAME'],

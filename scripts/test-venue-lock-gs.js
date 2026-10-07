@@ -127,11 +127,12 @@ check('缺少申請人電郵：不寫鎖，保持 pending', () => {
 });
 
 check('真鎖成功：才轉 Teamup、寄密碼及完成批准', () => {
-  context.createTtlockPasscode_ = () => ({ passcode: '654321', simulated: false });
+  context.createTtlockPasscode_ = () => ({ passcode: '654321', pwdRef: 'slot-103', simulated: false });
   const result = context.approveVenueBooking_('token', 'vb-1');
   assert.strictEqual(result.ok, true, JSON.stringify(result));
   assert.strictEqual(row().status, 'approved');
   assert.strictEqual(row().passcode, '654321');
+  assert.strictEqual(row().pwdRef, 'slot-103');
   // 已有 pending Teamup event 時，移動後仍沿用原 event ID。
   assert.strictEqual(row().teamupEventId, 'pending-event');
   assert.strictEqual(row().reviewer, 'dc@example.test');

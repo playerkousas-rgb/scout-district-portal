@@ -63,19 +63,22 @@
 
 當電子鎖準備好，才按以下順序處理。此系統使用同一份共用 Config；**不要**在 member portal 另設一套鎖設定。
 
-1. 先確認該鎖已連接 TTLock Gateway、可由網絡遠端管理；沒有 Gateway 不能遠端新增限時密碼。
+1. 先確認該鎖已連接 TTLock Gateway、可由網絡遠端管理；沒有 Gateway 不能遠端修改既有的限時密碼格。
 2. 在 Config 的 `value` 欄填入：
    - `SCIENER_CLIENT_ID`：TTLock / Sciener 開放平台 App ID；
    - `SCIENER_CLIENT_SECRET`：同一 App 的 Secret；
    - `SCIENER_USERNAME` / `SCIENER_PASSWORD`：有權管理該鎖的 TTLock 帳戶；
    - `SCIENER_LOCK_ID`：筲箕灣區總部**唯一大門鎖**的數字 Lock ID；
    - `SCIENER_API_BASE`：`https://api.sciener.com`；
-   - `PWD_MODE`：建議填 `random`，每宗申請產生不同的 6 位數密碼。
+   - `SCIENER_SLOT_NAMES`：可重用的既有 TTLock 密碼格名稱。筲箕灣區預設為 `限時2,限時3,限時4,限時5,限時6,限時7,限時12,限時13,限時14,限時15,限時16,限時17,限時18,限時22,限時24,限時25,限時26,限時27,限時28,限時29,限時30`；
+   - `PWD_MODE`：`random`。
 3. 清空 `ttlockDisabled`。它不可為 `TRUE`；`TRUE` 只是模擬鎖模式，不能用於日常自動批准。
 4. `Venues` 的 `scienerLockId` 保持空白即可，因為全區只用 Config 的 `SCIENER_LOCK_ID`。
 5. 將最新 `gs/Code.gs` 貼到**同一個**綁定 Apps Script，然後 **部署 → 管理部署 → 編輯 → 選「新版本」→ 部署**（保留原有 `/exec` 網址）。
 6. 在管理端 `/venue-regs` 按「讀取鎖列表」確認可見正確的鎖，並顯示「已接 Gateway」。
 7. 用一個有可收信電郵、短時段的測試申請按「⚡ 一鍵批准（Phase 2）」；逐項確認：限時密碼可真正開門、Teamup 轉到確認借用、申請人收到同一組密碼電郵。
+
+本區門鎖的密碼格必須先在 TTLock App 建立及配對；一鍵批准**不會**呼叫新增或刪除密碼。它會讀取現有密碼格，只在 `SCIENER_SLOT_NAMES` 白名單中挑選**已過期**的一格，再經 Gateway 改成新的 6 位密碼和借用時段。有效中、未來排期、未列入白名單的格一概不會修改；若沒有已過期格，申請會保持 `pending`。
 
 一鍵批准採取**失敗即停止**：只要鎖設定、Gateway 或 TTLock API 建碼失敗，該宗申請會保持 `pending`，不會轉 Teamup，亦不會寄出假密碼。申請人沒有電郵時同樣不會一鍵批准；先補回電郵才可繼續。
 

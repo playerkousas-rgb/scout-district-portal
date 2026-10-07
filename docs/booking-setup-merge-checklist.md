@@ -34,7 +34,8 @@
 | TTLock | `ttlockUsername` / `ttlockPassword` | App 登入帳密 |
 | TTLock | `ttlockLockId` | 大門鎖 Lock ID |
 | TTLock | `ttlockApiBase` | 預設 `https://api.ttlock.com` |
-| TTLock | `ttlockDisabled` | 未就緒先填 `TRUE`（改用隨機密碼，其餘流程照跑） |
+| TTLock / Sciener | `SCIENER_SLOT_NAMES` | 可重用的既有「限時N」格名稱；系統只改已過期白名單格 |
+| TTLock / Sciener | `ttlockDisabled` | 日常一鍵批准留空；`TRUE` 是模擬模式，一鍵批准會保持 pending |
 | 電郵 | `NOTIFY_STAFF_EMAIL` | 新申請通知收件人（可多個，以逗號分隔） |
 | 電郵 | `notifyFrom` | 選填：寄件人顯示名稱，不是 Gmail 地址 |
 | 電郵 | `approverEmail` | 不用填；現行 Code.gs 沒有使用 |

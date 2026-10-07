@@ -45,7 +45,8 @@ Phase 2：approveVenueBooking_ = 成功寫 TTLock 限時密碼 + Teamup 轉色 +
 | `SCIENER_USERNAME` / `SCIENER_PASSWORD` | 有權管理大門鎖的 TTLock 帳戶 |
 | `SCIENER_LOCK_ID` | 筲箕灣區總部唯一大門鎖的數字 Lock ID（填 Config，不填場地行） |
 | `SCIENER_API_BASE` | `https://api.sciener.com`（不要填 `open.sciener.com` 網站） |
-| `PWD_MODE` | 建議 `random`，每宗產生獨立 6 位數密碼 |
+| `SCIENER_SLOT_NAMES` | 可重用的 TTLock 預置「限時N」格名稱；只會修改清單中已過期的格 |
+| `PWD_MODE` | `random`，每宗產生獨立 6 位數密碼 |
 | `ttlockDisabled` | 日常一鍵批准必須留空；`TRUE` 是模擬模式，一鍵批准會安全地拒絕執行 |
 | `notifyFrom` | 電郵寄件人名稱（預設用區名） |
 
