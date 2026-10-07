@@ -1,0 +1,29 @@
+# ── Vercel 部署瘦身（防增肥守則）──────────────────────────────
+# 只把線上運行所需檔案送到 Vercel；文件、測試與 Apps Script 原始碼仍保留在 Git。
+
+# 版本控制與建置／依賴快取
+.git
+.github
+node_modules
+.next
+out
+build
+coverage
+*.tsbuildinfo
+
+# 本機環境與暫存
+.env
+.env.local
+.env*.local
+.DS_Store
+*.log
+*.bak
+*.tmp
+*.old
+
+# 不會被 Next.js runtime 載入的開發資料
+# 注意：public/downloads/ 是訓練班頁真正提供下載的檔案，不能忽略。
+docs
+scripts
+gs
+services

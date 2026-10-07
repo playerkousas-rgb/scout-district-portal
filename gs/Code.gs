@@ -1599,6 +1599,36 @@ var STOCK_STATUS = ['pending', 'approved', 'rejected', 'returned', 'cancelled'];
 function stockHolds_(status) { return String(status).toLowerCase() === 'approved'; }
 
 /**
+ * 批核前再核對一次即時可借庫存。
+ * 提交時嘅數量檢查不足以防止兩張 pending 申請同時爭同一件物資；
+ * 此 preflight 會聚合整個 batch 同款物資，任何一項不足便整批不寫，避免半批成功。
+ */
+function stockApprovalPreflight_(ss, requests, status) {
+  if (STOCK_DEDUCT_ON === 'submit' || !stockHolds_(status)) return '';
+  var needed = {};
+  (requests || []).forEach(function (req) {
+    if (stockHolds_(req.status || '')) return;
+    var itemId = String(req.itemId || '').trim();
+    if (!itemId) return;
+    needed[itemId] = (needed[itemId] || 0) + (Number(req.qty) || 0);
+  });
+  var keys = Object.keys(needed);
+  if (!keys.length) return '';
+
+  var items = readSheet_(SHEET.ITEMS);
+  for (var i = 0; i < keys.length; i++) {
+    var id = keys[i];
+    var item = items.filter(function (x) { return String(x.itemId || '').trim() === id; })[0];
+    if (!item) return '物資不存在或已刪除：' + id;
+    var available = Number(item.availableQty) || 0;
+    if (available < needed[id]) {
+      return '「' + (item.name || id) + '」可借數量不足（現有 ' + available + '，本次需要 ' + needed[id] + '）';
+    }
+  }
+  return '';
+}
+
+/**
  * 改一行申請嘅狀態 + 調整庫存（**唔寄電郵**，由呼叫者決定寄一封定係唔寄）。
  * 單件同批次批核共用同一段邏輯，庫存永遠只加減一次。
  */
@@ -1615,9 +1645,15 @@ function applyStockStatusRow_(ss, req, status, reviewer) {
   if (wasHeld !== nowHeld) {
     var ish = ss.getSheetByName(SHEET.ITEMS);
     var iIdx = rowIndexByCol_(ish, 'itemId', String(req.itemId).trim());
+    if (iIdx < 1 && nowHeld) return { ok: false, error: '物資不存在或已刪除：' + (req.itemName || req.itemId) };
     if (iIdx > 0) {
       var cur = Number(ish.getRange(iIdx, colIdxByHeader_(ish, 'availableQty')).getValue()) || 0;
-      var delta = (nowHeld ? -1 : 1) * (Number(req.qty) || 0);
+      var qty = Number(req.qty) || 0;
+      // ★ 最後一道防線：即使前端／其他呼叫者繞過 preflight，都不可批出超額庫存。
+      if (nowHeld && cur < qty) {
+        return { ok: false, error: '「' + (req.itemName || req.itemId) + '」可借數量不足（現有 ' + cur + '，申請 ' + qty + '）' };
+      }
+      var delta = (nowHeld ? -1 : 1) * qty;
       setCellByHeader_(ish, iIdx, 'availableQty', Math.max(0, cur + delta));
     }
   }
@@ -1643,6 +1679,10 @@ function setStockBatchStatus_(token, batchRef, status) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var rows = readSheet_(SHEET.STOCK_REQ).filter(function (r) { return String(r.batchRef || '').trim() === batchRef; });
   if (!rows.length) return err('找不到該批次');
+
+  // ★ 整批先檢查，避免前幾行扣咗貨、後幾行先發現不足而留下半批狀態。
+  var preflight = stockApprovalPreflight_(ss, rows, status);
+  if (preflight) return err(preflight);
 
   var done = 0, failed = [], names = [], email = '', who = '';
   rows.forEach(function (req) {
@@ -1676,6 +1716,9 @@ function setStockRequestStatus_(token, id, status) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var req = readSheet_(SHEET.STOCK_REQ).filter(function (r) { return String(r.id).trim() === String(id).trim(); })[0];
   if (!req) return err('找不到該申請');
+
+  var preflight = stockApprovalPreflight_(ss, [req], status);
+  if (preflight) return err(preflight);
 
   var applied = applyStockStatusRow_(ss, req, status, t.email);
   if (!applied.ok) return err(applied.error);

@@ -6,6 +6,7 @@ import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { ActivityNotice, UserSession } from '@/lib/types';
 import BackLink, { BackBar } from '@/components/BackLink';
+import { confirmSubmit, useFormGuard, useSubmitLock } from '@/lib/useFormGuard';
 
 const SECTIONS = ['小童軍', '幼童軍', '童軍', '深資童軍', '樂行童軍'];
 const NATURES = ['工作坊', '訓練班', '會議', '聚會', '比賽', '其他'];
@@ -15,7 +16,7 @@ const EMPTY = { troop: '', activityName: '', section: '', nature: '', year: '', 
 
 export default function ActivityNoticesPage() {
   const router = useRouter();
-  const { withDistrict } = useDistrict();
+  const { withDistrict, districtCode } = useDistrict();
   const session = useRequireCard('activity');
   const [notices, setNotices] = useState<ActivityNotice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +31,24 @@ export default function ActivityNoticesPage() {
   // 新增（admin）
   const [showAdd, setShowAdd] = useState(false);
   const [draft, setDraft] = useState<typeof EMPTY>(EMPTY);
+  const runOnce = useSubmitLock();
+  const activityDraftGuard = useFormGuard(
+    `portal:draft:${districtCode || 'district'}:activity-notice`,
+    draft,
+    saved => setDraft({
+      troop: String(saved.troop || ''), activityName: String(saved.activityName || ''), section: String(saved.section || ''),
+      nature: String(saved.nature || ''), year: String(saved.year || ''), startDateTime: String(saved.startDateTime || ''),
+      endDateTime: String(saved.endDateTime || ''), location: String(saved.location || ''), membersCount: String(saved.membersCount || ''),
+      leadersCount: String(saved.leadersCount || ''), parentsCount: String(saved.parentsCount || ''), leaderName: String(saved.leaderName || ''),
+      leaderPhone: String(saved.leaderPhone || ''), leaderEmail: String(saved.leaderEmail || ''), note: String(saved.note || ''),
+    }),
+    { active: !!session && showAdd },
+  );
+
+  async function runAction(work: () => Promise<void>) {
+    if (busy) return;
+    await runOnce(work);
+  }
 
   async function load() {
     setLoading(true); setError('');
@@ -56,17 +75,31 @@ export default function ActivityNoticesPage() {
   }, [notices, fYear, fSection, fNature, sort]);
 
   async function remove(n: ActivityNotice) {
-    if (!session || !confirm(`確定刪除知會「${n.activityName}」？`)) return;
-    setBusy(true); const r = await api.deleteActivityNotice(session.token, n.id); setBusy(false);
-    if (r.ok) { setMsg('已刪除 ✓'); await load(); } else setError(r.error || '刪除失敗');
+    if (!session || !confirmSubmit(`確定刪除知會「${n.activityName}」？\n\n此操作無法還原。`)) return;
+    await runAction(async () => {
+      setBusy(true);
+      try {
+        const r = await api.deleteActivityNotice(session.token, n.id);
+        if (r.ok) { setMsg('已刪除 ✓'); await load(); } else setError(r.error || '刪除失敗');
+      } finally { setBusy(false); }
+    });
   }
   async function add() {
     if (!session) return;
     setError(''); setMsg('');
     if (!draft.troop.trim() || !draft.activityName.trim() || !draft.leaderName.trim() || !draft.leaderPhone.trim()) { setError('旅團、活動名稱、領袖姓名及電話必填'); return; }
-    const r = await api.submitActivityNotice({ ...draft, year: draft.year || String(new Date().getFullYear()) });
-    if (r.ok) { setMsg('知會已記錄 ✓'); setDraft(EMPTY); setShowAdd(false); await load(); }
-    else setError(r.error || '記錄失敗');
+    const year = draft.year || String(new Date().getFullYear());
+    if (!confirmSubmit(`儲存活動知會？\n\n旅團：${draft.troop.trim()}\n活動：${draft.activityName.trim()}\n年份：${year}\n領袖：${draft.leaderName.trim()}（${draft.leaderPhone.trim()}）`)) return;
+    await runAction(async () => {
+      setBusy(true);
+      try {
+        const r = await api.submitActivityNotice({ ...draft, year });
+        if (r.ok) {
+          activityDraftGuard.clearDraft();
+          setMsg('知會已記錄 ✓'); setDraft(EMPTY); setShowAdd(false); await load();
+        } else setError(r.error || '記錄失敗');
+      } finally { setBusy(false); }
+    });
   }
 
   if (!session) return <div className="center"><div className="spinner" /></div>;
@@ -78,6 +111,13 @@ export default function ActivityNoticesPage() {
       <p className="page-sub">旅團活動知會記錄，可按年份／支部／活動性質篩選排序。</p>
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}
+      {activityDraftGuard.pending && (
+        <section className="info-card" style={{ borderLeft: '4px solid #f59e0b' }}>
+          <b>♻️ 發現未儲存的活動知會草稿</b>
+          <p className="page-sub">可回復或放棄上次未提交的手動補錄；草稿只存此瀏覽器，未曾寫入後台。</p>
+          <div className="user-actions"><button className="mini-btn" onClick={() => { activityDraftGuard.restore(); setShowAdd(true); }}>回復草稿</button><button className="mini-btn danger" onClick={activityDraftGuard.discard}>放棄草稿</button></div>
+        </section>
+      )}
 
       <div className="info-card" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <label style={{ fontWeight: 700 }}>篩選：</label>
@@ -117,7 +157,7 @@ export default function ActivityNoticesPage() {
             <input placeholder="領袖姓名 *" value={draft.leaderName} onChange={e => setDraft({ ...draft, leaderName: e.target.value })} style={{ width: 140 }} />
             <input placeholder="領袖電話 *" value={draft.leaderPhone} onChange={e => setDraft({ ...draft, leaderPhone: e.target.value })} style={{ width: 130 }} />
             <input placeholder="領袖電郵" value={draft.leaderEmail} onChange={e => setDraft({ ...draft, leaderEmail: e.target.value })} style={{ width: 160 }} />
-            <button className="btn-sm" onClick={add}>儲存</button>
+            <button className="btn-sm" disabled={busy} onClick={add}>{busy ? '儲存中…' : '儲存'}</button>
           </div>
           <p className="hint" style={{ fontSize: 12, marginTop: 8 }}>註：公開提交由 member-portal 處理；此處為後台手動補錄。</p>
         </div>

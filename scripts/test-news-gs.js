@@ -413,6 +413,24 @@ check('單件 submitStockRequest 照舊work（冇 batchRef）', () => {
   assert.strictEqual(avail('ROPE'), 9);
 });
 
+check('批准時再核庫存：後到 pending 申請不足時不可超借，整批不會寫一半', () => {
+  const first = ctx.submitStockBatchRequest_({ ...applicant, items: [{ itemId: 'LAMP', qty: 15 }] });
+  const second = ctx.submitStockBatchRequest_({ ...applicant, items: [{ itemId: 'LAMP', qty: 10 }] });
+  assert.ok(first.ok && second.ok);
+  assert.ok(ctx.setStockBatchStatus_(dcToken, first.data.batchRef, 'approved').ok);
+  assert.strictEqual(avail('LAMP'), 5);
+
+  const denied = ctx.setStockBatchStatus_(dcToken, second.data.batchRef, 'approved');
+  assert.strictEqual(denied.ok, false);
+  assert.ok(/可借數量不足/.test(denied.error), denied.error);
+  const secondRows = ctx.readSheet_('StockRequests').filter(x => x.batchRef === second.data.batchRef);
+  assert.ok(secondRows.every(x => x.status === 'pending'), '庫存不足時整批必須保持 pending');
+  assert.strictEqual(avail('LAMP'), 5);
+
+  assert.ok(ctx.setStockBatchStatus_(dcToken, first.data.batchRef, 'returned').ok);
+  assert.strictEqual(avail('LAMP'), 20);
+});
+
 check('doPost 路由 submitStockBatchRequest 通', () => {
   const out = JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({
     action: 'submitStockBatchRequest', ...applicant, items: [{ itemId: 'LAMP', qty: 1 }],

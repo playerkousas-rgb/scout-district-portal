@@ -6,6 +6,7 @@ import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession, StockItem, StockRequest } from '@/lib/types';
 import BackLink, { BackBar } from '@/components/BackLink';
+import { confirmSubmit, useFormGuard, useSubmitLock } from '@/lib/useFormGuard';
 
 const STATUS: Record<string, string> = { pending: '待批', approved: '已批', rejected: '已拒絕', returned: '已歸還', cancelled: '已取消' };
 
@@ -26,7 +27,7 @@ function groupByBatch(reqs: StockRequest[]): Group[] {
 
 export default function StockRegsPage() {
   const router = useRouter();
-  const { withDistrict } = useDistrict();
+  const { withDistrict, districtCode } = useDistrict();
   const session = useRequireCard('stockReg');
   const [reqs, setReqs] = useState<StockRequest[]>([]);
   const [items, setItems] = useState<StockItem[]>([]);
@@ -35,6 +36,26 @@ export default function StockRegsPage() {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [draft, setDraft] = useState<StockItem>({ itemId: '', name: '', category: '', totalQty: '', availableQty: '', unit: '', note: '', active: 'TRUE' });
+  const runOnce = useSubmitLock();
+  const itemDraftGuard = useFormGuard(
+    `portal:draft:${districtCode || 'district'}:stock-item`,
+    {
+      itemId: draft.itemId || '', name: draft.name || '', category: draft.category || '',
+      totalQty: draft.totalQty || '', availableQty: draft.availableQty || '', unit: draft.unit || '',
+      note: draft.note || '',
+    },
+    saved => setDraft({
+      itemId: String(saved.itemId || ''), name: String(saved.name || ''), category: String(saved.category || ''),
+      totalQty: String(saved.totalQty || ''), availableQty: String(saved.availableQty || ''),
+      unit: String(saved.unit || ''), note: String(saved.note || ''), active: 'TRUE',
+    }),
+    { active: !!session },
+  );
+
+  async function runAction(work: () => Promise<void>) {
+    if (busy) return;
+    await runOnce(work);
+  }
 
   async function load(s: UserSession) {
     setLoading(true); setError('');
@@ -47,33 +68,66 @@ export default function StockRegsPage() {
 
   async function setStatus(r: StockRequest, status: string) {
     if (!session) return;
-    setBusy(true); setError(''); setMsg('');
-    const res = await api.setStockRequestStatus(session.token, r.id, status);
-    setBusy(false);
-    if (res.ok) { setMsg(`已標為「${STATUS[status]}」✓`); await load(session); }
-    else setError(res.error || '更新失敗');
+    const action = STATUS[status] || status;
+    const inventoryNote = status === 'approved'
+      ? '\n\n批准後會即時扣減可借庫存。'
+      : status === 'returned' ? '\n\n歸還後會回補可借庫存。' : '';
+    if (!confirmSubmit(`確定將「${r.itemName || r.itemId} × ${r.qty}」標為「${action}」？${inventoryNote}`)) return;
+    await runAction(async () => {
+      setBusy(true); setError(''); setMsg('');
+      try {
+        const res = await api.setStockRequestStatus(session.token, r.id, status);
+        if (res.ok) { setMsg(`已標為「${action}」✓`); await load(session); }
+        else setError(res.error || '更新失敗');
+      } finally { setBusy(false); }
+    });
   }
   /** 整張申請（多款物資）一次過批：庫存逐款加減，申請人只收一封通知 */
   async function setBatchStatus(g: Group, status: string) {
     if (!session) return;
-    setBusy(true); setError(''); setMsg('');
-    const res = await api.setStockBatchStatus(session.token, g.batchRef, status);
-    setBusy(false);
-    if (res.ok) { setMsg(`整批 ${g.rows.length} 款已標為「${STATUS[status]}」✓`); await load(session); }
-    else setError(res.error || '更新失敗');
+    const action = STATUS[status] || status;
+    const itemsSummary = g.rows.map(r => `${r.itemName || r.itemId} × ${r.qty}`).join('、');
+    const inventoryNote = status === 'approved'
+      ? '\n\n批准後會逐款扣減可借庫存。'
+      : status === 'returned' ? '\n\n歸還後會逐款回補可借庫存。' : '';
+    if (!confirmSubmit(`確定將此批 ${g.rows.length} 款物資標為「${action}」？\n\n${itemsSummary}${inventoryNote}`)) return;
+    await runAction(async () => {
+      setBusy(true); setError(''); setMsg('');
+      try {
+        const res = await api.setStockBatchStatus(session.token, g.batchRef, status);
+        if (res.ok) { setMsg(`整批 ${g.rows.length} 款已標為「${action}」✓`); await load(session); }
+        else setError(res.error || '更新失敗');
+      } finally { setBusy(false); }
+    });
   }
   async function saveItem() {
     if (!session) return;
     setError(''); setMsg('');
     if (!draft.itemId.trim() || !draft.name.trim()) { setError('物資代碼與名稱必填'); return; }
-    const r = await api.saveItem(session.token, { ...draft, totalQty: draft.totalQty, availableQty: draft.availableQty || draft.totalQty });
-    if (r.ok) { setMsg('物資已儲存 ✓'); setDraft({ itemId: '', name: '', category: '', totalQty: '', availableQty: '', unit: '', note: '', active: 'TRUE' }); await load(session); }
-    else setError(r.error || '儲存失敗');
+    const total = Number(draft.totalQty) || 0;
+    const available = Number(draft.availableQty || draft.totalQty) || 0;
+    if (total < 0 || available < 0 || available > total) { setError('總數量不可小於 0，而可借數量必須介乎 0 至總數量。'); return; }
+    if (!confirmSubmit(`儲存物資？\n\n代碼：${draft.itemId.trim()}\n名稱：${draft.name.trim()}\n總數量：${total}${draft.unit || ''}\n可借：${available}${draft.unit || ''}`)) return;
+    await runAction(async () => {
+      setBusy(true);
+      try {
+        const r = await api.saveItem(session.token, { ...draft, totalQty: String(total), availableQty: String(available) });
+        if (r.ok) {
+          itemDraftGuard.clearDraft();
+          setMsg('物資已儲存 ✓'); setDraft({ itemId: '', name: '', category: '', totalQty: '', availableQty: '', unit: '', note: '', active: 'TRUE' }); await load(session);
+        } else setError(r.error || '儲存失敗');
+      } finally { setBusy(false); }
+    });
   }
   async function delItem(i: StockItem) {
-    if (!session || !confirm(`確定刪除物資「${i.name}」？`)) return;
-    const r = await api.deleteItem(session.token, i.itemId);
-    if (r.ok) { setMsg('物資已刪除 ✓'); await load(session); } else setError(r.error || '刪除失敗');
+    if (!session || !confirmSubmit(`確定刪除物資「${i.name}」？\n\n此操作不會自動取消已存在的借用申請。`)) return;
+    await runAction(async () => {
+      setBusy(true);
+      try {
+        const r = await api.deleteItem(session.token, i.itemId);
+        if (r.ok) { setMsg('物資已刪除 ✓'); await load(session); } else setError(r.error || '刪除失敗');
+      } finally { setBusy(false); }
+    });
   }
 
   const groups = useMemo(() => groupByBatch(reqs), [reqs]);
@@ -90,6 +144,13 @@ export default function StockRegsPage() {
       </p>
       {error && <div className="err">{error}</div>}
       {msg && <div className="success">✓ {msg}</div>}
+      {itemDraftGuard.pending && (
+        <section className="info-card" style={{ borderLeft: '4px solid #f59e0b' }}>
+          <b>♻️ 發現未儲存的物資草稿</b>
+          <p className="page-sub">可回復上次填寫的物資資料，或放棄該草稿。草稿只存此瀏覽器，未曾寫入後台。</p>
+          <div className="user-actions"><button className="mini-btn" onClick={itemDraftGuard.restore}>回復草稿</button><button className="mini-btn danger" onClick={itemDraftGuard.discard}>放棄草稿</button></div>
+        </section>
+      )}
 
       <section className="info-card">
         <div className="section-head"><div><h3>申請審批 <small>({reqs.length})</small></h3></div></div>
@@ -105,11 +166,11 @@ export default function StockRegsPage() {
                   <span>{g.rows[0].name}{g.rows[0].phone ? ` · ${g.rows[0].phone}` : ''}{g.rows[0].troop ? ` · ${g.rows[0].troop}` : ''}</span>
                 </div>
                 <div className="user-actions">
-                  <button className="mini-btn" disabled={busy} onClick={() => setBatchStatus(g, 'approved')}>✅ 一次過批准</button>
-                  {g.rows.some(r => r.status === 'approved') && (
+                  {g.rows.every(r => r.status === 'pending') && <button className="mini-btn" disabled={busy} onClick={() => setBatchStatus(g, 'approved')}>✅ 一次過批准</button>}
+                  {g.rows.every(r => r.status === 'approved') && (
                     <button className="mini-btn" disabled={busy} onClick={() => setBatchStatus(g, 'returned')}>📥 整批歸還</button>
                   )}
-                  <button className="mini-btn danger" disabled={busy} onClick={() => setBatchStatus(g, 'rejected')}>✕ 整批拒絕</button>
+                  {g.rows.every(r => r.status === 'pending') && <button className="mini-btn danger" disabled={busy} onClick={() => setBatchStatus(g, 'rejected')}>✕ 整批拒絕</button>}
                 </div>
               </div>
             )}
@@ -124,12 +185,12 @@ export default function StockRegsPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <span className={`state ${r.status === 'approved' ? 'on' : r.status === 'pending' ? '' : 'off'}`}>{STATUS[r.status || 'pending'] || r.status}</span>
               <div className="user-actions" style={{ display: 'inline-flex', gap: 6 }}>
-                <button className="mini-btn" disabled={busy} onClick={() => setStatus(r, 'approved')}>✅ 批准</button>
+                {r.status === 'pending' && <button className="mini-btn" disabled={busy} onClick={() => setStatus(r, 'approved')}>✅ 批准</button>}
                 {r.status === 'approved' && (
                   <button className="mini-btn" disabled={busy} onClick={() => setStatus(r, 'returned')}>📥 歸還</button>
                 )}
-                <button className="mini-btn danger" disabled={busy} onClick={() => setStatus(r, 'rejected')}>✕ 拒絕</button>
-                <button className="mini-btn" disabled={busy} onClick={() => setStatus(r, 'cancelled')}>↩ 取消</button>
+                {r.status === 'pending' && <button className="mini-btn danger" disabled={busy} onClick={() => setStatus(r, 'rejected')}>✕ 拒絕</button>}
+                {r.status === 'pending' && <button className="mini-btn" disabled={busy} onClick={() => setStatus(r, 'cancelled')}>↩ 取消</button>}
               </div>
             </div>
             {r.reviewedAt && <span style={{ fontSize: 11, color: '#888' }}>審批：{r.reviewer} @ {r.reviewedAt}</span>}

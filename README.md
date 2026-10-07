@@ -6,6 +6,8 @@
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
 > **目前啟動方式（Phase 1）**：只需在 `Venues` 新增已啟用的 `skw-hq` 場地，審批一律按「✅ 確認（唔設鎖）」。此動作會轉 Teamup，但不寫鎖、不寄密碼。詳細資料行、Items、Config 及 Phase 2 前置條件見 [`docs/phase-1-launch.md`](docs/phase-1-launch.md)。
+>
+> **部署瘦身／防呆／Scout Admin 回報**：Vercel 部署排除非 runtime 檔案以防 Storage 配額膨脹；場地、物資和手動活動知會有草稿、離開提示、確認摘要及防重複寫入；全站右下角已接入 Scout Admin「區系統」問題回報／意見回饋。詳見 [`docs/deployment-safety-and-scout-admin.md`](docs/deployment-safety-and-scout-admin.md)。
 
 ---
 
