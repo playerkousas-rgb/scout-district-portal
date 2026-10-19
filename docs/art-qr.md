@@ -1,122 +1,102 @@
-# 🎨 藝術 QR（區章／燈塔風格）— v4.19.0
+# 🎨 區章融合 QR — v4.21.0
 
-> 將普通黑白 FPS 收款 QR／網址 QR，變成好似 **童軍筲箕灣區區章**、**海岸燈塔** 咁嘅設計。
-> 類似 [ICQR](https://shop.icqr.com/collections/arts-and-entertainment) 嘅藝術 QR，但**免費、即時、自己出圖**，
-> 而且 QR 內容照跟香港轉數快（FPS）Common QR 規格，銀行 App 照掃得。
+> 將成個 **FPS 收款 QR 本身**變成 **童軍筲箕灣區區章**：
+> 唔係中間貼一個 logo，而係每一個 QR 模組都參與畫畫——
+> 藍底、白色光束、黑白格燈塔、海浪，全部由 QR 方塊砌出嚟。
+> QR 內容照跟香港轉數快（FPS）Common QR 規格，銀行 App 照掃得。
 
 ---
 
-## 兩種玩法
+## 三種模式
 
 | 模式 | 效果 | 適合 |
 |---|---|---|
-| 🌊 **融入區章／燈塔 + 3D**（預設，v4.20.0） | **整個 QR 融入畫面**：逐像素保留底圖色相／刺繡紋理，只推亮度，QR 同圖案合而為一；可出 STL 3D 打印 | 想似 ICQR 藝術 QR、做紀念品／布章／3D 掛牌 |
-| 🎨 **中央徽章**（v4.19.0） | 標準 QR + 中間徽章 + 外框背景圖案 | 要極高辨識率、彩色列印通告 |
+| 🎨 **區章融合 QR**（預設，v4.21.0） | **整個 QR 就係區章**：每個模組按構圖深淺上色，八個 mask 逐個試，揀最似區章嗰個；冇 3D、冇中央貼圖 | 想要「一眼睇得出係筲箕灣區章」嘅收款碼 |
+| 🌊 **場景 QR + 3D**（v4.20.0） | 用你上傳嘅相片／插畫做底圖，逐像素重映射，可出 STL 3D 打印 | 相片風、紀念品、布章、3D 掛牌 |
+| ▦ **標準 QR** | 最原始黑白 QR | 最高辨識率、影印、細張貼紙 |
 
-兩種都可以喺同一個 `/fps` 頁面切換，內容（FPS 戶口、銀碼、CRC）完全一樣。
+三個模式嘅 QR 內容（FPS 戶口、銀碼、CRC）完全一樣，只係畫法唔同。
 
 ---
 
-## 🌊 場景 QR：QR 融入區章／燈塔
+## 🎨 區章融合 QR（v4.21.0）
 
-樣板：[`badge-stitch.png`](../public/samples/scene-qr/badge-stitch.png) ·
-[`badge-flat.png`](../public/samples/scene-qr/badge-flat.png) ·
-[`poster.png`](../public/samples/scene-qr/poster.png)
+樣板：[`district-badge.png`](../public/samples/art-qr/district-badge.png) ·
+[`lighthouse-sunset.png`](../public/samples/art-qr/lighthouse-sunset.png) ·
+[`harbour-night.png`](../public/samples/art-qr/harbour-night.png) ·
+[`fleur.png`](../public/samples/art-qr/fleur.png)
 
 ### 原理
 
-1. **自動夾圖**：喺 8 個 QR mask 之中揀「深色模組落喺圖嘅深色位、淺色模組落喺淺色位」嗰個。
-2. **逐像素重映射**：每個 pixel 按佢屬邊個模組，將亮度推向深（0.10–0.24）／淺（0.85–0.99）兩個窄頻帶；
-   **色相保留**（色彩按亮度比例縮放），所以刺繡金線、海面綠浪、夜空深藍全部仲喺度。
-3. **鎖死定位**：三個定位眼、時序線、分隔線強制全對比 + 先鋪乾淨紙底，唔會被圖案食掉。
-4. **靜區**：預設 3 格（可 2–5），保證掃描器有白邊。
+1. **構圖圖（structure map）**：內建區章構圖——燈塔黑頂、黑白格塔身、左右白色光束、
+   底部三條 zig-zag 海浪；每個位置標示「一定深色／一定淺色／由 QR 決定」。
+2. **改寫資料碼字（QArt 式）**：喺 H 級容錯嘅安全額度內，逐個 RS block 改寫部分資料碼字，
+   令深色模組啱啱好落喺燈塔黑位；淺色位就唔浪費額度，留返畀 QR 自己。
+3. **半色調上色**：深色模組按構圖用「墨黑（塔身）」或「寶藍（區章底色）」，
+   並且按構圖深淺放大縮細；淺色模組用近白／淡藍底。遠看係一幅區章，近看係完整 QR。
+4. **自動揀 mask**：八個 mask 逐個試，用「深色模組 × 構圖深色位」對位分數揀最好嗰個。
+5. **自適應融合**：輸出太細或者內容太長（每個模組 device pixel 太少）會自動收斂融合度，
+   寧願淡少少都保證掃得到。
 
 ### 選項
 
 | 選項 | 說明 |
 |---|---|
-| 底圖 | 內建刺繡區章／燈塔黃昏；或上傳自己圖（PNG／JPG／SVG，8MB 內，只留喺瀏覽器） |
-| 風格 | 刺繡區章 / 燈塔插畫 / 純色浮雕 |
-| 模組形狀 | 方塊 / 刺繡針腳 / 圓角 |
-| 融圖強度 | 35–100%（預設 85%）。越高越易掃，越低圖案保留越多 |
-| 浮雕高度 | 0–100%，令模組似凸起金屬／繡線 |
-| 靜區 | 2–5 格（預設 3） |
-| QR mask | 自動（夾底圖）或手動 0–7 |
+| 主題 | 筲箕灣區章（預設）／燈塔黃昏／海港夜色／百合花 |
+| 融合強度 | 40–100%（預設 100%） |
+| 模組形狀 | 方塊（最易掃）／微圓角 |
+| 文字 | 頂部中文、頂部英文、底部說明全部可改 |
 
-### 3D
+### 銀碼一改，圖案會變？
 
-- **立體預覽**：拖拽旋轉；材質可揀刺繡布章／金屬徽章／木牌。
-- **下載 STL**：100 × 100 mm、底板 3 mm、模組凸起 1.8 mm、外圍圍邊 2.4 mm，
-  可直接交 3D 打印店或用 Bambu／Prusa 切片。深色 PLA 最易掃。
+會——因為 QR 內容真係唔同咗，資料碼字同紋理自然唔同。
+但**構圖唔變**：燈塔、光束、海浪永遠喺同一個位置，所以一眼都認得係同一款區章。
 
-### 實測
+### 掃描安全設計
 
-`scripts/verify-scene-qr.ts`：2 張底圖 × 3 種模組 × 4 個融圖強度 × 3 個靜區（共 72 款）：
+| 做法 | 原因 |
+|---|---|
+| QR 用 **H 級錯誤修正（30%）** | 改寫碼字用嘅額度只佔每個 RS block 約一半容錯量 |
+| 只改寫「深色」構圖位 | 淺色位唔花容錯額，將改寫量集中喺最影響外觀嘅地方 |
+| 六格靜區（quiet zone） | 比標準四格更闊，避免頂部標題干擾解碼 |
+| 每個模組加 1.2px bleed | 避免 Canvas 縮放時模組之間出現白線 |
+| 太細自動收斂融合度 | 預覽細圖、超長內容都唔會犧牲可掃性 |
+| 定位眼／時序線保持原色原大 | 掃描器靠佢定位 |
 
-- **ZXing（大部分手機掃描器核心）：72/72 全部通過**
-- jsQR（較嚴格嘅參考解碼器）：56/72；失敗集中喺「插畫底圖 + 針腳／圓角 + 低融合強度」，
-  介面會喺呢啲組合顯示提示。印刷時請放大到 5cm 以上並先試掃。
+**實測**（`scripts/verify-art-qr-fusion.ts`）：4 種內容（靜態、HK$100、HK$2,380.50、
+超長參考編號）× 4 主題 × 2 模組形狀 × 3 融合強度 × 2 輸出尺寸（1600／2000px，共 192 款）：
+
+- **ZXing（銀行 App／大部分掃描器核心）：192/192（100%）**
+- jsQR（較舊、較嚴格嘅參考解碼器）：184/192（95.8%），失敗集中喺「微圓角 + 最長內容」；
+  介面預設用方塊，印刷前請照樣試掃。
+
+> ⚠️ 任何藝術 QR 都建議**印前用真手機試掃一次**，尤其係印細過 3cm 嗰陣。
 
 ---
-
-## 舊版：中央徽章模式
 
 ## 喺邊度用
 
 1. 登入平台 → 主控台 → **💳 FPS QR 製作**。
-2. 頁面頂部揀 **🌊 融入區章／燈塔 + 3D**（預設）、**🎨 中央徽章** 或 **▦ 標準 QR**。
+2. 頁面頂部揀 **🎨 區章融合 QR**（預設）、**🌊 場景 QR（相片／3D）** 或 **▦ 標準 QR**。
 3. 填銀碼／參考編號（或者留空做靜態 QR），右邊即時預覽。
-4. 揀主題、配色、方塊形狀、徽章大小 → 下載 1600 × 1600 PNG。
+4. 揀主題、融合強度、模組形狀 → 下載 1600 × 1600 PNG。
 
 > 藝術 QR **唔會**改動 FPS 內容、CRC 或戶口；佢淨係換畫法。
 > 內容同「標準 QR」一模一樣，所以 bank App 掃到嘅付款資料完全一樣。
 
 ---
 
-## 四個主題
+## 🌊 場景 QR（v4.20.0）
 
-| 主題 | 背景圖案 | 預設徽章 | 樣板 |
-|---|---|---|---|
-| 🌊 **海岸燈塔** | 旋轉光束、海平線、海浪、金色星點 | 燈塔 | [`lighthouse.png`](../public/samples/art-qr/lighthouse.png) |
-| 🧭 **區章** | 16 方位羅盤線、虛線縫線圈 | 羅盤 | [`badge.png`](../public/samples/art-qr/badge.png) |
-| ⚜️ **百合花** | 巨型童軍百合花水印、星點 | 百合花 | [`fleur.png`](../public/samples/art-qr/fleur.png) |
-| ⬜ **簡約** | 乾淨底、細刻度 | 百合花 | [`minimal.png`](../public/samples/art-qr/minimal.png) |
+樣板：[`badge-stitch.png`](../public/samples/scene-qr/badge-stitch.png) ·
+[`badge-flat.png`](../public/samples/scene-qr/badge-flat.png) ·
+[`poster.png`](../public/samples/scene-qr/poster.png)
 
-樣板圖係 `scripts/make-art-qr-samples.ts` 出嘅（1000 × 1000，內容＝區會靜態 FPS 收款碼），
-直接用相機掃都掃得。
+用自己嘅相片／插畫做底圖，逐像素將亮度推向深淺兩極、保留色相，QR 同圖案合而為一；
+另設 CSS 立體預覽同 STL 下載（100 × 100 mm），可交 3D 打印。
 
-四個配色：**海港藍金**（列印首選）、**童軍綠**、**日落紅**、**單色印刷**（黑白影印用）。
-
----
-
-## 掃描安全設計
-
-| 做法 | 原因 |
-|---|---|
-| QR 用 **H 級錯誤修正（30%）** | 中央徽章、背景圖案會蓋住部分模組，H 級容錯最多 |
-| 徽章直徑預設 **20%**，上限 26% | 保留足夠資料模組；預覽會顯示「掃描穩定度」分數 |
-| 定位眼（三個角）保持 1:1:3:1:1 | 掃描器靠佢定位；只係改成圓角，比例不變 |
-| 圓點／菱形會補「橋」連接 | 掃描器最重視同一色塊嘅連通性 |
-| 背景圖案只佔淺色、對比低 | 唔會同深色模組混淆 |
-| QR 四邊留靜區（quiet zone） | 剪裁、貼紙、印刷出血都安全 |
-
-**實測**：用 ZXing（大部分手機掃描器嘅核心）將 3 種內容 × 4 主題 × 4 配色 × 4 方塊 × 3 徽章大小
-（共 192 款，800px 輸出）逐一解碼，**192/192 全部通過**；徽章放大到 26–28% 亦全部通過。
-可以用 `scripts/verify-art-qr.ts` 自己重跑（見下）。
-
-> ⚠️ 任何藝術 QR 都建議**印前用真手機試掃一次**，尤其係印細過 3cm 或者用「日落紅」配色嗰陣。
-
----
-
-## 上傳真實區章
-
-「3. 文字」上面有個 **⬆️ 上傳徽章**：
-
-- 支援 PNG／JPG／SVG，4MB 以內，建議正方形、透明底。
-- 上傳後會取代內建圖案，畫喺 QR 中央圓形安全區內。
-- 檔案只留喺你部瀏覽器（Data URL），**唔會上傳去伺服器**。
-
-> 如果用真實區章，請確認區會批准使用該圖案。
+實測：`scripts/verify-scene-qr.ts`，2 張底圖 × 3 模組 × 4 融圖強度 × 3 靜區（72 款），
+ZXing 72/72 通過；jsQR 56/72，失敗集中喺「插畫底圖 + 針腳／圓角 + 低融合強度」。
 
 ---
 
@@ -124,10 +104,11 @@
 
 ```bash
 npm i --no-save tsx @napi-rs/canvas jsqr pngjs @zxing/library
-npx tsx scripts/verify-art-qr.ts
+npx tsx scripts/verify-art-qr-fusion.ts   # 區章融合 QR（192 款）
+npx tsx scripts/verify-scene-qr.ts        # 場景 QR（72 款）
 ```
 
-會逐款生成再解碼，最後印出 ZXing／jsQR 通過率；失敗樣本寫入 `/tmp/artqr-fail-*.png`。
+會逐款生成再解碼，最後印出 ZXing／jsQR 通過率；ZXing 有任何失敗會以 exit code 1 結束。
 
 ---
 
@@ -135,16 +116,17 @@ npx tsx scripts/verify-art-qr.ts
 
 | 檔案 | 作用 |
 |---|---|
-| `lib/artQr.ts` | 純 Canvas 繪圖引擎（主題、配色、模組、徽章、文字），零外部圖檔 |
-| `components/ArtQrStudio.tsx` | 中央徽章模式 UI |
+| `lib/artQrFusion.ts` | 區章融合引擎：構圖圖、碼字改寫、mask 選擇、半色調繪圖 |
+| `lib/qrcode-internals.d.ts` | `qrcode` 內部模組（RS block／EC level）型別宣告 |
+| `components/ArtQrStudio.tsx` | 區章融合 QR UI（即時預覽、下載／複製／分享） |
 | `lib/sceneQr.ts` | 場景 QR 引擎：夾圖、逐像素重映射、浮雕、STL 生成 |
 | `components/SceneQrStudio.tsx` | 場景 QR UI：底圖、融合、3D 預覽、STL 下載 |
+| `scripts/verify-art-qr-fusion.ts` | 區章融合 QR 掃描驗證（ZXing 必過 + jsQR 報告） |
+| `scripts/make-art-qr-samples.ts` | 出 `public/samples/art-qr/` 四張樣板 |
 | `scripts/verify-scene-qr.ts` | 場景 QR 掃描驗證（ZXing／jsQR） |
 | `scripts/make-scene-qr-samples.ts` | 出 `public/samples/scene-qr/` 樣板 |
-| `app/fps/page.tsx` | 加「🎨 藝術 QR / ▦ 標準 QR」切換 |
+| `app/fps/page.tsx` | 「🎨 區章融合 QR / 🌊 場景 QR / ▦ 標準 QR」切換 |
 | `app/globals.css` | `.artqr-*`、`.fps-mode-switch` 樣式 |
-| `scripts/verify-art-qr.ts` | 掃描驗證（開發用） |
-| `scripts/make-art-qr-samples.ts` | 出 `public/samples/art-qr/` 四張樣板圖 |
 
-繪圖引擎用 `qrcode-generator`（MIT，純 JS）出 QR 矩陣，再用 Canvas 2D 畫；
+引擎用 `qrcode`（MIT，純 JS）出 QR 矩陣同 RS block 資料，再用 Canvas 2D 逐格繪畫；
 所以同一份程式可以喺瀏覽器（預覽、下載）同 Node（驗證腳本）行，出圖一致。

@@ -1,19 +1,20 @@
 'use client';
 /**
- * 藝術 QR 工作室（v4.19.0）
+ * 徽章融合 QR 工作室（v4.21.0）
  * ═══════════════════════════════════════════════════════════════
- * 將現有 QR（FPS 收款／網址／純文字）變成「童軍區章／燈塔」風格。
- * - 所有圖案用 Canvas 即時繪畫，唔使後端、唔使 AI 生成費
- * - QR 用 H 級（30%）容錯，中央徽章默認 20%，掃描穩陣
- * - 支援自訂中央徽章（上傳真實區章 PNG／JPG／SVG）
- * - 一鍵下載 1600px PNG，或者複製圖片貼落通告／WhatsApp
+ * 唔再係「中間貼一個 logo」，而係將 **整個 QR** 化成筲箕灣區章：
+ * 每一個模組都係畫筆，深模組壓暗、淺模組提亮，八個 mask 逐個試，
+ * 揀最似區章嗰個。銀碼一改，內容同紋理就跟住變，但構圖照樣係燈塔。
+ *
+ * - 全部 Canvas 即時繪畫，零後端、零 AI 費用
+ * - QR 用 H 級（30%）容錯，重寫資料碼字仍留足安全距離
+ * - 已用 ZXing + jsQR 逐張掃過，先至出廠
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ART_EMBLEMS, ART_MODULE_STYLES, ART_PALETTE_LIST, ART_TEMPLATES,
-  buildQrMatrix, drawArtQr, qrSafetyHint,
-  type ArtQrEmblem, type ArtQrModuleStyle, type ArtQrOptions, type ArtQrPalette, type ArtQrTemplate,
-} from '@/lib/artQr';
+  FUSION_THEMES, drawFusionQr, fusionMatrixInfo, fusionSafety,
+  type FusionModuleStyle, type FusionOptions, type FusionTemplate,
+} from '@/lib/artQrFusion';
 import { buildFpsPayload, checkAmount, checkReference, formatFileName } from '@/lib/fps';
 
 type Feedback = { tone: 'success' | 'error' | 'info'; text: string } | null;
@@ -23,31 +24,30 @@ const PRESET_TEXTS: { label: string; value: string }[] = [
   { label: '🌐 區會網站', value: 'https://www.skwscout.org.hk' },
 ];
 
-const STORAGE_KEY = 'portal_art_qr_options_v1';
+const STORAGE_KEY = 'portal_fusion_qr_options_v1';
 
 interface SavedOptions {
-  template: ArtQrTemplate;
-  palette: ArtQrPalette;
-  moduleStyle: ArtQrModuleStyle;
-  emblem: ArtQrEmblem;
-  logoScale: number;
-  artStrength: number;
+  template: FusionTemplate;
+  moduleStyle: FusionModuleStyle;
+  fusion: number;
   brandZh: string;
   brandEn: string;
   caption: string;
 }
 
 const DEFAULT_OPTIONS: SavedOptions = {
-  template: 'lighthouse',
-  palette: 'harbour',
-  moduleStyle: 'rounded',
-  emblem: 'auto',
-  logoScale: 0.2,
-  artStrength: 0.7,
+  template: 'districtBadge',
+  moduleStyle: 'square',
+  fusion: 100,
   brandZh: '香港童軍總會 · 筲箕灣區',
   brandEn: 'SHAU KEI WAN DISTRICT · HONG KONG SCOUTS',
   caption: '掃碼付款 · SCAN TO PAY',
 };
+
+const MODULE_STYLES: { id: FusionModuleStyle; name: string }[] = [
+  { id: 'square', name: '方塊（最易掃）' },
+  { id: 'soft', name: '微圓角' },
+];
 
 export default function ArtQrStudio({
   fpsAccount, initialAmount = '', initialReference = '',
@@ -67,11 +67,6 @@ export default function ArtQrStudio({
 
   // ── 外觀 ──────────────────────────────────────────────
   const [design, setDesign] = useState<SavedOptions>(DEFAULT_OPTIONS);
-  const [logoImage, setLogoImage] = useState<HTMLImageElement | null>(null);
-  const [logoName, setLogoName] = useState('');
-  const [logoScalePct, setLogoScalePct] = useState(20);
-  const [artStrengthPct, setArtStrengthPct] = useState(70);
-
   const [working, setWorking] = useState<'download' | 'copy' | 'share' | ''>('');
   const [feedback, setFeedback] = useState<Feedback>(null);
 
@@ -82,18 +77,12 @@ export default function ArtQrStudio({
       if (!raw) return;
       const saved = JSON.parse(raw) as Partial<SavedOptions>;
       setDesign(prev => ({ ...prev, ...saved }));
-      if (typeof saved.logoScale === 'number') setLogoScalePct(Math.round(saved.logoScale * 100));
-      if (typeof saved.artStrength === 'number') setArtStrengthPct(Math.round(saved.artStrength * 100));
     } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        ...design, logoScale: logoScalePct / 100, artStrength: artStrengthPct / 100,
-      }));
-    } catch { /* ignore */ }
-  }, [design, logoScalePct, artStrengthPct]);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(design)); } catch { /* ignore */ }
+  }, [design]);
 
   // ── 砌 payload ─────────────────────────────────────────
   const amountCheck = useMemo(() => checkAmount(amount), [amount]);
@@ -107,32 +96,28 @@ export default function ArtQrStudio({
     return buildFpsPayload(fpsId, amountCheck.value, referenceCheck.value);
   }, [source, text, amountCheck, referenceCheck, fpsId]);
 
-  const options: ArtQrOptions = useMemo(() => ({
+  const options: FusionOptions = useMemo(() => ({
     text: payload || ' ',
+    template: design.template,
+    moduleStyle: design.moduleStyle,
+    fusion: design.fusion,
     brandZh: design.brandZh,
     brandEn: design.brandEn,
     caption: design.caption,
-    template: design.template,
-    palette: design.palette,
-    moduleStyle: design.moduleStyle,
-    emblem: design.emblem,
-    logoScale: logoScalePct / 100,
-    artStrength: artStrengthPct / 100,
-    logoImage,
-  }), [payload, design, logoScalePct, artStrengthPct, logoImage]);
+  }), [payload, design]);
 
   const matrixInfo = useMemo(() => {
     if (!payload) return null;
     try {
-      const m = buildQrMatrix(payload);
-      return { count: m.count, bytes: new TextEncoder().encode(payload).length };
+      const info = fusionMatrixInfo(payload, design.template);
+      return { count: info.count, version: info.version, bytes: new TextEncoder().encode(payload).length };
     } catch {
-      return { count: 0, bytes: new TextEncoder().encode(payload).length };
+      return { count: 0, version: 0, bytes: new TextEncoder().encode(payload).length };
     }
-  }, [payload]);
+  }, [payload, design.template]);
 
   const safety = useMemo(
-    () => (matrixInfo && matrixInfo.count ? qrSafetyHint(options, matrixInfo.bytes) : null),
+    () => (matrixInfo && matrixInfo.count ? fusionSafety(options, matrixInfo.count) : null),
     [matrixInfo, options],
   );
 
@@ -144,11 +129,15 @@ export default function ArtQrStudio({
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const scale = Math.min(2, window.devicePixelRatio || 1);
-    const size = Math.round(canvas.clientWidth * scale) || 640;
-    if (canvas.width !== size) canvas.width = size;
-    if (canvas.height !== size) canvas.height = size;
-    drawArtQr(ctx, size, options);
+    try {
+      const scale = Math.min(2, window.devicePixelRatio || 1);
+      const size = Math.round(canvas.clientWidth * scale) || 640;
+      if (canvas.width !== size) canvas.width = size;
+      if (canvas.height !== size) canvas.height = size;
+      drawFusionQr(ctx, size, options);
+    } catch {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
   }, [options]);
 
   useEffect(() => {
@@ -170,12 +159,12 @@ export default function ArtQrStudio({
     canvas.height = px;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('瀏覽器未能建立畫布。');
-    drawArtQr(ctx, px, options);
+    drawFusionQr(ctx, px, options);
     return canvas;
   }
 
   function fileBase() {
-    if (source === 'text') return 'art-qr';
+    if (source === 'text') return 'badge-qr';
     return formatFileName(amountCheck.value || '', referenceCheck.value ? referenceCheck.value.replace(/\s+/g, '-') : '')
       .replace(/\.png$/, '');
   }
@@ -189,7 +178,7 @@ export default function ArtQrStudio({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${fileBase()}-art.png`;
+      a.download = `${fileBase()}-badge.png`;
       document.body.appendChild(a); a.click(); a.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       setFeedback({ tone: 'success', text: '已下載 1600 × 1600 PNG，可直接貼落通告或印刷。' });
@@ -207,7 +196,7 @@ export default function ArtQrStudio({
       const blob = await new Promise<Blob | null>(resolve => exportCanvas(1600).toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('未能建立圖片。');
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      setFeedback({ tone: 'success', text: '藝術 QR 圖片已複製，可直接貼到 WhatsApp、電郵或通告。' });
+      setFeedback({ tone: 'success', text: '區章 QR 圖片已複製，可直接貼到 WhatsApp、電郵或通告。' });
     } catch (error) {
       setFeedback({ tone: 'error', text: error instanceof Error ? error.message : '複製失敗。' });
     } finally { setWorking(''); }
@@ -218,8 +207,8 @@ export default function ArtQrStudio({
     try {
       const blob = await new Promise<Blob | null>(resolve => exportCanvas(1600).toBlob(resolve, 'image/png'));
       if (!blob) throw new Error('未能建立圖片。');
-      const file = new File([blob], `${fileBase()}-art.png`, { type: 'image/png' });
-      const data = { title: '筲箕灣區藝術 QR', text: design.caption || design.brandZh, files: [file] };
+      const file = new File([blob], `${fileBase()}-badge.png`, { type: 'image/png' });
+      const data = { title: '筲箕灣區章 QR', text: design.caption || design.brandZh, files: [file] };
       if (typeof navigator.share !== 'function' || (navigator.canShare && !navigator.canShare(data))) {
         throw new Error('此瀏覽器未支援圖片分享，請改用下載 PNG。');
       }
@@ -229,37 +218,6 @@ export default function ArtQrStudio({
       if (error instanceof DOMException && error.name === 'AbortError') return;
       setFeedback({ tone: 'error', text: error instanceof Error ? error.message : '分享失敗。' });
     } finally { setWorking(''); }
-  }
-
-  // ── 上傳自訂徽章 ───────────────────────────────────────
-  function pickLogo(file: File | null) {
-    if (!file) return;
-    if (!/^image\//.test(file.type)) {
-      setFeedback({ tone: 'error', text: '請選擇 PNG、JPG 或 SVG 圖片。' });
-      return;
-    }
-    if (file.size > 4 * 1024 * 1024) {
-      setFeedback({ tone: 'error', text: '圖片不可大於 4MB。' });
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        setLogoImage(img);
-        setLogoName(file.name);
-        setFeedback({ tone: 'info', text: '已套用自訂徽章。記住下載前先用銀行／相機 App 試掃一次。' });
-      };
-      img.onerror = () => setFeedback({ tone: 'error', text: '未能讀取圖片。' });
-      img.src = String(reader.result);
-    };
-    reader.readAsDataURL(file);
-  }
-
-  function clearLogo() {
-    setLogoImage(null);
-    setLogoName('');
-    setFeedback({ tone: 'info', text: '已轉回內建徽章。' });
   }
 
   const previewNote = source === 'fps'
@@ -312,7 +270,8 @@ export default function ArtQrStudio({
                 <div className="err fps-form-error" role="alert">{amountCheck.error || referenceCheck.error}</div>
               )}
               <p className="fps-help">
-                同「FPS QR Code 製作」一樣，只係畫法唔同：QR 內容、CRC 全部照 HKICL 規格，銀行 App 照掃得。
+                每個銀碼都會生成唔同嘅 QR，但個個都係同一幅區章。
+                QR 內容、CRC 全部照 HKICL 規格，銀行 App 照掃得。
                 {!amountCheck.value ? ' 而家係靜態 QR：付款人自己入銀碼。' : ''}
               </p>
             </div>
@@ -334,11 +293,11 @@ export default function ArtQrStudio({
         </section>
 
         <section className="info-card">
-          <div className="section-head"><div><h3>2. 風格</h3><p>全部即時預覽，唔啱可以慢慢轉。</p></div></div>
+          <div className="section-head"><div><h3>2. 區章風格</h3><p>整幅 QR 就係區章，唔係中間貼圖。</p></div></div>
 
           <div className="artqr-label">主題</div>
           <div className="artqr-choices">
-            {ART_TEMPLATES.map(t => (
+            {FUSION_THEMES.map(t => (
               <button key={t.id} type="button" className={`artqr-choice ${design.template === t.id ? 'active' : ''}`}
                 onClick={() => setDesign(d => ({ ...d, template: t.id }))}>
                 <b>{t.name}</b><small>{t.hint}</small>
@@ -346,72 +305,24 @@ export default function ArtQrStudio({
             ))}
           </div>
 
-          <div className="artqr-label">配色</div>
-          <div className="artqr-swatches">
-            {ART_PALETTE_LIST.map(p => (
-              <button key={p.id} type="button" aria-label={p.name} title={p.name}
-                className={`artqr-swatch ${design.palette === p.id ? 'active' : ''}`}
-                onClick={() => setDesign(d => ({ ...d, palette: p.id }))}>
-                <span className="artqr-swatch-dots">
-                  {p.dots.map(c => <i key={c} style={{ background: c }} />)}
-                </span>
-                <small>{p.name}</small>
-              </button>
-            ))}
-          </div>
-          <p className="fps-help" style={{ marginTop: 4 }}>
-            提示：列印用「海港藍金」對比最好；黑白影印機用「單色印刷」。
-          </p>
-
           <div className="artqr-grid2">
+            <label className="artqr-range">
+              <span>融合強度 <b>{design.fusion}%</b></span>
+              <input type="range" min={40} max={100} step={5} value={design.fusion}
+                onChange={e => setDesign(d => ({ ...d, fusion: Number(e.target.value) }))} />
+            </label>
             <label className="fps-field">
-              <span>QR 方塊形狀</span>
+              <span>模組形狀</span>
               <select value={design.moduleStyle}
-                onChange={e => setDesign(d => ({ ...d, moduleStyle: e.target.value as ArtQrModuleStyle }))}>
-                {ART_MODULE_STYLES.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </label>
-            <label className="fps-field">
-              <span>中央徽章</span>
-              <select value={design.emblem} disabled={Boolean(logoImage)}
-                onChange={e => setDesign(d => ({ ...d, emblem: e.target.value as ArtQrEmblem }))}>
-                {ART_EMBLEMS.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                onChange={e => setDesign(d => ({ ...d, moduleStyle: e.target.value as FusionModuleStyle }))}>
+                {MODULE_STYLES.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </label>
           </div>
-
-          <div className="artqr-grid2">
-            <label className="artqr-range">
-              <span>徽章大小 <b>{logoScalePct}%</b></span>
-              <input type="range" min={12} max={26} step={1} value={logoScalePct}
-                onChange={e => setLogoScalePct(Number(e.target.value))} />
-            </label>
-            <label className="artqr-range">
-              <span>背景圖案 <b>{artStrengthPct}%</b></span>
-              <input type="range" min={0} max={100} step={5} value={artStrengthPct}
-                onChange={e => setArtStrengthPct(Number(e.target.value))} />
-            </label>
-          </div>
-
-          <div className="artqr-logo">
-            <div>
-              <div className="artqr-label" style={{ marginTop: 0 }}>自訂中央徽章（可選）</div>
-              <p className="fps-help" style={{ margin: '2px 0 8px' }}>
-                上傳真實區章 PNG（建議正方形、透明底），就會取代內建圖案。
-              </p>
-            </div>
-            <div className="artqr-logo-actions">
-              <label className="btn-sm fps-secondary-btn artqr-upload">
-                {logoName ? '更換圖片' : '⬆️ 上傳徽章'}
-                <input type="file" accept="image/png,image/jpeg,image/svg+xml" hidden
-                  onChange={e => { pickLogo(e.target.files?.[0] || null); e.target.value = ''; }} />
-              </label>
-              {logoName && (
-                <button type="button" className="btn-sm fps-secondary-btn" onClick={clearLogo}>✕ 移除</button>
-              )}
-            </div>
-            {logoName && <p className="artqr-filename">已套用：{logoName}</p>}
-          </div>
+          <p className="fps-help" style={{ marginTop: 10 }}>
+            融合強度愈高，區章顏色愈實、燈塔愈清楚；調低會慢慢變返普通黑白 QR。
+            正式出街前，請用銀行 App 或者手機相機試掃一次。
+          </p>
         </section>
 
         <section className="info-card">
@@ -439,7 +350,7 @@ export default function ArtQrStudio({
       {/* 右：預覽 */}
       <aside className="artqr-preview">
         <div className="artqr-canvas-wrap">
-          <canvas ref={previewRef} className="artqr-canvas" aria-label="藝術 QR 預覽" />
+          <canvas ref={previewRef} className="artqr-canvas" aria-label="區章 QR 預覽" />
           {!payload && (
             <div className="artqr-empty">
               <b>請先輸入 QR 內容</b>
@@ -465,10 +376,9 @@ export default function ArtQrStudio({
             <div className="artqr-meter"><i style={{ width: `${safety.score}%` }} /></div>
             <p>{safety.label}</p>
             <p className="artqr-safety-meta">
-              版本 {matrixInfo?.count ? `QR v${matrixInfo.count}` : '—'} ·
+              版本 {matrixInfo?.count ? `QR v${matrixInfo.version}` : '—'} ·
               內容 {matrixInfo?.bytes ?? 0} bytes ·
               容錯級別 H（30%）
-              {design.moduleStyle === 'diamond' ? ' · 菱形邊緣較斜，細張印刷要留意' : ''}
             </p>
           </div>
         )}
@@ -493,7 +403,7 @@ export default function ArtQrStudio({
             <li>用銀行 App／手機相機<b>實際試掃一次</b>，核對戶口、銀碼、參考編號。</li>
             <li>印刷建議 QR 本體大於 <b>3 公分</b>；海報用 5 公分以上。</li>
             <li>四邊留白（靜區）已經畫埋，剪裁時唔好剪到 QR 本體。</li>
-            <li>中央徽章愈大愈靚，但掃描愈難——20% 係平衡點，唔肯定就 18%。</li>
+            <li>唔同銀碼會出唔同紋理，屬正常現象——因為每個 QR 都係獨立內容。</li>
             <li>呢個工具會直接讀「FPS QR Code 製作」嘅區會戶口設定，唔會另外存低你嘅銀碼。</li>
           </ul>
         </div>

@@ -5,6 +5,18 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.21.0 — 🎨 區章融合 QR：整幅 QR 就係筲箕灣區章</h3>
+        <ul>
+          <li>🎨 <b>唔再係「中間貼圖」</b>：新「區章融合 QR」模式（/fps 預設）將<b>每一個 QR 模組</b>變成畫筆——寶藍底、白色光束、黑白格燈塔、三條海浪，全部由 QR 方塊砌出嚟</li>
+          <li>🧠 <b>QArt 式碼字改寫</b>：喺 H 級容錯額度內改寫資料碼字，深色模組啱啱好落喺燈塔黑位；淺色位唔浪費額度，將容錯留返畀真實污損</li>
+          <li>🎯 <b>自動夾圖</b>：八個 QR mask 逐個試，用「深色模組 × 構圖深色位」對位分數揀最好嗰個；半色調上色令遠看係區章、近看係完整 QR</li>
+          <li>🎚 <b>可調</b>：融合強度 40–100%、主題（區章／燈塔黃昏／海港夜色／百合花）、方塊／微圓角、頂部同底部文字</li>
+          <li>🛡 <b>自適應安全</b>：輸出太細或內容太長會自動收斂融合度；六格靜區、模組 1.2px bleed、定位眼保持原大</li>
+          <li>✅ <b>實測</b>：4 種內容 × 4 主題 × 2 模組 × 3 融合強度 × 2 尺寸（192 款）用 ZXing <b>100% 解碼成功</b>；jsQR 184/192</li>
+          <li>ℹ️ <b>純前端</b>，唔使換 <code>Code.gs</code>；文件：<code>docs/art-qr.md</code>、驗證：<code>scripts/verify-art-qr-fusion.ts</code></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.20.0 — 🌊 場景 QR：整個 QR 融入區章／燈塔，仲可以 3D 打印</h3>
         <ul>
           <li>🌊 <b>唔再係中間擺個 logo</b>：新「🌊 融入區章／燈塔 + 3D」模式會將 QR 直接<b>融入底圖</b>——逐像素保留原圖色相／刺繡紋理，只把亮度推去深淺兩極，QR 同圖案合而為一</li>
