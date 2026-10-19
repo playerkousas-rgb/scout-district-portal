@@ -5,6 +5,17 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.19.0 — 🎨 藝術 QR：FPS 收款碼變身區章／燈塔設計</h3>
+        <ul>
+          <li>🎨 <b>一鍵出藝術 QR</b>：「💳 FPS QR 製作」新增 <b>🎨 藝術 QR（區章／燈塔）</b> 模式，同標準黑白 QR 自由切換——QR 內容、FPS 戶口、CRC 完全一樣，只係畫法唔同，銀行 App 照掃得</li>
+          <li>🌊 <b>四個主題</b>：海岸燈塔（光束＋海浪）、區章（羅盤線＋縫線圈）、百合花（童軍水印）、簡約；四個配色：海港藍金／童軍綠／日落紅／單色印刷</li>
+          <li>⚜️ <b>五款中央徽章</b>（燈塔／百合花／羅盤／船錨／跟主題），亦可以<b>上傳真實區章</b> PNG／JPG／SVG 直接畫喺 QR 中央（只留喺瀏覽器，唔會上傳）</li>
+          <li>🛡 <b>掃描安全</b>：H 級錯誤修正（30%）、徽章直徑預設 20%、定位眼保持 1:1:3:1:1、圓點／菱形補連通橋；頁面即時顯示「掃描穩定度」。實測 192 款組合用 ZXing 全部解碼成功</li>
+          <li>⬇️ <b>輸出</b>：1600 × 1600 PNG 下載、複製圖片、系統分享；頂部／底部文字可自訂（預設「香港童軍總會 · 筲箕灣區」）</li>
+          <li>ℹ️ <b>純前端</b>：唔使換 <code>Code.gs</code>、唔使跑 <code>setupSheets()</code>、member-portal 唔使改；新依賴只有 <code>qrcode-generator</code>（MIT）。詳情見 <code>docs/art-qr.md</code></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.18.0 — 🔑 6.2.1 對接：靠班 GS 網址（fileId）＋區系統密匙（opsKey）對班、批核</h3>
         <ul>
           <li>🔑 <b>唔使再逐班搵／存公開課程ID</b>：CL 交嚟班 GS 網址 → 後台自動抽 <code>fileId</code> → 用 <code>opsKey</code>＋<code>fileId</code> 對班（白名單 action：<code>getCourseProfile／getCourseSummary／listRegs／listBudgetVersions／setPaymentCheck／setCourseRefund／approveBudgetVersion</code>）；舊路 <code>opsKey</code>＋<code>publicCourseId</code> 照用得，兩條路並存</li>

@@ -11,6 +11,7 @@ import {
   DEFAULT_FPS_ACCOUNT, FPS_ID_PATTERN, buildFpsPayload, checkAmount, checkReference, formatFileName,
 } from '@/lib/fps';
 import BackLink, { BackBar } from '@/components/BackLink';
+import ArtQrStudio from '@/components/ArtQrStudio';
 
 type Feedback = { tone: 'success' | 'error' | 'info'; text: string } | null;
 
@@ -29,6 +30,8 @@ export default function FpsPage() {
   const [reference, setReference] = useState('');
   const [staticMode, setStaticMode] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
+  // v4.19.0：同一個 FPS 戶口，可以揀「標準 QR」或者「🎨 藝術 QR（區章／燈塔）」
+  const [mode, setMode] = useState<'standard' | 'art'>('art');
   const [workingAction, setWorkingAction] = useState<'copy' | 'share' | 'download' | 'payload' | ''>('');
 
   useEffect(() => {
@@ -193,8 +196,26 @@ export default function FpsPage() {
     <>
       <BackLink />
       <h1 className="page-title">💳 FPS QR Code 製作</h1>
-      <p className="page-sub">輸入銀碼後即時生成轉數快收款 QR Code，可複製、分享或下載，不再需要前往外部網站。</p>
+      <p className="page-sub">輸入銀碼後即時生成轉數快收款 QR Code，可揀標準黑白版本，或者畫成筲箕灣區章／燈塔風格。</p>
 
+      <div className="fps-mode-switch" role="tablist" aria-label="QR 樣式">
+        <button type="button" role="tab" aria-selected={mode === 'art'}
+          className={mode === 'art' ? 'active' : ''} onClick={() => setMode('art')}>
+          🎨 藝術 QR（區章／燈塔）
+        </button>
+        <button type="button" role="tab" aria-selected={mode === 'standard'}
+          className={mode === 'standard' ? 'active' : ''} onClick={() => setMode('standard')}>
+          ▦ 標準 QR
+        </button>
+      </div>
+
+      {mode === 'art' && (
+        cfgLoaded
+          ? <ArtQrStudio fpsAccount={{ name: accountName, id: cleanFpsId }} initialAmount={amount} initialReference={reference} />
+          : <div className="info-card"><div className="small-loading">載入戶口設定中…</div></div>
+      )}
+
+      {mode === 'standard' && (<>
       <section className="info-card">
         <div className="section-head"><div><h3>已綁定收款戶口</h3></div></div>
         {!cfgLoaded ? <div className="small-loading">載入戶口設定中…</div> : (
@@ -299,6 +320,7 @@ export default function FpsPage() {
           </div>
         </section>
       )}
+      </>)}
       <BackBar />
     </>
   );
