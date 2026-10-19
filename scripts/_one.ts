@@ -1,0 +1,13 @@
+import { createCanvas } from '@napi-rs/canvas';
+import { writeFileSync } from 'node:fs';
+import jsQR from 'jsqr';
+import { drawFullArtQr } from '../lib/artQrFull';
+import { buildFpsPayload } from '../lib/fps';
+const [source, ecl, amt, style, pxs] = process.argv.slice(2);
+const px = Number(pxs || 1200);
+const text = buildFpsPayload('102866183', amt || '', '');
+const c = createCanvas(px, px);
+const res = drawFullArtQr(c.getContext('2d') as any, px, { text, source: source as any, fusion: 0.9, ecl: ecl as any, autoMask: true, moduleStyle: (style || 'dot') as any, quietZone: 4, paper: '#fff', caption: '', makeCanvas: (w: number, h: number) => createCanvas(w, h) as any });
+const d = c.getContext('2d').getImageData(0, 0, px, px).data;
+console.log(source, ecl, style, px, 'n=' + res.size, 'mask=' + res.mask, jsQR(d as any, px, px)?.data === text ? 'jsQR ok' : 'jsQR FAIL');
+writeFileSync(`/home/user/artqr-samples/one-${source}-${ecl}-${style}-${px}.png`, c.toBuffer('image/png'));

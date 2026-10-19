@@ -5,6 +5,18 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.22.0 — 🎨 FPS QR → 區章藝術 QR（整幅 QR 都係圖）</h3>
+        <ul>
+          <li>🎨 <b>唔再係「中間貼圖」</b>：「💳 FPS QR 製作」嘅<b>藝術 QR</b> 分頁，將<b>每一個 QR 模組</b>變成畫筆——深藍底、白色光束、黑白格燈塔、白色 zig-zag 海浪，全部由 QR 方塊砌出嚟</li>
+          <li>💰 <b>銀碼即改即變</b>：輸入幾多錢就生成一個新 QR；構圖位置永遠唔變（燈塔、光束、海浪固定），只係方塊紋理跟資料變</li>
+          <li>🖼 <b>三種圖案</b>：筲箕灣區章（預設）／海岸燈塔／上傳自己嘅區章相或插畫</li>
+          <li>🎚 <b>可調</b>：融合強度 50–100%、方塊／微圓角／圓點、容錯級別 M／Q／H、底部文字</li>
+          <li>⬇️ <b>輸出</b>：1600 × 1600 PNG 下載、複製到剪貼板；附「掃描安全度」即時提示</li>
+          <li>✅ <b>實測</b>：3 圖案 × M/Q/H × 3 形狀 × 3 銀碼 × 600/1200px（162 款）——jsQR <b>162/162</b>；ZXing 對照純黑白 QR 只有 132/162（JS 版本身嘅限制），藝術版 <b>143/162</b>，因圖案而失誤只有 <b>1 款</b></li>
+          <li>ℹ️ <b>純前端</b>，唔使換 <code>Code.gs</code>；FPS 內容（戶口／金額／參考編號／CRC）完全冇改，只係換畫法。文件：<code>docs/art-qr.md</code>、驗證：<code>scripts/verify-fps-art.ts</code></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.18.0 — 🔑 6.2.1 對接：靠班 GS 網址（fileId）＋區系統密匙（opsKey）對班、批核</h3>
         <ul>
           <li>🔑 <b>唔使再逐班搵／存公開課程ID</b>：CL 交嚟班 GS 網址 → 後台自動抽 <code>fileId</code> → 用 <code>opsKey</code>＋<code>fileId</code> 對班（白名單 action：<code>getCourseProfile／getCourseSummary／listRegs／listBudgetVersions／setPaymentCheck／setCourseRefund／approveBudgetVersion</code>）；舊路 <code>opsKey</code>＋<code>publicCourseId</code> 照用得，兩條路並存</li>
