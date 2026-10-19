@@ -5,6 +5,18 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.20.0 — 🌊 場景 QR：整個 QR 融入區章／燈塔，仲可以 3D 打印</h3>
+        <ul>
+          <li>🌊 <b>唔再係中間擺個 logo</b>：新「🌊 融入區章／燈塔 + 3D」模式會將 QR 直接<b>融入底圖</b>——逐像素保留原圖色相／刺繡紋理，只把亮度推去深淺兩極，QR 同圖案合而為一</li>
+          <li>🖼 <b>底圖</b>：內建刺繡區章（燈塔＋金繩圈）同燈塔黃昏插畫；亦可<b>上傳自己嘅圖</b>（真實區章、相片、AI 圖）</li>
+          <li>🎯 <b>自動夾圖</b>：喺 8 個 QR mask 中揀最深淺對位嗰個；三個定位眼同時序線鎖死全對比，唔會被圖案蓋過</li>
+          <li>🪡 <b>模組形狀</b>：方塊／刺繡針腳／圓角；融圖強度同浮雕高度可調</li>
+          <li>🧊 <b>3D</b>：拖拽旋轉嘅立體預覽（刺繡布章／金屬徽章／木牌材質），並可<b>下載 STL</b>（100×100mm、模組凸起 1.8mm）交去 3D 打印</li>
+          <li>🛡 <b>實測</b>：2 張底圖 × 3 模組 × 4 融圖強度 × 3 靜區（共 72 款）用 ZXing <b>全部解碼成功</b></li>
+          <li>ℹ️ <b>純前端</b>，唔使換 <code>Code.gs</code>；新依賴 <code>qrcode</code>（MIT）。文件：<code>docs/art-qr.md</code></li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.19.0 — 🎨 藝術 QR：FPS 收款碼變身區章／燈塔設計</h3>
         <ul>
           <li>🎨 <b>一鍵出藝術 QR</b>：「💳 FPS QR 製作」新增 <b>🎨 藝術 QR（區章／燈塔）</b> 模式，同標準黑白 QR 自由切換——QR 內容、FPS 戶口、CRC 完全一樣，只係畫法唔同，銀行 App 照掃得</li>

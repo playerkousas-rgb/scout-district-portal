@@ -12,6 +12,7 @@ import {
 } from '@/lib/fps';
 import BackLink, { BackBar } from '@/components/BackLink';
 import ArtQrStudio from '@/components/ArtQrStudio';
+import SceneQrStudio from '@/components/SceneQrStudio';
 
 type Feedback = { tone: 'success' | 'error' | 'info'; text: string } | null;
 
@@ -31,7 +32,8 @@ export default function FpsPage() {
   const [staticMode, setStaticMode] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
   // v4.19.0：同一個 FPS 戶口，可以揀「標準 QR」或者「🎨 藝術 QR（區章／燈塔）」
-  const [mode, setMode] = useState<'standard' | 'art'>('art');
+  // 'scene' = 將 QR 融入區章／燈塔（預設）；'art' = 舊版中央徽章；'standard' = 黑白 QR
+  const [mode, setMode] = useState<'standard' | 'art' | 'scene'>('scene');
   const [workingAction, setWorkingAction] = useState<'copy' | 'share' | 'download' | 'payload' | ''>('');
 
   useEffect(() => {
@@ -199,9 +201,13 @@ export default function FpsPage() {
       <p className="page-sub">輸入銀碼後即時生成轉數快收款 QR Code，可揀標準黑白版本，或者畫成筲箕灣區章／燈塔風格。</p>
 
       <div className="fps-mode-switch" role="tablist" aria-label="QR 樣式">
+        <button type="button" role="tab" aria-selected={mode === 'scene'}
+          className={mode === 'scene' ? 'active' : ''} onClick={() => setMode('scene')}>
+          🌊 融入區章／燈塔 + 3D
+        </button>
         <button type="button" role="tab" aria-selected={mode === 'art'}
           className={mode === 'art' ? 'active' : ''} onClick={() => setMode('art')}>
-          🎨 藝術 QR（區章／燈塔）
+          🎨 中央徽章
         </button>
         <button type="button" role="tab" aria-selected={mode === 'standard'}
           className={mode === 'standard' ? 'active' : ''} onClick={() => setMode('standard')}>
@@ -209,9 +215,11 @@ export default function FpsPage() {
         </button>
       </div>
 
-      {mode === 'art' && (
+      {(mode === 'art' || mode === 'scene') && (
         cfgLoaded
-          ? <ArtQrStudio fpsAccount={{ name: accountName, id: cleanFpsId }} initialAmount={amount} initialReference={reference} />
+          ? (mode === 'scene'
+            ? <SceneQrStudio fpsAccount={{ name: accountName, id: cleanFpsId }} initialAmount={amount} initialReference={reference} />
+            : <ArtQrStudio fpsAccount={{ name: accountName, id: cleanFpsId }} initialAmount={amount} initialReference={reference} />)
           : <div className="info-card"><div className="small-loading">載入戶口設定中…</div></div>
       )}
 

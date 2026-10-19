@@ -1016,3 +1016,35 @@ a{color:inherit;text-decoration:none;}
   .fps-mode-switch{display:flex;width:100%;}
   .fps-mode-switch button{flex:1;padding:8px 10px;font-size:12.5px;}
 }
+
+/* ── 🌊 場景 QR 工作室：QR 融入區章／燈塔（v4.20.0）───────────── */
+.sceneqr{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);gap:22px;align-items:start;}
+.sceneqr-controls{display:flex;flex-direction:column;gap:16px;min-width:0;}
+.sceneqr-preview{position:sticky;top:16px;display:flex;flex-direction:column;gap:12px;min-width:0;}
+.sceneqr-stage{position:relative;perspective:1400px;perspective-origin:50% 45%;background:radial-gradient(circle at 50% 20%,#eef3f8 0%,#dbe4ee 45%,#c8d5e3 100%);border:1px solid #cbd5e1;border-radius:18px;padding:34px 26px 26px;min-height:380px;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;cursor:grab;user-select:none;}
+.sceneqr-stage:active{cursor:grabbing;}
+.sceneqr-3d{position:relative;width:100%;max-width:330px;aspect-ratio:1;transform-style:preserve-3d;transition:transform .12s linear;filter:drop-shadow(0 26px 28px var(--shadow));}
+.sceneqr-face{position:absolute;inset:0;border-radius:14px;overflow:hidden;background:var(--surface);box-shadow:inset 0 0 0 1px rgba(255,255,255,.35);}
+.sceneqr-canvas{display:block;width:100%;height:100%;border-radius:14px;}
+.sceneqr-edge{position:absolute;background:var(--edge);}
+.sceneqr-edge-b{left:0;right:0;bottom:-14px;height:14px;border-radius:0 0 14px 14px;transform-origin:top center;transform:rotateX(-90deg);}
+.sceneqr-edge-t{left:0;right:0;top:-14px;height:14px;transform-origin:bottom center;transform:rotateX(90deg);border-radius:14px 14px 0 0;}
+.sceneqr-edge-l{top:0;bottom:0;left:-14px;width:14px;transform-origin:right center;transform:rotateY(-90deg);border-radius:14px 0 0 14px;}
+.sceneqr-edge-r{top:0;bottom:0;right:-14px;width:14px;transform-origin:left center;transform:rotateY(90deg);border-radius:0 14px 14px 0;}
+.sceneqr-hint{position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:11px;color:#64748b;letter-spacing:.06em;pointer-events:none;}
+.sceneqr-arts{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px;margin-bottom:6px;}
+.sceneqr-art{display:flex;flex-direction:column;gap:6px;padding:6px;border:1.5px solid #dbe4ee;border-radius:10px;background:#fff;cursor:pointer;font:inherit;overflow:hidden;}
+.sceneqr-art img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;display:block;}
+.sceneqr-art span{font-size:11.5px;font-weight:700;color:#475569;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.sceneqr-art.active{border-color:var(--p2);background:#eff6ff;box-shadow:0 0 0 3px rgba(21,101,192,.12);}
+.sceneqr-art.upload{align-items:center;justify-content:center;border-style:dashed;min-height:96px;}
+.sceneqr-art-plus{font-size:22px;}
+.sceneqr-3d-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;}
+.sceneqr-3d-actions .btn-sm{padding:10px 8px;font-size:12.5px;white-space:nowrap;}
+.sceneqr-3d-actions .btn-sm:first-child{grid-column:1 / -1;}
+@media (max-width: 900px){
+  .sceneqr{grid-template-columns:1fr;}
+  .sceneqr-preview{position:static;}
+  .sceneqr-stage{min-height:320px;padding:22px 18px 20px;}
+  .sceneqr-3d{max-width:280px;}
+}
