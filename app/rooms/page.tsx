@@ -1,9 +1,10 @@
 'use client';
 /**
- * 🏢 地域房間及區總部使用情況
+ * 🏢 區總部及地域房間使用情況
  * 地域 17／18／19 樓：/api/external 拉公開 Google ICS（3 分鐘快取）；
- * 區總部：共用後台讀 Teamup「確認借用」紅色子日曆，只傳佔用時段，不傳聯絡資料／鎖碼。
- * 月曆、逐個地點及今日總覽將區總部當成一個展示樓層；Google ICS 房間來源維持獨立。
+ * 區總部：月曆及逐個地點嵌入成員系統同一公開 Teamup 原版日曆；今日已 BOOK 狀態
+ * 由 Vercel 唯讀紅色「確認借用區總部」ICS 計算，只傳匿名時段、不傳私人資料／鎖碼。
+ * 區總部亦保留現有格仔／時段展示，地域 17／18／19 樓來源維持不變；GS 維持 4.18.0。
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -14,6 +15,8 @@ import { FLOORS, ROOMS, ROOM_NOTES } from '@/lib/roomsDirectory';
 import { SOURCES } from '@/lib/externalSources';
 import { HK_OFFSET_MS, hkDayStart, hkDow, hkHm, hkStartOfDay, hkYmd, type IcsEvent } from '@/lib/ics';
 import { districtHqByDay, districtHqTimeOnDay, USAGE_FLOORS, type UsageFloorId } from '@/lib/districtHqCalendar';
+import { ROOMS_CARD_TITLE } from '@/lib/roomCardLabel';
+import TeamupCalendarEmbed from '@/components/TeamupCalendarEmbed';
 
 type Mode = 'calendar' | 'room' | 'today' | 'embed';
 const MODES: { id: Mode; label: string }[] = [
@@ -74,6 +77,8 @@ export default function RoomsPage() {
   const [hqEvents, setHqEvents] = useState<IcsEvent[]>([]);
   const [hqConfigured, setHqConfigured] = useState<boolean | null>(null);
   const [hqError, setHqError] = useState('');
+  const [teamupUrl, setTeamupUrl] = useState('');
+  const [teamupLinkError, setTeamupLinkError] = useState('');
   const [fetchedAt, setFetchedAt] = useState('');
   const [stale, setStale] = useState('');
   const [loading, setLoading] = useState(true);
@@ -85,6 +90,18 @@ export default function RoomsPage() {
   const calDays = useMemo(() => daysInMonth(calY, calM), [calY, calM]);
 
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(id); }, []);
+  // 與 ICS 讀取分開：即使今日狀態暫讀不到，仍可打開成員系統同一個 Teamup 原版日曆。
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    setTeamupLinkError('');
+    api.extTeamupCalendarLink().then((result) => {
+      if (cancelled) return;
+      if (result.ok && result.data?.url) setTeamupUrl(result.data.url);
+      else { setTeamupUrl(''); setTeamupLinkError(result.error || '公開日曆無法載入'); }
+    });
+    return () => { cancelled = true; };
+  }, [session, tick]);
 
   const todayKey = hkYmd(now);
   const hqRoomMode = mode === 'room' && floor === 'hq';
@@ -99,7 +116,7 @@ export default function RoomsPage() {
       try {
         const [r, hq] = await Promise.all([
           hqRoomMode ? Promise.resolve(null) : api.extRooms('', requestFrom, requestDays),
-          showHq ? api.getDistrictHqBookings(session.token, requestFrom, requestDays) : Promise.resolve(null),
+          showHq ? api.extDistrictHqBookings(session.token, requestFrom, requestDays) : Promise.resolve(null),
         ]);
         if (cancelled) return;
         if (r) {
@@ -199,8 +216,8 @@ export default function RoomsPage() {
   return (
     <>
       <BackLink />
-      <h1 className="page-title">🏢 地域房間及區總部使用情況</h1>
-      <p className="page-sub">同一張查閱卡：地域 17／18／19 樓房間及區總部（紅色），可用月曆、逐個地點及今日總覽查看；只有「地域原版日曆」不包含區總部。</p>
+      <h1 className="page-title">🏢 {ROOMS_CARD_TITLE}</h1>
+      <p className="page-sub">月曆及逐個地點可查看成員系統同一個 Teamup 原版日曆，並列地域 17／18／19 樓；今日總覽只用紅色已批事件判斷區總部有冇借用。只有「地域原版日曆」不包含區總部。</p>
 
       <div className="inc-tabs" role="tablist">
         {MODES.map(m => (
@@ -215,9 +232,9 @@ export default function RoomsPage() {
 
       {error && <div className="err">❌ {error}<div style={{ fontSize: 12, marginTop: 4 }}>可先到原網站查看：<a href={SOURCES.roomsSite} target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>hkir-rooms ↗</a></div></div>}
       {showHq && !loading && hqConfigured === false &&
-        <div className="err">⚠️ 區總部日曆未設定：請管理員設定 Teamup API Key、日曆 ID 同紅色「確認借用區總部」子日曆 ID。以下只顯示地域房間，唔代表區總部冇預約。</div>}
+        <div className="err">⚠️ 區總部已批時段來源未設定；今日狀態未知，唔代表冇預約，可先查看 Teamup 原版日曆。</div>}
       {showHq && !loading && hqError &&
-        <div className="err">⚠️ 區總部已確認借用資料暫時讀唔到：{hqError}。以下只顯示地域房間，唔代表區總部冇預約。</div>}
+        <div className="err">⚠️ 區總部已批時段暫時讀唔到：{hqError}。今日狀態未知，唔代表冇預約，可先查看 Teamup 原版日曆。</div>}
 
       {/* ── 📅 月曆模式：地域房間 + 區總部紅色已確認借用 ── */}
       {mode === 'calendar' && (
@@ -233,6 +250,10 @@ export default function RoomsPage() {
             </span>
           </div>
 
+          {teamupUrl ? <TeamupCalendarEmbed url={teamupUrl} view="m" date={calFrom} title="區總部 · 成員系統同一 Teamup 月曆" /> :
+            teamupLinkError ? <p className="fps-notice">⚠️ {teamupLinkError}；下方月曆會獨立顯示已讀到的佔用時段，請勿將未知當成空置。</p> :
+            <div className="center"><div className="spinner" /></div>}
+          <h2 className="room-section-title">地域房間及區總部已批時段 · {calY} 年 {calM + 1} 月</h2>
           {loading ? <div className="center"><div className="spinner" /></div> : (
             <>
               <div className="cal-grid">
@@ -247,18 +268,19 @@ export default function RoomsPage() {
                   const dow = hkDow(d);
                   // 格仔最多列三節；有區總部時至少保留一個紅色標記，其餘點格仔睇晒。
                   const preview = list.slice(0, 3);
+                  const hqUnknown = (calFloor === 'all' || calFloor === 'hq') && !hqReady;
                   if (list.length > 3 && !preview.some(b => b.floor === 'hq')) {
                     const confirmed = list.find(b => b.floor === 'hq');
                     if (confirmed) { preview[2] = confirmed; preview.sort((a, b) => a.start - b.start); }
                   }
                   return (
                     <button
-                      key={ymd} className={`cal-cell ${list.length ? 'has' : 'free'} ${isToday ? 'today' : ''} ${isSel ? 'sel' : ''} ${dow === '日' || dow === '六' ? 'wknd' : ''}`}
+                      key={ymd} className={`cal-cell ${list.length ? 'has' : hqUnknown ? 'unknown' : 'free'} ${isToday ? 'today' : ''} ${isSel ? 'sel' : ''} ${dow === '日' || dow === '六' ? 'wknd' : ''}`}
                       onClick={() => setSelDay(isSel ? '' : ymd)}
                     >
                       <span className="cal-d">{i + 1}</span>
                       {list.length === 0 ? (
-                        <span className="cal-free">—</span>
+                        <span className="cal-free" title={hqUnknown ? '區總部資料不可用，請勿當作空置' : undefined}>{hqUnknown ? '區總部未知' : '—'}</span>
                       ) : (
                         <span className="cal-events">
                           {preview.map((b, j) => (
@@ -284,7 +306,7 @@ export default function RoomsPage() {
                     <button className="mini-btn ghost" onClick={() => setSelDay('')}>收起</button>
                   </div>
                   {selList.length === 0 ? (
-                    <p className="empty">{calFloor === 'hq' && hqConfigured !== true ? '區總部資料暫時不可用，請勿當作空置。' : '未見預約；請留意上方資料來源提示。'}</p>
+                    <p className="empty">{(calFloor === 'hq' || calFloor === 'all') && !hqReady ? '區總部資料暫時不可用，請勿當作空置；地域房間另見上方來源提示。' : '未見預約；請留意上方資料來源提示。'}</p>
                   ) : (
                     <div className="cal-day-list">
                       {selList.map((b, i) => {
@@ -390,6 +412,11 @@ export default function RoomsPage() {
               </div>
             )}
           </div>
+
+          {hqRoomMode && (teamupUrl ?
+            <TeamupCalendarEmbed url={teamupUrl} view="w" date={from} title="區總部 · 成員系統同一 Teamup 日曆" /> :
+            teamupLinkError ? <p className="fps-notice">⚠️ {teamupLinkError}；以下仍會獨立列出已批時段，但無資料不代表空置。</p> :
+            <div className="center"><div className="spinner" /></div>)}
 
           {mode === 'embed' ? (
             <div className="embed-shell room-embed">
@@ -514,7 +541,7 @@ export default function RoomsPage() {
       <section className="info-card" style={{ marginTop: 16 }}>
         <div className="section-head"><div><h3>ℹ️ 地域房間使用須知</h3></div></div>
         <ul>{ROOM_NOTES.map((n, i) => <li key={i}>{n}</li>)}</ul>
-        <p className="fps-help">地域房間來源：<a href={SOURCES.roomsSite} target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>港島地域房間日曆網站 ↗</a>（公開 Google 日曆，每 3 分鐘同步一次）。區總部來源：Teamup 紅色「確認借用區總部」子日曆（每次開頁／更新時讀取，只顯示匿名佔用時段；申請中不顯示）。本頁只供查閱，唔會改動任何預約。</p>
+        <p className="fps-help">地域房間來源：<a href={SOURCES.roomsSite} target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>港島地域房間日曆網站 ↗</a>（公開 Google 日曆，每 3 分鐘同步一次）。區總部來源：Teamup 公開唯讀 iCalendar 的紅色「確認借用區總部」子日曆（只顯示匿名佔用時段；申請中不顯示；來源可能有同步延遲，僅涵蓋近半年至未來一年，超出範圍會標示不可用）。本頁只供查閱，唔會改動任何預約。</p>
       </section>
       <BackBar />
     </>

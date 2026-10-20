@@ -3,6 +3,8 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
+> **現時正式共用後台維持可用的 v4.18.0。** 倉庫內 v4.19.1 `gs/Code.gs` 登入另要求 `PORTAL_TOKEN_SECRET`，未完成遷移之前**唔可以覆蓋正式 4.18.0**。區總部房間讀取改用 Vercel 公開唯讀 Teamup ICS，**不需更動 GS／Users／Sheet／密碼**，見[房間設定](docs/venue-booking-flow.md)。下方「全新部署」步驟不適用於今次房間修正。
+>
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
 ---
@@ -188,16 +190,16 @@
 - 後台邏輯測試（唔使開 Apps Script）：`node scripts/test-news-gs.js`（35 項）。
 - 對齊檢查：`node scripts/check-member-alignment.js`（action／欄位名／`level` 值域／proxy 安全邊界）。
 
-## 🏢 地域房間及區總部使用情況（`/rooms`）
+## 🏢 區總部及地域房間使用情況（`/rooms`）
 
 主控台 `rooms` 卡片及頁面已改名；**所有已登入區系統人士均可查閱**，即使個別帳戶 `cards` 欄有限制。借場**審批係另一張 `venueReg` 卡**：只顯示畀真係有 `canVenue` 權限嘅人（預設 DC／SYSADMIN／DDC_ADMIN／DDC_TRAINING／STAFF），睇日曆唔等於有審批權。示範模式嘅 mockAdmin 為全權功能示範身份，唔代表 ADC 正式權限。月曆／逐個地點／今日總覽同時顯示：
 
 - **地域房間**：17／18／19 樓公開 Google Calendar ICS，沿用原本逐間房／打通房計算及 3 分鐘快取。
-- **區總部**：管理後台用已登入 `rooms` 卡權限即時查 **Teamup 紅色「確認借用區總部」子日曆**（`TEAMUP_APPROVED_SUBCAL_ID`）；唔會只按借場表已批准記錄，直接喺 Teamup 建嘅確認事件亦會顯示。作為 **17／18／19 樓以外的同一個樓層**，可在月曆揀區總部篩選、在「逐個地點」查看逐日時段，以及在今日總覽看當天狀態並按入詳情。為保障私隱，只回傳時間與「已確認借用」，唔會回傳人名、notes、入場密碼或原始 Teamup ID；未設定／讀取失敗會顯示警告，**唔代表區總部空置**。
+- **區總部**：月曆及「逐個地點」直接嵌入**成員系統同一公開 Teamup 日曆**（地域房間照舊顯示）；原有月曆格仔、逐日時段及今日總覽保留。今日「有冇已 BOOK」由 Vercel 唯讀紅色「確認借用區總部」iCalendar 子日曆判斷，包括手動加入的確認事件，**不計藍色申請中**，亦唔靠借場表批准狀態。JSON 僅含匿名時段，唔回傳人名、備註、入場密碼或原始 Teamup ID；來源讀不到會顯示警告，**唔代表區總部空置**。
 
-**正式啟用**：更新 `gs/Code.gs`、執行 `setupSheets()` 保留既有資料及自訂卡片名稱、重新部署 Apps Script Web App，再部署新版前端；Config 核對 `TEAMUP_API_KEY`、`TEAMUP_CALENDAR_KEY`、`TEAMUP_APPROVED_SUBCAL_ID` 指向同一個 Teamup 紅色已確認子日曆。現有 `PORTAL_{區碼}_APIKEY` 代理設定照舊，**不要將 Teamup Token 放喺前端**。舊版 `get-ids.js`／文件曾將 Token 提交到 Git，今次已移除明文，但 Git 歷史仍可能見到：請喺 Teamup **輪換舊 Token** 並更新後台 Config，唔好重用舊值。用手動建立嘅紅色 Teamup 事件核實，而唔係只睇借場批核表。詳見 [`docs/venue-booking-flow.md`](docs/venue-booking-flow.md)。
+**正式啟用（維持可登入的 GS v4.18.0）**：只部署此 Next.js/Vercel 改動；**唔使**更新 Apps Script、執行 `setupSheets()`、改 Sheet 或任何登入密碼。原有 `PORTAL_SKW_APIKEY` 照舊，網址優先讀共用 Config `TEAMUP_BOOKING_URL`（透過 `getPublicInfo.teamupBookingUrl`），留空先沿用成員系統公開後備網址；本倉唔硬編碼公開分享連結。已按用戶提供的現有 Config 數字確認**紅色 11188257**、藍色 11188256，直接讀紅色 feed；預設**唔使加 Vercel env**。日後 ID 變更才可選用 `TEAMUP_APPROVED_SUB_ID` 覆蓋，但會驗證來源屬紅色日曆。**不用 Teamup API Token**。不要將本倉 v4.19.1 GS 覆蓋正式 4.18.0（未設 `PORTAL_TOKEN_SECRET` 會阻擋登入）。詳細對照見 [`docs/venue-booking-flow.md`](docs/venue-booking-flow.md)。
 
-本地示範 `?demo=1` 有匿名示範事件；測試：`node scripts/test-district-hq-gs.js`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node scripts/test-upgrade-gs.js`、`node --experimental-strip-types scripts/test-demo-engine.ts`、`npm run build`。以上測試唔需要真 Teamup 憑據；**尚需部署後用真實 Teamup 日曆做端到端核對**。
+本地示範 `?demo=1` 有匿名示範事件（不嵌入真日曆）；測試：`node --experimental-strip-types scripts/test-teamup-hq-ics.ts`、`node --experimental-strip-types scripts/test-room-card-compat.ts`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node --experimental-strip-types scripts/test-demo-engine.ts`、`npm run build`。2026-10-20 已獨立取得用戶公開連結的**紅色單一子日曆 ICS**，確認類別及每月第一個星期五重複規則；測試加入相同格式的匿名樣本。**Vercel 預覽受登入保護，尚需部署後核對頁面真實回應**；不能把來源測試當成正式畫面已驗收。
 
 ## 🪪 YMIS 會員核實（人工登入卡）
 

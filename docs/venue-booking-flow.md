@@ -4,8 +4,8 @@
 
 而家先測呢一步。TTLock 一鍵密碼 + 電郵申請人（`approveVenueBooking`）留低稍後再接。
 
-全部由同一個 Apps Script 後台（`gs/Code.gs` v4.0 統一後台：管理系統 + 成員系統共用）完成，
-唔需要另起 Vercel service。
+借場**寫入與審批**仍由同一個 Apps Script 後台（管理系統 + 成員系統共用）完成；
+下方房間**唯讀查閱**獨立由現有 Vercel 前端的 `/api/rooms/hq` 讀公開 iCalendar，毋須另起部署或更動正式 GS v4.18.0。
 
 ## 流程
 ```
@@ -44,14 +44,14 @@
 > 攞子日曆 ID：可喺 `services/skw-booking/get-ids.js` 輸入 API Key + Calendar ID 查（係選用工具）。
 > 舊 Config 用緊 `teamupApiKey` 等舊欄名都可以繼續用，程式會自動 fallback。
 
-## 地域房間及區總部使用情況（`/rooms` 月曆）
+## 區總部及地域房間使用情況（`/rooms` 月曆；正式後台維持 v4.18.0）
 
-- **區總部資料來源係 Teamup 紅色「確認借用區總部」子日曆**（上表 `TEAMUP_APPROVED_SUBCAL_ID`），**唔係**借場申請表 `VenueBookings.status=approved`：人手直接喺 Teamup 建立嘅事件同重複事件實例都要見到；藍色「申請中」及拒絕事件唔顯示。地域 17／18／19 樓房間繼續由公開 Google ICS 讀取。
-- 新增管理後台 `POST getDistrictHqBookings`（`token`, `from: YYYY-MM-DD`, `days: 1..60`）。先用現有 `getCards_` 檢查登入及 `rooms` 卡查閱權限，再用 Teamup API `GET /{calendar}/events?startDate=...&endDate=...&subcalendarId[]=...&tz=Asia/Hong_Kong` 讀指定子日曆，並再次核對每個事件嘅 `subcalendar_ids`。只回傳匿名 `{uid, summary: '已確認借用', start, end, allDay}`（epoch 毫秒、香港時間解讀），**唔回傳** Teamup ID、title、notes、聯絡資料或入場密碼。未填 Key／日曆／紅色子日曆時 `configured=false`；讀取失敗回錯誤，前端顯示提示，唔會誤稱空置。
-- `rooms` 查閱卡畀**全部已登入人士**，不受個別 `cards` 白名單限制；借場審批 `venueReg` 係另一張卡，須獲 `canVenue` 授權，預設只 DC／SYSADMIN／DDC_ADMIN／DDC_TRAINING／STAFF 可見。升級**不會清除**舊 Perms 賦畀 ADC／領袖的 view 格，實時 `canVenue` 門禁仍會阻止未授權者睇審批卡或待批借場資料。
-- 前端月曆以紅色顯示區總部已確認時段，可揀「全部地點／區總部／各樓層」；「逐個地點」用 17／18／19 樓＋區總部作同一樓層清單顯示逐日時段；今日總覽同樣用區總部卡顯示當天確認借用，按卡可進詳情。「地域原版日曆」仍只顯示地域房間。🎭 示範模式使用獨立嘅匿名 Teamup 模擬事件，唔會打真後台。
-- **升級現有部署**：先按[GS 只追加升級步驟](gs-upgrade-no-data-loss.md)備份，更新原有 `gs/Code.gs` → 執行 `setupSheets()`（只在最右／最底補缺欄／行，不改任何舊 `rooms`／`venueReg` 格；舊預設房間卡新名只在 API 顯示，全員查閱及審批限制在讀取／操作時生效）→ **更新 Apps Script 原有 Web App 部署版本**。前端功能已合併 `main`，唔使另建 Sheet。核對 `TEAMUP_API_KEY`、`TEAMUP_CALENDAR_KEY`、`TEAMUP_APPROVED_SUBCAL_ID` 係**同一個** Teamup 日曆，且後台 Token 可讀紅色子日曆；到月曆測試一個直接喺 Teamup 建立嘅確認事件同一個「申請中」事件。未完成後台部署前，前端會提示區總部資料不可用。
-- 無需／不可把 Teamup Token 設喺前端或把 Teamup 原始事件直接傳到瀏覽器。程式測試：`node scripts/test-district-hq-gs.js`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node scripts/test-upgrade-gs.js`、`node --experimental-strip-types scripts/test-demo-engine.ts`。
+- **區總部資料來源係 Teamup 紅色「確認借用區總部」子日曆**，**唔係**借場申請表 `VenueBookings.status=approved`：人手直接喺 Teamup 建立嘅確認事件亦會見到；藍色「申請中」及拒絕事件唔顯示。地域 17／18／19 樓房間繼續由公開 Google ICS 讀取。
+- **今次毋須改 Apps Script、Sheet、Users 或原有密碼。**正式共用後台 v4.18.0 無 `getDistrictHqBookings` action；前端改由 Vercel `/api/rooms/hq` 唯讀 Teamup 公開 iCalendar feed，而唔係要求重新部署 `gs/Code.gs`。JSON REST API 仍需要 `Teamup-Token`；公開 ICS 唔需要。成員系統原有公開分享 URL 優先讀 v4.18.0 `getPublicInfo.teamupBookingUrl`（Config `TEAMUP_BOOKING_URL`），留空則從成員系統 GitHub 公開元件取得 `TEAMUP_OPEN_URL` 後備連結（本倉不硬編碼分享金鑰）。若公開程式暫時取不到且 Config 未設網址，可選 Vercel `TEAMUP_PUBLIC_BOOKING_URL` = 成員系統 `TEAMUP_OPEN_URL` 全個公開網址。
+- **Vercel 新環境變數預設毋須加。**用戶已確認現有 Config：`TEAMUP_APPROVED_SUBCAL_ID=11188257` 為紅色已批，`TEAMUP_PENDING_SUBCAL_ID=11188256` 為藍色申請中（公開子日曆 ID，**非**私人 Token）。程式使用已核對的紅色 ID 預設值，直接讀紅色專屬 ICS，並再次核對紅色 `CATEGORIES`／日曆名稱，避免用錯藍色 ID 時將其誤作空置；空的紅色 feed 亦可正確顯示未見借用。**日後**紅色 ID 改變，才可選 Vercel `TEAMUP_APPROVED_SUB_ID` 覆蓋。已存在的 `PORTAL_SKW_APIKEY` 用來讀 `getPublicInfo.teamupBookingUrl`，不新增／更動；`TEAMUP_API_KEY` 不須複製到 Vercel，公開分享網址亦不寫入倉庫。公開分享連結應有合適查閱權限；來源 iCalendar 可能有同步延遲，只涵蓋過去約 6 個月至未來約 12 個月，超出範圍會標示不可用。
+- `/api/rooms/hq` 上游固定 `ics.teamup.com`，禁跳轉並限制檔案大小；不接受訪客提供 URL，亦不返回原始 ICS／Token／名稱／電話／備註／入場密碼／Teamup UID，只回匿名時段。區系統前端收到舊版已知預設卡名時，僅在顯示層改成「區總部及地域房間使用情況」；**不改 Cards 表自訂名稱或原有儲存格**。舊後台 `getCards_` 若因個別帳戶 `cards` 白名單漏掉 `rooms`，前端只於成功登入、SKW 區補出查閱卡；借場審批 `venueReg` 仍受原 `canVenue` 限制。
+- 「月曆」及「逐個地點」區總部區塊用成員系統同一 Teamup 公開連結顯示原版 iframe（月／週檢視），並保留原有地域房間與區總部已批時段格仔／逐日清單；「今日總覽」只用紅色 ICS 判斷區總部有冇已 BOOK，唔計藍色申請中。來源失敗顯示不可用，不把缺資料說成空置；原版日曆仍可供人工核對。「地域原版日曆」維持只顯示地域房間。🎭 示範模式使用獨立匿名模擬事件，不嵌入真日曆。
+- **驗證與部署**：只部署此 Next.js/Vercel 改動；**不要因房間功能貼上本倉 v4.19.1 `gs/Code.gs`**（該版本會強制 `PORTAL_TOKEN_SECRET`，未設時堵塞正式 v4.18.0 全部登入）。2026-10-20 已從用戶提供的公開網址取得紅色 11188257 ICS，核對名稱及已批事件；其中存在 `RRULE:FREQ=MONTHLY;BYDAY=1FR`，故已補足 parser 的每月第 N 個星期重複規則及匿名樣本測試。測試：`node --experimental-strip-types scripts/test-teamup-hq-ics.ts`、`node --experimental-strip-types scripts/test-room-card-compat.ts`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node --experimental-strip-types scripts/test-demo-engine.ts`、`npm run build`。**Vercel PR 預覽有登入保護，仍要在部署後核對正式頁面的真實 Teamup 事件與今日狀態，未驗收不可聲稱正式畫面已讀通。**
 
 ## 成員系統 (member-portal) 要接嘅 action
 申請表呼叫後台公開 `submitVenueRequest`（經 `/api/proxy` 帶 API Key），欄位：
