@@ -19,7 +19,7 @@
 
 1. 安排切換時間，先在 YMIS 按總會程序**輪換**曾披露的共用密碼；核對帳戶核實用途的授權。請勿將新帳密貼到聊天或原始碼。
 2. 在區方的 Apps Script 專案 → **Project Settings／專案設定 → Script Properties／指令碼屬性**設定 `PORTAL_TOKEN_SECRET`：每區獨立、隨機、至少 32 字元；只由可信的專案編輯者保存。若需要維護帳號，另設 `PORTAL_MASTER_PASSWORD`（長而獨立，至少 12 字元）；否則維護登入保持停用。原始碼內 `MASTER_EMAIL` 只係帳號名稱，區方可私下更改；**絕不可把上述私密值加入 Git、Config、Vercel 公開環境變數或對話**。
-3. 先備份原有 Google Sheet 及 Apps Script 程式版本，將新 `gs/Code.gs` 貼入**原有**區方專案，再執行 `setupSheets()`（補缺欄／卡片，按舊預設調整權限；保留所有現有工作表和業務記錄，舊內建卡片只隱藏不刪除）。到 **Deploy → Manage deployments／管理部署 → 編輯原有 Web App → 新版本 → 部署**，不要建立新 Sheet 或換 `/exec` 網址。檢查公開 `getHealthCheck` 回傳 `version: "4.19.0"`，現有區方 API Key 和前端 `PORTAL_{區碼}_APIKEY` 仍配對。切換 `PORTAL_TOKEN_SECRET` 會令舊 session／重設連結失效，請通知職員重新登入。詳細順序見[無損更新步驟](gs-upgrade-no-data-loss.md)。
+3. 先備份原有 Google Sheet 及 Apps Script 程式版本，將新 `gs/Code.gs` 貼入**原有**區方專案，再執行 `setupSheets()`：只追加缺表、缺欄、缺行，**舊權限、卡片啟用狀態、帳戶及任何既有儲存格都不改**；新增 YMIS 卡及其權限行則屬新增資料。到 **Deploy → Manage deployments／管理部署 → 編輯原有 Web App → 新版本 → 部署**，不要建立新 Sheet 或換 `/exec` 網址。檢查公開 `getHealthCheck` 回傳 `version: "4.19.1"` 及 `apiKeySet: true`，原有區方 API Key 和前端 `PORTAL_{區碼}_APIKEY` 仍配對；舊 `API_KEY_HASH` 行若留空，先按[只追加升級步驟](gs-upgrade-no-data-loss.md)另外明確生成 Key。切換 `PORTAL_TOKEN_SECRET` 會令舊 session／重設連結失效，請通知職員重新登入。
 4. **先**更換原本公開或初始的區系統帳戶密碼（包括預設 DC／DDC／ADC／STAFF 和任何舊 Staff 登入），確認 `Users.mustChangePassword` 經改密碼流程明確寫成 `FALSE`（舊資料留空會拒絕），停用不再使用的帳戶，再設定 YMIS 帳密。預設初始密碼絕不適合保護共用核實帳戶。
 5. 在同一專案 Script Properties 新增 `YMIS_VERIFY_USERNAME`（區方核實帳戶）和 `YMIS_VERIFY_PASSWORD`（**輪換後**的新密碼）。如未設齊，頁面會提示「後台尚未設定」，不會回傳空白登入資料。部署新版前端。
 6. 用**測試人員帳戶**驗證：DC／DDC／ADC／STAFF 能看卡並按掣；SYSADMIN、DL／LEADER／AL、已停用或仍需改初始密碼的帳戶均不能取得帳密；在官方網站由區方自行驗證新 YMIS 帳密可登入。**本工作環境沒有用真實帳密登入 YMIS，亦未替區方部署。**

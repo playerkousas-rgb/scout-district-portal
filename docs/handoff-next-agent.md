@@ -181,16 +181,14 @@
 
 ## 用家而家要做（測試）
 
-1. 下載 `public/downloads/Code.gs.txt`（= `gs/Code.gs` v4.19.0）；已有後台請先讀 `docs/gs-upgrade-no-data-loss.md`，沿用原有專案／Sheet，唔好另開新表。
+1. 下載 `public/downloads/Code.gs.txt`（= `gs/Code.gs` v4.19.1）；已有後台先讀 `docs/gs-upgrade-no-data-loss.md`，沿用原有專案／Sheet，升級只追加新表／欄／行，不改舊資料／權限。
 2. Apps Script **全部覆蓋貼上** → 儲存。
 3. Sheet 選單「🧭 區統一後台」→「🧱 補建缺失表（不清空資料）」。
-4. **新部署／更新現有 Web App**（執行身分：我自己；存取：任何人）。`/exec` 唔好換就得。
-5. 健康檢查（免 Key）：  
-   `{apiBase}?action=getHealthCheck`  
-   要見到 `"version":"4.2.3"`。
+4. **已有區只編輯原有 Web App**（執行身分：我自己；存取：任何人），選新版本；唔好換 `/exec`。只有全新區先新增部署。
+5. 健康檢查（免 Key）：`{apiBase}?action=getHealthCheck` 要見到 `"version":"4.19.1"`、`apiKeySet: true`。
 6. DDC 或以上登入管理系統，睇主控台 HERO 走馬燈 + `/venue-regs` 四掣。
 
-`setupSheets()` **只補唔洗**：已有表唔 `clear()`、已有 Config key 唔覆寫 value、`API_KEY_HASH` 已有就唔再生成。
+`setupSheets()` **只追加**：已有表只加新欄、新行，唔 `clear()`、唔改 Cards／Perms／AwardTypes 舊格／Sheet 保護；已有 Config key（連空白 value）都唔覆寫。空白 `API_KEY_HASH` 須由區方另外明確生成 Key 後才部署。上述歷史版本筆記未必反映新版的只追加路徑，以 `docs/gs-upgrade-no-data-loss.md` 為準。
 
 ---
 

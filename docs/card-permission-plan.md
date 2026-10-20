@@ -231,7 +231,7 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
 ### gs/Code.gs（一次性服務後台）
 - 新表：`Venues` / `VenueBookings`（借場）、`Items` / `StockRequests`（借物資）、`ActivityNotices`（知會）。
 - 新卡片（取代舊 venue/stock 跳轉佔位）：`venueReg`（/venue-regs）、`stockReg`（/stock-regs）、`activity`（/activity-notices）。
-- 權限（更新）：`venueReg` 只畀 DC/SYS/DDC_ADMIN/DDC_TRAINING/STAFF 預設 edit；ADC／DL／LEADER／AL 等不可見，舊預設 view 行由 `setupSheets()` 修正，實時 `getCards_` 亦檢查 `canVenue`。`stockReg`/`activity` 仍用原有矩陣。查閱 `rooms` 卡對所有已登入者 view，與審批卡完全分開。
+- 權限（更新）：新建 `venueReg` 預設只畀 DC/SYS/DDC_ADMIN/DDC_TRAINING/STAFF edit；舊表的 view 格**不會**由 `setupSheets()` 修改，實時 `getCards_`／審批動作檢查 `canVenue`，未授權的 ADC／DL／LEADER／AL 仍不可見／不可批核。`stockReg`／`activity` 繼續用原有矩陣。查閱 `rooms` 卡對所有已登入者 view，與審批卡完全分開。
 - 動作：
   - **借場**：`submitVenueRequest`（公開 intake）／`getVenueBookings`／`setVenueBookingStatus`／`saveVenue`/`deleteVenue`（維運）。
   - **借物資**：`submitStockRequest`（intake）／`getStockRequests`／`setStockRequestStatus`（**批准扣庫存、拒絕/取消歸還**）／`saveItem`/`deleteItem`。
