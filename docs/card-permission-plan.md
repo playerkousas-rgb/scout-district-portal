@@ -37,7 +37,7 @@
 | `STAFF` | 區職員（受薪） | **特別獨立**，預設可處理行政類卡片（借場/借物資/知會/通告），其餘 view，上級可調 |
 
 > 另有區專章秘書、區設備管理員等特設職位，非主層級。
-> **Scope 委派**：每帳戶 `cards` 欄可覆寫（上級設定下級睇到邊啲卡片）；留空 = 用角色矩陣。
+> **Scope 委派**：每帳戶 `cards` 欄可限制一般卡片（上級設定下級睇到邊啲卡片）；留空 = 用角色矩陣。`rooms`「地域房間及區總部使用情況」例外：凡已登入都可 view，唔受 `cards` 白名單限制；`venueReg` 審批必須有實際 `canVenue` 權限，舊 Perms 嘅 view 唔會令未獲授權者見到卡。
 > 登入後可自行改密碼（`changePassword`）；後台/Sheet 亦可直接改（換人時唔使知舊密碼）。
 
 ---
@@ -51,7 +51,7 @@
 
 > 下表矩陣預設列 DC/SYS/DDC/ADC/DL/LEADER；新增 `AL`（助理區領袖）預設同 LEADER（主要 view +
 > 自己範圍）、`STAFF`（區職員受薪）預設行政類卡 edit（借場/借物資/知會/通告）、其餘 view。
-> 全部可由 DC/超管喺權限矩陣或「卡片範圍」逐帳戶微調。
+> 一般卡片可由 DC／超管喺權限矩陣或「卡片範圍」微調；`ymis` 另有不可繞過的角色上限，不能授予 SYSADMIN／領袖。
 
 ### 2.1 卡片分類（done 已實作 / todo 加入中）— 最終定案
 - **已實作（done，4 張）**：
@@ -69,8 +69,11 @@
 |---|---|---|---|---|---|---|---|---|---|---|
 | contacts | 聯結簿（旅團／港島地域／總會） | builtin | 內建目錄 + 旅團 Sheet | ✏️ | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 |
 | budget | 區年度預算 | builtin | 原 Excel | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 | — |
+| ymis | YMIS 會員核實（人工登入） | builtin | 區方 Script Properties → 官方 YMIS 登入頁 | 👁 | — | 👁 | 👁 | 👁 | — | — |
 | committee | 委任系統 | jump | 委任表 | ✏️ | ✏️ | ✏️ | 👁 | 👁 | — | — |
 | unit | 旅團管理系統 | jump | 旅名冊 | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | 👁 |
+
+> `ymis`：表外 STAFF／區職員亦有 👁；SYSADMIN／維護帳號、AL／助理區領袖冇。卡片同後台動作雙重核對當前角色，只有 DC／DDC／ADC／STAFF 可見；登入資料只喺按掣後從 Script Properties 取用，詳見 [`YMIS 人工登入卡部署指引`](ymis-verification-feasibility.md)。
 
 ### 2.3 營運／審批
 
@@ -78,7 +81,8 @@
 |---|---|---|---|---|---|---|---|---|---|---|
 | visit | 旅團探訪 | builtin | 探訪表 | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | 👁 |
 | awards | 獎勵提名 | builtin | 獲獎 Excel | ✏️ | ✏️ | 👁 | ✏️ | ✏️(該支部) | 👁 | 👁 |
-| venue | 場地借用審批 | builtin | member `VenueBookings` | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 | 👁 |
+| venueReg | 場地借用審批 | builtin | member `VenueBookings` | ✏️ | ✏️ | ✏️ | ✏️ | — | — | — |
+| rooms | 地域房間及區總部使用情況 | builtin | 地域房間 ICS + Teamup 紅色確認子日曆 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 |
 | stock | 物資借用審批 | builtin | member `StockRequests` | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 | 👁 |
 | activity | 活動知會審批 | builtin | member `ActivityNotices` | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | 👁 |
 | incident | 意外／應變 | resource | 總會指引 | ✏️ | ✏️ | 👁 | 👁 | 👁 | 👁 | 👁 |
@@ -142,8 +146,8 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
 
 ## 3.3 卡片開關 + 卡片門禁（最終定案）
 
-- **卡片開關**（DC / SYSADMIN 超管可控）：`setCardEnabled` 改 `Cards.enabled`，
-  關閉後前端主控台唔顯示（Perms 保留，重開即恢復）。admin 頁權限矩陣最右「開關」欄。
+- **卡片開關**（DC / SYSADMIN 超管可控）：`setCardEnabled` 改 `Cards.enabled`；關閉後前端主控台唔顯示（Perms 保留，重開即恢復）。
+  唯 `ymis` 不因超管身分而繞過角色限制。admin 頁權限矩陣最右「開關」欄。
 - **權限控制模型（跟用戶其他系統一致）**：靠「帳戶睇到邊張卡」嚟控制。
   Perms 矩陣決定每個角色對每張卡有冇 view/edit；後台寫入仍用角色（`canManageCourses_`/`canOps_`）粗粒度檢查，
   唔再另加卡片寫入權限層。
@@ -166,7 +170,7 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
 4. 借場批核行 **`approveVenueBooking`**（TTLock 限時密碼 → Teamup 轉色 → 電郵），拒絕/取消行 `setVenueBookingStatus`。
 
 ### 兩邊都要
-1. **後門清除**：`MASTER_EMAIL/MASTER_PW`、`TOKEN_SECRET='CHANGE_ME_*'` 一律移除或改每區隨機。
+1. **簽署密鑰／維護帳號**：已移除程式碼內的公開 `TOKEN_SECRET`／`MASTER_PW`；每區在 Apps Script Script Properties 必設私密 `PORTAL_TOKEN_SECRET`（≥32 字元），選用維護登入則設 `PORTAL_MASTER_PASSWORD`（≥12 字元），並旋轉既有帳號密碼。
 2. **API Key**：每區 Code.gs 自動隨機生成（唔寫死），存 Vercel env + App 內登記。
 3. **防濫用**：重複報名檢查（email+course）、honeypot／reCAPTCHA、Apps Script quota 注意。
 
@@ -227,7 +231,7 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
 ### gs/Code.gs（一次性服務後台）
 - 新表：`Venues` / `VenueBookings`（借場）、`Items` / `StockRequests`（借物資）、`ActivityNotices`（知會）。
 - 新卡片（取代舊 venue/stock 跳轉佔位）：`venueReg`（/venue-regs）、`stockReg`（/stock-regs）、`activity`（/activity-notices）。
-- 權限：`venueReg`/`stockReg`/`activity` 用 `opsEdit`（DC/SYS/DDC_ADMIN/DDC_TRAINING 可 edit，其餘 view）。
+- 權限（更新）：`venueReg` 只畀 DC/SYS/DDC_ADMIN/DDC_TRAINING/STAFF 預設 edit；ADC／DL／LEADER／AL 等不可見，舊預設 view 行由 `setupSheets()` 修正，實時 `getCards_` 亦檢查 `canVenue`。`stockReg`/`activity` 仍用原有矩陣。查閱 `rooms` 卡對所有已登入者 view，與審批卡完全分開。
 - 動作：
   - **借場**：`submitVenueRequest`（公開 intake）／`getVenueBookings`／`setVenueBookingStatus`／`saveVenue`/`deleteVenue`（維運）。
   - **借物資**：`submitStockRequest`（intake）／`getStockRequests`／`setStockRequestStatus`（**批准扣庫存、拒絕/取消歸還**）／`saveItem`/`deleteItem`。

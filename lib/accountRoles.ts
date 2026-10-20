@@ -9,6 +9,12 @@ export const CREATABLE_ROLES = [
 
 export const ACCOUNT_MANAGER_ROLES = ['DC', 'SYSADMIN', 'DDC_ADMIN', 'DDC_TRAINING'] as const;
 
+/** YMIS 共用核實帳戶的角色上限；另須登入、卡片權限及個別帳戶範圍。 */
+export function canViewYmisRole(role: string): boolean {
+  const r = String(role || '').trim().toUpperCase();
+  return r === 'DC' || r === 'STAFF' || /^DDC(_|$)/.test(r) || /^ADC(_|$)/.test(r);
+}
+
 export function canManageAccounts(s: UserSession | null | undefined): boolean {
   if (!s) return false;
   if (s.canManageAccounts) return true;

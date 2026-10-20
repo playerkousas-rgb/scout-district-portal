@@ -29,6 +29,13 @@ export async function GET(request: NextRequest) {
   const districtCode = searchParams.get('districtCode');
   const action = searchParams.get('action') || 'getHealthCheck';
 
+  // 共用帳密只可經 POST；不可將 token/帳密請求放在可記錄的 GET URL。
+  if (action === 'getYmisCredentials') {
+    return NextResponse.json({ ok: false, error: 'Method not allowed' }, {
+      status: 405, headers: { 'Cache-Control': 'private, no-store, max-age=0' },
+    });
+  }
+
   if (!districtCode) {
     return NextResponse.json({ ok: false, error: 'Missing districtCode' }, { status: 400 });
   }
@@ -113,12 +120,16 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(postBody),
+      cache: 'no-store',
     });
     const text = await res.text();
     if (/<!doctype html|<html/i.test(text)) {
       return NextResponse.json({ ok: false, error: 'Apps Script not public (Deploy → Anyone)' }, { status: 502 });
     }
-    return NextResponse.json(JSON.parse(text));
+    const response = NextResponse.json(JSON.parse(text));
+    // YMIS 帳密只畀獲授權職員按掣查閱，絕不可喺 CDN／瀏覽器快取。
+    if (action === 'getYmisCredentials') response.headers.set('Cache-Control', 'private, no-store, max-age=0');
+    return response;
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err.message || 'Proxy fetch failed' }, { status: 502 });
   }

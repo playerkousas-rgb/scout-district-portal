@@ -102,10 +102,7 @@ export default function DistrictShell({ children }: { children: React.ReactNode 
         )}
       </main>
 
-      <footer className="shell-foot">
-        <div>{PLATFORM_COPYRIGHT}</div>
-        <div style={{ marginTop: 6 }}>Multi-district platform powered by SKWSCOUT SYSTEM</div>
-      </footer>
+      <footer className="shell-foot">{PLATFORM_COPYRIGHT}</footer>
     </>
   );
 }

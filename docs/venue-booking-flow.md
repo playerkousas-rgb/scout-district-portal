@@ -44,6 +44,15 @@
 > 攞子日曆 ID：可喺 `services/skw-booking/get-ids.js` 輸入 API Key + Calendar ID 查（係選用工具）。
 > 舊 Config 用緊 `teamupApiKey` 等舊欄名都可以繼續用，程式會自動 fallback。
 
+## 地域房間及區總部使用情況（`/rooms` 月曆）
+
+- **區總部資料來源係 Teamup 紅色「確認借用區總部」子日曆**（上表 `TEAMUP_APPROVED_SUBCAL_ID`），**唔係**借場申請表 `VenueBookings.status=approved`：人手直接喺 Teamup 建立嘅事件同重複事件實例都要見到；藍色「申請中」及拒絕事件唔顯示。地域 17／18／19 樓房間繼續由公開 Google ICS 讀取。
+- 新增管理後台 `POST getDistrictHqBookings`（`token`, `from: YYYY-MM-DD`, `days: 1..60`）。先用現有 `getCards_` 檢查登入及 `rooms` 卡查閱權限，再用 Teamup API `GET /{calendar}/events?startDate=...&endDate=...&subcalendarId[]=...&tz=Asia/Hong_Kong` 讀指定子日曆，並再次核對每個事件嘅 `subcalendar_ids`。只回傳匿名 `{uid, summary: '已確認借用', start, end, allDay}`（epoch 毫秒、香港時間解讀），**唔回傳** Teamup ID、title、notes、聯絡資料或入場密碼。未填 Key／日曆／紅色子日曆時 `configured=false`；讀取失敗回錯誤，前端顯示提示，唔會誤稱空置。
+- `rooms` 查閱卡畀**全部已登入人士**，不受個別 `cards` 白名單限制；借場審批 `venueReg` 係另一張卡，須獲 `canVenue` 授權，預設只 DC／SYSADMIN／DDC_ADMIN／DDC_TRAINING／STAFF 可見。升級會清除舊預設賦畀 ADC／領袖等嘅審批 view；保留自訂值，但實時門禁仍會阻止無 `canVenue` 者睇審批卡或待批借場資料。
+- 前端月曆以紅色顯示區總部已確認時段，可揀「全部地點／區總部／各樓層」；「逐個地點」用 17／18／19 樓＋區總部作同一樓層清單顯示逐日時段；今日總覽同樣用區總部卡顯示當天確認借用，按卡可進詳情。「地域原版日曆」仍只顯示地域房間。🎭 示範模式使用獨立嘅匿名 Teamup 模擬事件，唔會打真後台。
+- **升級現有部署**：先按[GS 無損升級步驟](gs-upgrade-no-data-loss.md)備份，更新原有 `gs/Code.gs` → 執行 `setupSheets()`（更新舊預設 `rooms` 卡片名稱/描述及舊預設 `venueReg` 權限；`rooms` 各角色權限一律設 view，其他自訂卡片值及資料保留）→ **更新 Apps Script Web App 部署版本** → 部署新版 Next.js 前端。核對 `TEAMUP_API_KEY`、`TEAMUP_CALENDAR_KEY`、`TEAMUP_APPROVED_SUBCAL_ID` 係**同一個** Teamup 日曆，且後台 Token 可讀紅色子日曆；到月曆測試一個直接喺 Teamup 建立嘅確認事件同一個「申請中」事件。未完成後台部署前，前端會提示區總部資料不可用。
+- 無需／不可把 Teamup Token 設喺前端或把 Teamup 原始事件直接傳到瀏覽器。程式測試：`node scripts/test-district-hq-gs.js`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node scripts/test-upgrade-gs.js`、`node --experimental-strip-types scripts/test-demo-engine.ts`。
+
 ## 成員系統 (member-portal) 要接嘅 action
 申請表呼叫後台公開 `submitVenueRequest`（經 `/api/proxy` 帶 API Key），欄位：
 `venueId, name, phone, email, troop, position, purpose, startDate, endDate, agreeRules, teamupEventId`。

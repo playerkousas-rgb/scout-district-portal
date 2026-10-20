@@ -86,7 +86,7 @@ const ctx = {
   ContentService: { createTextOutput: (t) => ({ setMimeType: () => t }), MimeType: { JSON: 'json' } },
   MailApp: { sendEmail: () => {} },
   UrlFetchApp: { fetch: () => ({ getContentText: () => '{}', getResponseCode: () => 200 }) },
-  PropertiesService: { getScriptProperties: () => ({ getProperty: () => '', setProperty: () => {} }) },
+  PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'PORTAL_TOKEN_SECRET' ? 'FAKE_UNIT_TEST_PRIVATE_TOKEN_SECRET_0123456789' : '', setProperty: () => {} }) },
   CacheService: { getScriptCache: () => ({ get: () => null, put: () => {} }) },
   HtmlService: { createHtmlOutput: () => ({ setWidth: () => ({ setHeight: () => ({}) }) }) },
 };
@@ -341,9 +341,9 @@ check('舊 Visits 表（未升級）跑 ensureSheetColumns_ 自動補四欄，�
   sheets.Visits = makeSheet('Visits', [VISIT_HEAD]);   // 還原，等其他測試環境乾淨
 });
 
-check('健康檢查版本 4.14.0', () => {
+check('健康檢查版本 4.19.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.18.0');
+  assert.strictEqual(parsed.data.version, '4.19.0');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

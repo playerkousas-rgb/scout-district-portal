@@ -6,7 +6,8 @@
  */
 import assert from 'node:assert';
 import { demoCall, demoExternal, resetDemoData } from '../lib/demo/engine.ts';
-import { DEMO_TOKEN } from '../lib/demo/seed.ts';
+import { DEMO_TOKEN, demoDefaultMatrix } from '../lib/demo/seed.ts';
+import { canViewYmisRole } from '../lib/accountRoles.ts';
 
 let pass = 0;
 function check(name: string, fn: () => void) {
@@ -31,17 +32,46 @@ check('login：任何電郵密碼都入到同一個 ADC 示範身份（權限全
 });
 
 // ── 2. 卡片 ──
-check('getCards：權限全開 — 14 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
+check('getCards：權限全開 — 15 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
   const r = demoCall('getCards', { token: T.adc }, 'GET');
   assert.ok(r.ok);
   const ids = r.data.map((c: any) => c.cardId);
-  assert.strictEqual(ids.length, 14);
+  assert.strictEqual(ids.length, 15);
   assert.ok(ids.indexOf('circulars') >= 0, '區通告卡要喺示範版出現');
   assert.ok(r.data.every((c: any) => c.access === 'edit'));
   assert.strictEqual(ids.indexOf('awards'), -1, '成人獎勵提名唔喺示範範圍');
   assert.strictEqual(ids.indexOf('news'), -1, 'news 卡已移除（消息喺主控台頂）');
+  assert.strictEqual(r.data.find((c: any) => c.cardId === 'rooms').title, '地域房間及區總部使用情況');
   const bad = demoCall('getCards', { token: T.bad }, 'GET');
   assert.strictEqual(bad.ok, false);
+});
+
+check('示範權限矩陣：rooms 全員可看，審批卡唔畀 ADC；mockAdmin 仍可示範所有功能', () => {
+  const matrix = demoDefaultMatrix();
+  assert.strictEqual(matrix.rooms.ADC_SCOUT, 'view');
+  assert.strictEqual(matrix.rooms.STAFF, 'view');
+  assert.strictEqual(matrix.venueReg.ADC_SCOUT, '');
+  assert.strictEqual(matrix.venueReg.STAFF, 'edit');
+  assert.strictEqual(matrix.venueReg.DDC_ADMIN, 'edit');
+  assert.ok(demoCall('getCards', { token: T.adc }, 'GET').data.some((c: any) => c.cardId === 'venueReg'), '示範 mockAdmin 屬特權身份');
+});
+
+check('YMIS：卡片只給總監級／職員；示範按掣只回完全虛構登入資料', () => {
+  for (const role of ['DC', 'DDC_ADMIN', 'DDC_TRAINING', 'ADC_SCOUT', 'ADC_GH', 'STAFF']) {
+    assert.strictEqual(canViewYmisRole(role), true);
+  }
+  for (const role of ['SYSADMIN', 'DL', 'LEADER', 'AL', '']) assert.strictEqual(canViewYmisRole(role), false);
+  const matrix = demoDefaultMatrix();
+  assert.strictEqual(matrix.ymis.ADC_SCOUT, 'view');
+  assert.strictEqual(matrix.ymis.STAFF, 'view');
+  assert.strictEqual(matrix.ymis.LEADER, undefined);
+  const card = demoCall('getCards', { token: T.adc }, 'GET').data.find((c: any) => c.cardId === 'ymis');
+  assert.strictEqual(card.url, '/ymis');
+  const r = demoCall('getYmisCredentials', { token: T.adc }, 'POST');
+  assert.ok(r.ok && r.data.configured);
+  assert.ok(r.data.username.startsWith('DEMO-') && r.data.password.startsWith('DEMO-'));
+  assert.strictEqual(demoCall('getYmisCredentials', { token: T.bad }, 'POST').ok, false);
+  assert.strictEqual(demoCall('getYmisCredentials', { token: T.adc }, 'GET').ok, false);
 });
 
 // ── 3. 消息：軟刪除＋公開過濾 ──
@@ -156,12 +186,23 @@ check('extRegionStaff／extRegionOrg：示範資料形狀正確', () => {
   const dcGroup = org.data.groups.find((g: any) => g.id === 'reg-dc');
   assert.strictEqual(dcGroup.members.length, 7, '7 區總監合一大格嘅資料源');
 });
-check('extRooms：11 間房、每房 3 個示範事件（今日有嘢睇）', () => {
-  const r = demoExternal('rooms', { from: String(Date.now()), days: '14' });
+check('extRooms：11 間房、每房 3 個示範事件；月曆日期以香港時間處理', () => {
+  const todayHk = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  const r = demoExternal('rooms', { from: todayHk, days: '14' });
   assert.strictEqual(r.data.rooms.length, 11);
+  assert.strictEqual(r.data.from, Date.parse(`${todayHk}T00:00:00+08:00`));
   r.data.rooms.forEach((room: any) => {
     assert.ok(room.ok && room.events.length >= 3);
   });
+});
+check('區總部確認借用：獨立 Teamup 示範時段、要 rooms 權限同合法日期', () => {
+  const todayHk = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  const allowed = demoCall('getDistrictHqBookings', { token: T.adc, from: todayHk, days: 14 }, 'POST');
+  assert.ok(allowed.ok && allowed.data.configured);
+  assert.ok(allowed.data.events.some((e: any) => e.uid.includes('manual')), '包括直接喺 Teamup 加嘅時段');
+  assert.ok(allowed.data.events.every((e: any) => e.summary === '已確認借用'));
+  assert.strictEqual(demoCall('getDistrictHqBookings', { token: T.bad, from: todayHk, days: 14 }, 'POST').ok, false);
+  assert.strictEqual(demoCall('getDistrictHqBookings', { token: T.adc, from: '2026-02-30', days: 61 }, 'POST').ok, false);
 });
 check('extBudget：rows＋summary', () => {
   const b = demoExternal('budget', {});

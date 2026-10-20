@@ -155,7 +155,7 @@ const ctx = {
       return { getContentText: () => fetchResult, getResponseCode: () => 200 };
     },
   },
-  PropertiesService: { getScriptProperties: () => ({ getProperty: () => '', setProperty: () => {} }) },
+  PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'PORTAL_TOKEN_SECRET' ? 'FAKE_UNIT_TEST_PRIVATE_TOKEN_SECRET_0123456789' : '', setProperty: () => {} }) },
   CacheService: { getScriptCache: () => ({ get: () => null, put: () => {} }) },
   HtmlService: { createHtmlOutput: () => ({ setWidth: () => ({ setHeight: () => ({}) }) }) },
 };
@@ -337,9 +337,9 @@ check('saveCourseLink 照存 sheetId／setupJson；undefined＝保留', () => {
   assert.strictEqual(got.hasSetup, true);
 });
 
-check('健康檢查版本 4.15.0', () => {
+check('健康檢查版本 4.19.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.18.0');
+  assert.strictEqual(parsed.data.version, '4.19.0');
 });
 
 

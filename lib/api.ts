@@ -69,6 +69,7 @@ async function callPost<T = any>(action: string, body: Record<string, unknown> =
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(postBody),
+      cache: 'no-store',
     });
     const data = await res.json();
     return data;
@@ -369,6 +370,12 @@ export const api = {
   /** 地域房間日曆（公開 ICS）；room 留空 = 全部 */
   extRooms: (room = '', from = '', days = 14): Promise<ApiResult<ExternalMeta & { from: number; to: number; days: number; rooms: RoomEvents[] }>> =>
     callExternal('rooms', { room, from, days: String(days) }),
+  /** 區總部已確認借用：區後台讀 Teamup 紅色子日曆，需登入及 rooms 卡權限；不傳聯絡/密碼。 */
+  getDistrictHqBookings: (token: string, from: string, days: number): Promise<ApiResult<DistrictHqBookings>> =>
+    callPost('getDistrictHqBookings', { token, from, days }),
+  /** 只喺受保護頁面按掣時讀取；後台先核對總監級／職員身份及 ymis 卡權限。 */
+  getYmisCredentials: (token: string): Promise<ApiResult<YmisCredentials>> =>
+    callPost('getYmisCredentials', { token }),
 };
 
 /** /api/external 共同欄位 */
@@ -380,3 +387,6 @@ export interface ExternalMeta {
   source?: string;
 }
 export interface RoomEvents { id: string; ok: boolean; error?: string; events: IcsEvent[] }
+export interface DistrictHqBookings { configured: boolean; events: IcsEvent[]; fetchedAt?: string }
+/** 唯有 getYmisCredentials 後台 action 可回傳，切勿存入 localStorage／示範資料。 */
+export interface YmisCredentials { configured: boolean; username?: string; password?: string }

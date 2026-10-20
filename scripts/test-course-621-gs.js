@@ -162,7 +162,7 @@ const ctx = {
       return { getContentText: () => JSON.stringify(out), getResponseCode: () => 200 };
     },
   },
-  PropertiesService: { getScriptProperties: () => ({ getProperty: () => '', setProperty: () => {} }) },
+  PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'PORTAL_TOKEN_SECRET' ? 'FAKE_UNIT_TEST_PRIVATE_TOKEN_SECRET_0123456789' : '', setProperty: () => {} }) },
   CacheService: { getScriptCache: () => ({ get: () => null, put: () => {} }) },
   HtmlService: { createHtmlOutput: () => ({ setWidth: () => ({ setHeight: () => ({}) }) }) },
 };
