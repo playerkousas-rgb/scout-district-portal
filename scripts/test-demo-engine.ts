@@ -41,7 +41,7 @@ check('getCards：權限全開 — 15 張卡全部 edit；冇 news；連成人�
   assert.ok(r.data.every((c: any) => c.access === 'edit'));
   assert.strictEqual(ids.indexOf('awards'), -1, '成人獎勵提名唔喺示範範圍');
   assert.strictEqual(ids.indexOf('news'), -1, 'news 卡已移除（消息喺主控台頂）');
-  assert.strictEqual(r.data.find((c: any) => c.cardId === 'rooms').title, '地域房間及區總部使用情況');
+  assert.strictEqual(r.data.find((c: any) => c.cardId === 'rooms').title, '區總部及地域房間使用情況');
   const bad = demoCall('getCards', { token: T.bad }, 'GET');
   assert.strictEqual(bad.ok, false);
 });

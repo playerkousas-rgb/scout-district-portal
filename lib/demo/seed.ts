@@ -70,7 +70,7 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'incident', title: '意外 / 應變', icon: '🚨', type: 'builtin', url: '/incident', description: '天氣決策 · 即時應變 · 總會指引 · 意外報告', order: 12, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'training', title: '訓練班管理', icon: '🎓', type: 'builtin', url: '/training', description: '開班登記 · 區會目錄', order: 13, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'fps', title: 'FPS QR 製作', icon: '💳', type: 'builtin', url: '/fps', description: '轉數快 QR 碼：綁區會戶口，填銀碼即生成', order: 14, enabled: true, embed: false, source: 'core', category: 'done' },
-  { cardId: 'rooms', title: '地域房間及區總部使用情況', icon: '🏢', type: 'builtin', url: '/rooms', description: '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆', order: 15, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'rooms', title: '區總部及地域房間使用情況', icon: '🏢', type: 'builtin', url: '/rooms', description: '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆', order: 15, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'orgchart', title: '地域及總會架構', icon: '🏛', type: 'builtin', url: '/orgchart', description: '港島地域總監架構 · 總會領導層，自動跟官網更新', order: 16, enabled: true, embed: false, source: 'core', category: 'done' },
 ];
 

@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import { displayRoomCardTitle, ensureSkwRoomsCard, ROOMS_CARD_TITLE } from '../lib/roomCardLabel.ts';
+
+const older = { cardId: 'rooms', title: '地域房間使用情況', type: 'builtin', source: 'core', access: 'view' };
+const oldCopy = { ...older };
+const displayed = displayRoomCardTitle(older);
+assert.equal(displayed.title, ROOMS_CARD_TITLE);
+assert.deepEqual(older, oldCopy, '舊後台卡片物件不可改寫');
+assert.equal(displayed.access, 'view', '舊權限不變');
+assert.equal(displayRoomCardTitle({ ...older, title: '地域房間及區總部使用情況' }).title, ROOMS_CARD_TITLE);
+assert.equal(displayRoomCardTitle({ ...older, title: ROOMS_CARD_TITLE }).title, ROOMS_CARD_TITLE);
+const custom = { ...older, title: '區方自訂卡名' };
+assert.strictEqual(displayRoomCardTitle(custom), custom, '區方自訂名稱保留');
+const unrelated = { cardId: 'venueReg', title: '地域房間使用情況' };
+assert.strictEqual(displayRoomCardTitle(unrelated), unrelated, '其他卡片名稱絕不可改');
+const skwFallback = ensureSkwRoomsCard([], 'SKW');
+assert.equal(skwFallback.length, 1);
+assert.equal(skwFallback[0].title, ROOMS_CARD_TITLE);
+assert.equal(skwFallback[0].access, 'view', '舊白名單漏卡時只補查閱，不能變審批');
+assert.deepEqual(ensureSkwRoomsCard([], 'ABC'), [], '其他區不能補 SKW 卡片');
+assert.equal(ensureSkwRoomsCard([custom], 'SKW')[0].title, '區方自訂卡名', '已回傳自訂名稱必須優先保留');
+assert.equal(ensureSkwRoomsCard([older], 'SKW').length, 1, '已有 rooms 不可重複補卡');
+console.log('舊版卡片前端改名、白名單補查閱卡、保留自訂名稱及權限測試通過 ✓');

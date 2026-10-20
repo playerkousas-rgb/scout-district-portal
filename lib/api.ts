@@ -17,6 +17,7 @@ import type { IcsEvent } from './ics.ts';
 import { isDemoMode } from './demo/session.ts';
 import { demoCall, demoExternal } from './demo/engine.ts';
 import { demoNoticeFields } from './notice-parse.ts';
+import { displayRoomCardTitle, displayRoomCards, ensureSkwRoomsCard } from './roomCardLabel.ts';
 
 function getDistrictCode(): string {
   if (typeof window === 'undefined') return '';
@@ -87,8 +88,10 @@ export const api = {
   /** 公開設定（成員系統同一份）：旅號清單 troopList 等 */
   getPublicInfo: (): Promise<ApiResult<{ districtName: string; districtCode: string; troopList?: string[]; locked?: boolean }>> => callGet('getPublicInfo'),
 
-  getCards: (token: string): Promise<ApiResult<CardDef[]>> =>
-    callGet('getCards', { token }),
+  getCards: async (token: string): Promise<ApiResult<CardDef[]>> => {
+    const r = await callGet<CardDef[]>('getCards', { token });
+    return r.ok && r.data ? { ...r, data: ensureSkwRoomsCard(r.data, getDistrictCode()) } : r;
+  },
 
   verify: (token: string): Promise<ApiResult<UserSession>> =>
     callGet('verify', { token }),
@@ -97,8 +100,10 @@ export const api = {
   health: (): Promise<ApiResult<{ ok: boolean }>> => callGet('getHealthCheck'),
 
   // 權限管理
-  getPerms: (token: string): Promise<ApiResult<PermsBundle>> =>
-    callGet('getPerms', { token }),
+  getPerms: async (token: string): Promise<ApiResult<PermsBundle>> => {
+    const r = await callGet<PermsBundle>('getPerms', { token });
+    return r.ok && r.data ? { ...r, data: { ...r.data, cards: displayRoomCards(r.data.cards) } } : r;
+  },
   savePerms: (token: string, matrix: Record<string, Record<string, AccessLevel>>):
     Promise<ApiResult<{ saved: boolean }>> =>
     callPost('savePerms', { token, matrix }),
@@ -111,7 +116,10 @@ export const api = {
   resetPassword: (resetToken: string, newPassword: string): Promise<ApiResult<{ reset: boolean; email: string }>> =>
     callPost('resetPassword', { resetToken, newPassword }),
   // 授權／收回（v4.4.0）
-  getDelegation: (token: string): Promise<ApiResult<DelegationBundle>> => callGet('getDelegation', { token }),
+  getDelegation: async (token: string): Promise<ApiResult<DelegationBundle>> => {
+    const r = await callGet<DelegationBundle>('getDelegation', { token });
+    return r.ok && r.data ? { ...r, data: { ...r.data, cards: r.data.cards.map(displayRoomCardTitle) } } : r;
+  },
   delegatePerms: (token: string, targetRole: string, grants: Record<string, AccessLevel>): Promise<ApiResult<{ applied: number; rejected: string[] }>> =>
     callPost('delegatePerms', { token, targetRole, grants }),
   revokePerms: (token: string, targetRole: string): Promise<ApiResult<{ revoked: number; roles: string[] }>> =>
@@ -370,9 +378,20 @@ export const api = {
   /** 地域房間日曆（公開 ICS）；room 留空 = 全部 */
   extRooms: (room = '', from = '', days = 14): Promise<ApiResult<ExternalMeta & { from: number; to: number; days: number; rooms: RoomEvents[] }>> =>
     callExternal('rooms', { room, from, days: String(days) }),
-  /** 區總部已確認借用：區後台讀 Teamup 紅色子日曆，需登入及 rooms 卡權限；不傳聯絡/密碼。 */
-  getDistrictHqBookings: (token: string, from: string, days: number): Promise<ApiResult<DistrictHqBookings>> =>
-    callPost('getDistrictHqBookings', { token, from, days }),
+  /** 區總部已確認借用：Vercel 只讀公開 Teamup ICS、只回傳匿名時段；不經 4.18.0 區後台新 action。 */
+  extDistrictHqBookings: async (token: string, from: string, days: number): Promise<ApiResult<DistrictHqBookings>> => {
+    if (isDemoMode()) return demoCall('getDistrictHqBookings', { token, from, days }, 'POST') as ApiResult<DistrictHqBookings>;
+    try {
+      const url = new URL('/api/rooms/hq', window.location.origin);
+      url.searchParams.set('districtCode', getDistrictCode());
+      url.searchParams.set('from', from);
+      url.searchParams.set('days', String(days));
+      const res = await fetch(url.toString(), { cache: 'no-store' });
+      return await res.json();
+    } catch {
+      return { ok: false, error: 'Teamup 公開日曆連線失敗' };
+    }
+  },
   /** 只喺受保護頁面按掣時讀取；後台先核對總監級／職員身份及 ymis 卡權限。 */
   getYmisCredentials: (token: string): Promise<ApiResult<YmisCredentials>> =>
     callPost('getYmisCredentials', { token }),
