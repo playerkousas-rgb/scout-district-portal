@@ -1,11 +1,10 @@
 /**
- * v4.19.0 無損升級路徑測試 — 舊版（4.8.1）已經用緊嘅 Sheet，貼新 Code.gs → setupSheets()：
- *   · AwardTypes 舊預設值自動升級（FIVE/LSM 補年期、CCH 斬開 CCM 連結、THANKS/HAB 轉提名期、note 更新）
- *   · 用戶自己改過嘅設定絕對唔會被掂
- *   · Perms：awards 舊預設（全角色 view）→ 只限 DDC 或以上
- *   · Cards：舊 news 入口只停用（保留原 Card／Perms 行）；contacts／rooms 舊預設改名
- *   · News 表自動補 deleted/deletedAt/deletedBy 欄；ContactNames 表自動補建
- *   · 已有借場記錄、舊消息、設定、自訂卡片一律不可刪除
+ * v4.19.1 追加式升級測試 — 舊版（4.8.1）已有資料，貼新 Code.gs → setupSheets()：
+ *   · 原有 Config／Cards／Perms／AwardTypes／Users／借場／News 全部既有儲存格不得修改
+ *   · 只在最右補缺欄、最底補缺行，絕不清空工作表／重設保護或原有 API Key
+ *   · 舊 news、meeting、annual 卡保持原 enabled；舊 Awards 規則／Perms 原樣保留
+ *   · 權限以讀取時門禁控制，Rooms 卡顯示新名但不改 Sheet，舊卡仍可用
+ *   · 未有 API_KEY_HASH 才新增帶雜湊的行；已有空白行亦不覆寫，重跑不重複新增
  *
  *   node scripts/test-upgrade-gs.js
  */
@@ -16,32 +15,65 @@ const assert = require('assert');
 
 const code = fs.readFileSync(path.join(__dirname, '..', 'gs', 'Code.gs'), 'utf8');
 
+// 僅在 setupSheets 執行期間開啟：任何觸及原有儲存格／格式／保護的寫入即測試失敗。
+let originals = null;
+const violations = [];
+function rejectOldMutation(name, row, col, height, width, operation) {
+  if (!originals || !originals[name]) return;
+  const old = originals[name];
+  if (row > old.rows || col > old.cols) return;
+  const message = `${operation} 觸及原有 ${name}!R${row}C${col}（原範圍 ${old.rows}×${old.cols}）`;
+  violations.push(message);
+  throw new Error(message);
+}
+
 function makeSheet(name, rows) {
   const data = rows.map(r => r.slice());
+  let maxColumns = Math.max(26, ...rows.map(r => r.length));
   const sh = {
     name,
     getLastRow: () => data.length,
-    getLastColumn: () => (data[0] ? data[0].length : 0),
-    getMaxColumns: () => Math.max(26, data[0] ? data[0].length : 0),
+    getLastColumn: () => Math.max(0, ...data.map(r => r.length)),
+    getMaxColumns: () => maxColumns,
+    insertColumnsAfter(after, count) {
+      if (after !== maxColumns) throw new Error('只能喺最右邊追加欄位');
+      maxColumns += count;
+    },
     getDataRange: () => ({ getValues: () => data.map(r => r.slice()) }),
     getRange(row, col, numRows = 1, numCols = 1) {
+      const guard = operation => rejectOldMutation(name, row, col, numRows, numCols, operation);
       return {
         getValues: () => data.slice(row - 1, row - 1 + numRows).map(r => r.slice(col - 1, col - 1 + numCols)),
         getValue: () => (data[row - 1] || [])[col - 1],
-        setValue: (v) => { while (data.length < row) data.push([]); data[row - 1][col - 1] = v; },
+        setValue: (v) => {
+          guard('setValue');
+          while (data.length < row) data.push([]);
+          data[row - 1][col - 1] = v;
+        },
         setValues: (vals) => {
+          guard('setValues');
           vals.forEach((r, i) => {
             while (data.length < row + i) data.push([]);
             r.forEach((v, j) => { data[row - 1 + i][col - 1 + j] = v; });
           });
         },
-        setFontWeight: () => ({ setBackground: () => {} }),
-        setBackground: () => {}, setFontColor: () => {},
+        setFontWeight: () => { guard('setFontWeight'); return { setBackground: () => guard('setBackground') }; },
+        setBackground: () => guard('setBackground'), setFontColor: () => guard('setFontColor'),
       };
     },
     appendRow: (row) => { data.push(row.slice()); },
-    deleteRow: (idx) => { data.splice(idx - 1, 1); },
-    setFrozenRows: () => {}, setFrozenColumns: () => {}, clear: () => { data.length = 0; },
+    deleteRow: (idx) => { rejectOldMutation(name, idx, 1, 1, 1, 'deleteRow'); data.splice(idx - 1, 1); },
+    getProtections: () => { if (originals?.[name]) violations.push(`getProtections 觸及原有 ${name}`); return []; },
+    protect: () => {
+      if (originals?.[name]) violations.push(`protect 觸及原有 ${name}`);
+      return {
+        setDescription() { return this; }, addEditor() {}, getEditors: () => [],
+        canDomainEdit: () => false,
+      };
+    },
+    setFrozenRows: () => { if (originals?.[name]) violations.push(`setFrozenRows 觸及原有 ${name}`); },
+    setFrozenColumns: () => { if (originals?.[name]) violations.push(`setFrozenColumns 觸及原有 ${name}`); },
+    clear: () => { if (originals?.[name]) violations.push(`clear 觸及原有 ${name}`); data.length = 0; },
     _data: data,
   };
   return sh;
@@ -58,6 +90,8 @@ const sheets = {
     ['contacts', '聯結簿', '📇', 'builtin', '/contacts', '旅團 · 港島地域 · 總會 聯絡資料', 2, 'TRUE', 'FALSE', 'core', 'done'],
     ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '獎勵名冊 · 自動計夠期可提名 · 年期自訂', 3, 'TRUE', 'FALSE', 'core', 'done'],
     ['news', '消息發佈', '📢', 'builtin', '/news', '發佈消息到成員系統首頁置頂 · 一刪即消失', 4, 'TRUE', 'FALSE', 'core', 'done'],
+    ['meeting', '會議行事曆', '📅', 'builtin', '/meeting', '舊會議入口', 5, 'TRUE', 'FALSE', 'core', 'done'],
+    ['annual', '週年會議', '📅', 'builtin', '/annual', '舊週年入口', 6, 'FALSE', 'FALSE', 'core', 'done'],
     ['venueReg', '場地借用審批', '🏛', 'builtin', '/venue-regs', '借場申請批核 · 場地清單', 9, 'TRUE', 'FALSE', 'core', 'done'],
     ['rooms', '地域房間使用情況', '🏢', 'builtin', '/rooms', '17／18／19 樓逐間房睇用途時段 · 今日總覽', 15, 'TRUE', 'FALSE', 'core', 'done'],
   ]),
@@ -67,6 +101,8 @@ const sheets = {
     ['contacts', 'edit', 'edit', 'edit', 'edit', 'edit', 'edit'],
     ['awards', 'edit', 'edit', 'edit', 'view', 'view', 'view'],
     ['news', 'edit', 'edit', 'edit', 'edit', 'view', 'edit'],
+    ['meeting', 'edit', 'edit', 'view', 'view', 'view', 'view'],
+    ['annual', 'edit', 'edit', 'view', 'view', '', 'view'],
     ['venueReg', 'edit', 'edit', 'edit', 'edit', 'view', 'edit'],
     ['rooms', 'view', 'view', 'view', 'view', 'view', 'view'],
   ]),
@@ -104,6 +140,7 @@ const ctx = {
   console,
   Logger: { log: () => {} },
   SpreadsheetApp: {
+    ProtectionType: { SHEET: 'SHEET' },
     getActiveSpreadsheet: () => ({
       getSheetByName: (n) => sheets[n] || null,
       insertSheet: (n) => (sheets[n] = makeSheet(n, [])),
@@ -134,13 +171,43 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(code, ctx, { filename: 'Code.gs' });
+// 測試只核對雜湊有冇新增；唔輸出隨機生成的測試用 API Key。
+ctx.uiAlert_ = () => {};
+ctx.showKeyDialog_ = () => {};
 
 let pass = 0;
 function check(label, fn) { fn(); pass++; console.log('  ✓ ' + label); }
 
-console.log('v4.19.0 無損升級路徑（舊 Sheet → setupSheets）');
+console.log('v4.19.1 只追加升級路徑（舊 Sheet → setupSheets）');
 
-ctx.setupSheets();
+function guardedSetup() {
+  const before = Object.fromEntries(Object.entries(sheets).map(([name, sh]) => [
+    name, sh._data.map(r => r.slice()),
+  ]));
+  originals = Object.fromEntries(Object.entries(before).map(([name, rows]) => [
+    name, { rows: rows.length, cols: Math.max(0, ...rows.map(r => r.length)) },
+  ]));
+  violations.length = 0;
+  try { ctx.setupSheets(); } finally { originals = null; }
+  assert.deepStrictEqual(violations, [], '升級時不可以改動舊儲存格／格式／保護');
+  for (const [name, rows] of Object.entries(before)) {
+    assert.ok(sheets[name], `原有 ${name} 表不能刪除`);
+    rows.forEach((row, i) => {
+      assert.deepStrictEqual(sheets[name]._data[i].slice(0, row.length), row,
+        `原有 ${name} 表第 ${i + 1} 行任何一格都唔可以改`);
+    });
+  }
+}
+
+check('首輪升級：所有原有表／行／儲存格／格式／保護原封不動，只有缺行／缺欄追加', guardedSetup);
+check('原 Config 未有 API_KEY_HASH：只能在末尾加新行，不觸碰舊 Config 值', () => {
+  const hashRows = sheets.Config._data.filter(r => r[0] === 'API_KEY_HASH');
+  assert.strictEqual(hashRows.length, 1);
+  assert.ok(String(hashRows[0][1]).length > 0);
+  assert.strictEqual(sheets.Config._data[1][1], 'SKW');
+  assert.strictEqual(sheets.Config._data[2][1], '筲箕灣區');
+});
+
 // 模擬三名測試幹部已按區方流程輪換舊密碼；其餘升級舊行 mustChangePassword 仍留空。
 const mustChangeCol = sheets.Users._data[0].indexOf('mustChangePassword');
 for (const email of ['dc@x.org', 'adc@x.org', 'staff@x.org']) {
@@ -148,53 +215,55 @@ for (const email of ['dc@x.org', 'adc@x.org', 'staff@x.org']) {
   sheets.Users.getRange(row + 1, mustChangeCol + 1).setValue('FALSE');
 }
 
-check('AwardTypes 舊預設自動升級：FIVE=5、LSM=15、CCH 斬開、HAB→hab、THANKS→other', () => {
+check('AwardTypes 舊預設原封不動：FIVE/LSM 空白、CCH=CCM+5、HAB/THANKS 舊提名期', () => {
   const by = {};
   ctx.awardTypes_().forEach(t => { by[t.code] = t; });
-  assert.strictEqual(by.FIVE.minYears, 5);
-  assert.strictEqual(by.LSM.minYears, 15);
+  assert.strictEqual(by.FIVE.minYears, null);
+  assert.strictEqual(by.LSM.minYears, null);
   assert.strictEqual(by.LSM.prevCode, '');
-  assert.strictEqual(by.CCH.prevCode, '');
-  assert.strictEqual(by.CCH.minYears, null);
-  assert.strictEqual(by.HAB.round, 'hab');
-  assert.strictEqual(by.THANKS.round, 'other');
-  assert.strictEqual(by.TEN.prevCode, 'FIVE');   // 本來就啱，唔會被掂
+  assert.strictEqual(by.CCH.prevCode, 'CCM');
+  assert.strictEqual(by.CCH.minYears, 5);
+  assert.strictEqual(by.HAB.round, 'other');
+  assert.strictEqual(by.THANKS.round, 'founder');
+  assert.strictEqual(by.TEN.prevCode, 'FIVE');
 });
 
-check('用戶改過嘅 AwardTypes 設定唔會被掂', () => {
-  // 用戶早已自訂 GSA 年期 = 9 → patch 唔應該改
+check('用戶自訂獎勵年期維持原值，重跑 setupSheets 亦不修改', () => {
   const sh = sheets.AwardTypes;
   const v = sh.getDataRange().getValues();
-  const cCode = v[0].indexOf('code'), cMin = v[0].indexOf('minYears');
-  for (let i = 1; i < v.length; i++) {
-    if (String(v[i][cCode]) === 'GSA') { sh.getRange(i + 1, cMin + 1).setValue(9); break; }
-  }
-  ctx.patchAwardTypes_(ctx.SpreadsheetApp.getActiveSpreadsheet());
+  const i = v.findIndex(r => r[0] === 'GSA');
+  sh.getRange(i + 1, v[0].indexOf('minYears') + 1).setValue(9);
+  guardedSetup();
   const by = {};
   ctx.awardTypes_().forEach(t => { by[t.code] = t; });
-  assert.strictEqual(by.GSA.minYears, 9, '用戶自訂 GSA=9 唔應該被改');
+  assert.strictEqual(by.GSA.minYears, 9);
 });
 
-check('Perms：awards 舊預設（全 view）→ 只限 DDC 或以上', () => {
+check('Perms：舊 awards view 一格不改，但 ADC／STAFF 實際不可讀／寫提名資料', () => {
   const perms = ctx.readPerms_();
   assert.strictEqual(perms.awards.DC, 'edit');
-  assert.strictEqual(perms.awards.SYSADMIN, 'edit');
-  assert.strictEqual(perms.awards.DDC_ADMIN, 'edit');
   assert.strictEqual(perms.awards.DDC_TRAINING, 'view');
-  assert.strictEqual(perms.awards.ADC_SCOUT, undefined);
-  assert.strictEqual(perms.awards.STAFF, undefined);
-  assert.strictEqual(perms.contacts.STAFF, 'edit');   // 其他行照舊
+  assert.strictEqual(perms.awards.ADC_SCOUT, 'view', '舊矩陣資料不許遷移');
+  assert.strictEqual(perms.awards.STAFF, 'view');
+  const adc = ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12);
+  assert.ok(!ctx.getCards_(adc).data.some(c => c.cardId === 'awards'));
+  assert.strictEqual(ctx.getAwardsBoard_(adc).ok, false, '直接調用讀取 API 也要擋');
+  assert.ok(ctx.requireCardEdit_(adc, 'awards').error, '直接調用寫入 API 也要擋');
+  assert.strictEqual(perms.contacts.STAFF, 'edit');
 });
 
-check('Perms：舊場地審批預設 view → 只限有審批權角色；rooms 繼續全員 view', () => {
+check('Perms：借場審批及房間卡舊矩陣不變，實際門禁分別限制／放行', () => {
   const perms = ctx.readPerms_();
   ['DC', 'SYSADMIN', 'DDC_ADMIN', 'DDC_TRAINING', 'STAFF'].forEach(role => {
-    assert.strictEqual(perms.venueReg[role], 'edit', `${role} 可見審批卡`);
+    assert.strictEqual(perms.venueReg[role], 'edit', `${role} 舊審批權保留`);
   });
-  ['ADC_SCOUT', 'LEADER', 'AL'].forEach(role => {
-    assert.strictEqual(perms.venueReg[role], undefined, `${role} 不應見審批卡`);
-    assert.strictEqual(perms.rooms[role], 'view', `${role} 仍可查看房間及區總部`);
-  });
+  assert.strictEqual(perms.venueReg.ADC_SCOUT, 'view', '未授權角色的舊 view 格不能清空');
+  const adc = ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12);
+  const leader = ctx.makeToken_('leader@x.org', 'LEADER', 12);
+  assert.ok(!ctx.getCards_(adc).data.some(c => c.cardId === 'venueReg'));
+  assert.ok(ctx.requirePerm_(adc, 'canVenue').error, '直接借場審批 API 同樣要檢查 canVenue');
+  assert.ok(ctx.getCards_(leader).data.some(c => c.cardId === 'rooms' && c.access === 'view'));
+  assert.strictEqual(perms.rooms.LEADER, undefined, '新欄原有行仍是空白，不強行填入');
 });
 
 check('getCards：一般登入者／個別卡片範圍仍見 rooms；未獲借場權限者看不到審批', () => {
@@ -387,33 +456,38 @@ check('待批走馬燈不向無審批卡者透露借場申請資料', () => {
   assert.strictEqual(ctx.getPendingInbox_(dc).data.venue.length, 1);
 });
 
-check('Cards：舊 news 入口只隱藏不刪，舊 Perms 留底；contacts／rooms 預設值升級', () => {
-  const rows = ctx.readSheet_('Cards');   // readSheet_ 回傳物件（header 當 key）
+check('Cards：舊 news／contacts／rooms 設定原樣；新名稱只在 API 顯示，不寫 Cards', () => {
+  const rows = ctx.readSheet_('Cards');
   const news = rows.find(r => r.cardId === 'news');
-  assert.ok(news, 'news 卡原始行必須保留');
-  assert.strictEqual(news.enabled, 'FALSE', '只停用舊內建入口，新版消息改用主控台');
-  assert.strictEqual(ctx.readPerms_().news.STAFF, 'edit', 'news 權限行不應被刪除');
-  const contacts = rows.filter(r => String(r.cardId || '').trim() === 'contacts')[0];
-  assert.ok(contacts, 'contacts 卡應該仍在');
-  assert.strictEqual(contacts.title, '聯絡簿');
-  assert.strictEqual(contacts.description, '聯絡電話：旅團 · 港島地域 · 總會（職員姓名區方可改）');
+  assert.ok(news && news.enabled === 'TRUE', '舊卡啟用狀態必須保留');
+  assert.strictEqual(rows.find(r => r.cardId === 'meeting').enabled, 'TRUE');
+  assert.strictEqual(rows.find(r => r.cardId === 'annual').enabled, 'FALSE');
+  assert.strictEqual(ctx.readPerms_().news.STAFF, 'edit', '舊 news 權限行不應被刪改');
+  assert.strictEqual(ctx.readPerms_().meeting.DC, 'edit');
+  assert.strictEqual(ctx.readPerms_().annual.DDC_ADMIN, 'view');
+  const contacts = rows.find(r => r.cardId === 'contacts');
+  assert.strictEqual(contacts.title, '聯結簿');
+  assert.strictEqual(contacts.description, '旅團 · 港島地域 · 總會 聯絡資料');
   const rooms = rows.find(r => r.cardId === 'rooms');
-  assert.strictEqual(rooms.title, '地域房間及區總部使用情況');
-  assert.strictEqual(rooms.description, '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆');
-  assert.strictEqual(ctx.readPerms_().rooms.STAFF, 'view', '原 rooms 卡權限要保留');
-  assert.ok(!ctx.getCards_(ctx.makeToken_('staff@x.org', 'STAFF', 12)).data.some(c => c.cardId === 'news'), '一般用戶不應再見舊 news 入口');
+  assert.strictEqual(rooms.title, '地域房間使用情況', '原 Sheet 舊名稱不改');
+  assert.strictEqual(rooms.description, '17／18／19 樓逐間房睇用途時段 · 今日總覽');
+  const displayed = ctx.getCards_(ctx.makeToken_('staff@x.org', 'STAFF', 12)).data;
+  assert.strictEqual(displayed.find(c => c.cardId === 'rooms').title, '地域房間及區總部使用情況');
+  assert.strictEqual(displayed.find(c => c.cardId === 'rooms').description, '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆');
+  assert.ok(displayed.some(c => c.cardId === 'news'), '舊 news 入口不自動隱藏，由區方自行決定');
 });
 
-check('Cards：用戶自行改過嘅 rooms 名稱／描述唔會被覆寫', () => {
+check('Cards：用戶自行改過嘅 rooms 名稱／描述保持顯示原樣', () => {
   const sh = sheets.Cards;
   const rows = sh.getDataRange().getValues();
   const i = rows.findIndex(r => r[0] === 'rooms');
   sh.getRange(i + 1, 2).setValue('自訂房間日曆');
   sh.getRange(i + 1, 6).setValue('自訂說明');
-  ctx.patchCardRows_(ctx.SpreadsheetApp.getActiveSpreadsheet());
+  guardedSetup();
   const rooms = ctx.readSheet_('Cards').find(r => r.cardId === 'rooms');
   assert.strictEqual(rooms.title, '自訂房間日曆');
   assert.strictEqual(rooms.description, '自訂說明');
+  assert.strictEqual(ctx.getCards_(ctx.makeToken_('dc@x.org', 'DC', 12)).data.find(c => c.cardId === 'rooms').title, '自訂房間日曆');
 });
 
 check('現有區有 Users 帳戶時不會新增公開預設密碼的高權限帳戶', () => {
@@ -423,13 +497,13 @@ check('現有區有 Users 帳戶時不會新增公開預設密碼的高權限帳
 });
 
 check('自訂舊卡片／既有借場及消息記錄，升級時不可被刪除或覆寫', () => {
-  // 自訂入口即使沿用已棄用嘅 meeting ID，亦不可被停用或清空。
+  // 自訂入口即使沿用舊 meeting ID，重跑升級亦不可被停用或清空。
   ctx.appendRowObj_(sheets.Cards, {
     cardId: 'meeting', title: '自訂會議記錄', url: '/my-calendar', type: 'jump',
     source: 'custom', enabled: 'TRUE', category: 'done',
   });
-  ctx.patchCardRows_(ctx.SpreadsheetApp.getActiveSpreadsheet());
-  const custom = ctx.readSheet_('Cards').find(r => r.cardId === 'meeting');
+  guardedSetup();
+  const custom = ctx.readSheet_('Cards').find(r => r.cardId === 'meeting' && r.source === 'custom');
   assert.ok(custom && custom.title === '自訂會議記錄' && custom.enabled === 'TRUE');
   assert.strictEqual(custom.url, '/my-calendar');
   const booking = ctx.readSheet_('VenueBookings').find(r => r.id === 'original-confirmed-booking');
@@ -457,30 +531,119 @@ check('舊 News 行（未有 deleted 值）照樣正常讀；刪除後會留底'
   assert.strictEqual(ctx.getAnnouncements_(t).data.filter(n => n.id === r.data.id)[0].deleted, true);
 });
 
-check('setupSheets 重跑都唔會清資料（補建唔清空）', () => {
+check('setupSheets 多次重跑：所有格不變、不加重複行，舊資料全部仍在', () => {
   const oldApiKeyHash = ctx.getConfigValue_('API_KEY_HASH');
-  ctx.setupSheets();
+  const beforeCounts = Object.fromEntries(Object.entries(sheets).map(([name, sh]) => [name, sh.getLastRow()]));
+  guardedSetup();
   assert.strictEqual(ctx.getConfigValue_('API_KEY_HASH'), oldApiKeyHash, '重跑不可重設現有 API Key');
+  assert.deepStrictEqual(Object.fromEntries(Object.entries(sheets).map(([name, sh]) => [name, sh.getLastRow()])), beforeCounts);
   assert.strictEqual(ctx.readSheet_('Users').length, 5, '重跑不可新增預設管理員帳戶');
   assert.ok(ctx.readSheet_('VenueBookings').some(r => r.id === 'original-confirmed-booking' && r.purpose === '原有借場用途要保留'));
   assert.ok(ctx.readSheet_('News').some(r => r.id === 'old-news-1' && r.body === '舊內容要保留'));
-  assert.ok(ctx.readSheet_('Cards').some(r => r.cardId === 'news' && r.enabled === 'FALSE'));
-  assert.ok(ctx.readSheet_('Cards').some(r => r.cardId === 'meeting' && r.enabled === 'TRUE'));
+  assert.ok(ctx.readSheet_('Cards').some(r => r.cardId === 'news' && r.enabled === 'TRUE'));
+  assert.ok(ctx.readSheet_('Cards').some(r => r.cardId === 'meeting' && r.source === 'custom' && r.enabled === 'TRUE'));
   assert.strictEqual(ctx.readPerms_().news.STAFF, 'edit', '舊 Permissions 行要保留');
   const by = {};
   ctx.awardTypes_().forEach(t2 => { by[t2.code] = t2; });
-  assert.strictEqual(by.GSA.minYears, 9, '用戶自訂值重跑 setupSheets 之後仍然喺度');
-  assert.strictEqual(by.FIVE.minYears, 5);
+  assert.strictEqual(by.GSA.minYears, 9, '用戶自訂值重跑後仍然喺度');
+  assert.strictEqual(by.FIVE.minYears, null, '舊規則原樣不遷移');
   assert.strictEqual(ctx.readSheet_('Cards').find(r => r.cardId === 'rooms').title, '自訂房間日曆');
-  assert.strictEqual(ctx.readPerms_().rooms.LEADER, 'view', '房間全員查閱權重跑仍在');
-  assert.strictEqual(ctx.readPerms_().venueReg.ADC_SCOUT, 'edit', '自訂嘅審批權限矩陣唔會被遷移覆蓋');
+  assert.strictEqual(ctx.readPerms_().rooms.LEADER, undefined, '不向原有 rooms 行寫新權限值');
+  const leader = ctx.makeToken_('leader@x.org', 'LEADER', 12);
+  assert.ok(ctx.getCards_(leader).data.some(c => c.cardId === 'rooms' && c.access === 'view'));
+  assert.strictEqual(ctx.readPerms_().venueReg.ADC_SCOUT, 'edit', '自訂矩陣原樣保留');
   const adc = ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12);
   assert.ok(!ctx.getCards_(adc).data.some(c => c.cardId === 'venueReg'), '但無 canVenue 仍唔會展示審批卡');
 });
 
+check('現有 API_KEY_HASH 行留空時，setupSheets 保持空白且不產生重複行', () => {
+  const cfg = sheets.Config;
+  const row = cfg._data.findIndex(r => r[0] === 'API_KEY_HASH');
+  const originalHash = cfg._data[row][1];
+  cfg.getRange(row + 1, 2).setValue('');
+  try {
+    const count = cfg.getLastRow();
+    guardedSetup();
+    assert.strictEqual(cfg._data[row][1], '');
+    assert.strictEqual(cfg.getLastRow(), count);
+    assert.strictEqual(ctx.getConfigValue_('API_KEY_HASH'), '');
+  } finally { cfg.getRange(row + 1, 2).setValue(originalHash); }
+});
+
+check('全新 Config 表才可連新行一併建立新 Key；其他原有表不改', () => {
+  const previous = sheets.Config;
+  delete sheets.Config;
+  try {
+    guardedSetup();
+    const row = sheets.Config._data.find(r => r[0] === 'API_KEY_HASH');
+    assert.ok(row && String(row[1]).length > 0, '新表當次寫入時便有 Key 雜湊');
+  } finally { sheets.Config = previous; }
+});
+
+check('已存在但只有表頭的 Users 表不應種公開初始密碼管理員', () => {
+  const previous = sheets.Users;
+  sheets.Users = makeSheet('Users', [['email', 'role', 'active']]);
+  try {
+    guardedSetup();
+    assert.strictEqual(sheets.Users.getLastRow(), 1, '現有 Users 只追加欄，不加帳戶行');
+  } finally { sheets.Users = previous; }
+});
+
+check('已有資料但缺 Users 表時只建空表頭，不植入公開初始管理員', () => {
+  const previous = sheets.Users;
+  delete sheets.Users;
+  try {
+    guardedSetup();
+    assert.ok(sheets.Users._data[0].includes('email'));
+    assert.strictEqual(sheets.Users._data.length, 1);
+    guardedSetup();
+    assert.strictEqual(sheets.Users._data.length, 1);
+  } finally { sheets.Users = previous; }
+});
+
+check('已有 Perms 只有表頭時，只在底部追加缺少的權限行', () => {
+  const previous = sheets.Perms;
+  sheets.Perms = makeSheet('Perms', [['cardId', 'DC', 'STAFF']]);
+  try {
+    guardedSetup();
+    assert.ok(sheets.Perms._data.some(r => r[0] === 'ymis'));
+    assert.ok(sheets.Perms._data.some(r => r[0] === 'rooms'));
+    const row = sheets.Perms._data.find(r => r[0] === 'ymis');
+    assert.strictEqual(row[2], 'view');
+    const count = sheets.Perms.getLastRow();
+    guardedSetup();
+    assert.strictEqual(sheets.Perms.getLastRow(), count, '不加重複 Perms 行');
+  } finally { sheets.Perms = previous; }
+});
+
+check('已有空白 Awards 表只補新表頭，原有格式及保護不變', () => {
+  const previous = sheets.Awards;
+  sheets.Awards = makeSheet('Awards', []);
+  try {
+    guardedSetup();
+    assert.strictEqual(sheets.Awards._data.length, 1);
+    assert.ok(sheets.Awards._data[0].includes('GSA'));
+  } finally { sheets.Awards = previous; }
+});
+
+check('整本全新空白 Sheet 仍可初始化並只在首次建立時種初始帳戶', () => {
+  const original = { ...sheets };
+  for (const name of Object.keys(sheets)) delete sheets[name];
+  sheets.Sheet1 = makeSheet('Sheet1', []);
+  try {
+    guardedSetup();
+    assert.ok(sheets.Users._data.length > 1, '全新系統仍可按現有藍圖首次建立帳戶');
+    assert.ok(sheets.Config._data.some(r => r[0] === 'API_KEY_HASH' && r[1]));
+    guardedSetup();
+  } finally {
+    for (const name of Object.keys(sheets)) delete sheets[name];
+    Object.assign(sheets, original);
+  }
+});
+
 check('前端可下載的完整 Code.gs 與後台原始檔完全一致', () => {
   const downloadable = fs.readFileSync(path.join(__dirname, '..', 'public', 'downloads', 'Code.gs.txt'), 'utf8');
-  assert.strictEqual(downloadable, code, '如更新 gs/Code.gs，記得同步更新 public/downloads/Code.gs.txt');
+  assert.ok(downloadable === code, '如更新 gs/Code.gs，記得同步更新 public/downloads/Code.gs.txt');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

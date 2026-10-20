@@ -5,13 +5,13 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
-        <h3>v4.19.0 — 原有資料無損更新 · YMIS 人工登入 · 區總部月曆</h3>
-        <p>已有區後台請<strong>繼續使用原本 Google Sheet 與同一個 Apps Script 專案</strong>，先備份，唔好開新表，亦唔好執行訓練班模版嘅 <code>setupCourseSheet()</code>。</p>
-        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.19.0</a></p>
+        <h3>v4.19.1 — 後端嚴格只追加（YMIS／區總部月曆功能沿用）</h3>
+        <p>已有區後台請<strong>沿用原本 Google Sheet 與同一個 Apps Script 專案</strong>，先備份，唔好開新表或執行訓練班模版 <code>setupCourseSheet()</code>。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.19.1</a></p>
         <ul>
-          <li>貼入原有 Script → 只執行 <code>setupSheets()</code>：補缺欄／卡片、調整舊預設權限；借場、消息、帳戶等原有記錄不會清除，舊內建卡片只隱藏，Cards／Perms 行留底。</li>
-          <li>Apps Script <b>Script Properties 必設</b>每區獨立嘅 <code>PORTAL_TOKEN_SECRET</code>（至少 32 字元亂碼），否則新版無法登入；舊 session 會失效。YMIS 新帳密須先輪換，再由區方私下填入 Script Properties，唔好貼到程式碼、Sheet 或對話。</li>
-          <li>沿用原有 Web App 部署，更新至新版本；檢查 <code>getHealthCheck</code> 回傳 <code>4.19.0</code>。<a href="https://github.com/playerkousas-rgb/scout-district-portal/blob/main/docs/gs-upgrade-no-data-loss.md" target="_blank" rel="noopener noreferrer">逐步備份及無損升級指引 ↗</a></li>
+          <li><code>setupSheets()</code> 只追加缺表、缺欄、缺行；<strong>不改寫／清除舊資料</strong>，包括原有 Users、Cards、Perms、AwardTypes、API Key、保護設定。舊 news／meeting／annual 卡片啟用狀態不變；如需隱藏，請由區方另行決定。</li>
+          <li>房間全員查閱、借場審批及 YMIS／獎勵角色限制在讀取或操作時生效，唔使更改舊 Perms 格。已有 <code>API_KEY_HASH</code> 行若係空白亦不會自動填寫，須由區方另行明確生成 Key，並同步前端環境變數。</li>
+          <li>Apps Script <b>Script Properties 必設</b>每區獨立嘅 <code>PORTAL_TOKEN_SECRET</code>（最少 32 字元）；舊 session 會失效。YMIS 新帳密須先輪換，再私下填入 Script Properties。沿用原部署選新版本，檢查 <code>getHealthCheck</code> 回傳 <code>4.19.1</code> 及 <code>apiKeySet: true</code>。<a href="https://github.com/playerkousas-rgb/scout-district-portal/blob/main/docs/gs-upgrade-no-data-loss.md" target="_blank" rel="noopener noreferrer">逐步備份及只追加升級指引 ↗</a></li>
         </ul>
       </div>
       <div className="info-card">
@@ -321,7 +321,7 @@ export default function UpdatesPage() {
       </div>
       <div className="info-card">
         <h3>後台程式碼</h3>
-        <p style={{ fontSize: 13.5 }}>目前下載檔係完整 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.19.0</a>。已有區資料請先備份，再於原有 Script 覆蓋程式碼、執行 <code>setupSheets()</code> 補缺並更新原有部署；唔好開新 Sheet 或貼入真實密碼。詳見本頁頂部升級指引。</p>
+        <p style={{ fontSize: 13.5 }}>目前下載檔係完整 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">Code.gs v4.19.1（只追加升級）</a>。已有區資料請先備份，再於原有 Script 覆蓋程式碼、執行 <code>setupSheets()</code> 只補缺並更新原有部署；唔好開新 Sheet 或貼入真實密碼。詳見本頁頂部升級指引。</p>
       </div>
     </>
   );

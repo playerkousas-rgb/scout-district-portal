@@ -18,17 +18,17 @@
 
 ### 第 1 步：起後台（Google Sheet + Apps Script）
 
-**已有原有資料要更新，而唔係新建？請先依照 [`GS 無損升級步驟`](docs/gs-upgrade-no-data-loss.md) 備份及更新原有專案。**
+**已有原有資料要更新，而唔係新建？請先依照 [`GS 只追加升級步驟`](docs/gs-upgrade-no-data-loss.md) 備份及更新原有專案；下方「新增部署」只適用於全新空白 Sheet。**
 
 1. 開一張 Google Sheet（或沿用你已有嗰張）→ **擴充功能 → Apps Script**。
 2. 將最新版 `gs/Code.gs` **全部內容覆蓋貼上** → 儲存。
 3. 函數選單揀 **`setupSheets`** → 執行（首次要授權：Review permissions → Advanced → Allow）。
    - 自動建齊所有工作表（Config / Users / Venues / VenueBookings / CourseLinks …）。
-   - ★ 係「**補建唔清空**」：重跑唔會刪除現有工作表／借場／消息／帳戶等記錄；只補缺欄及調整舊預設卡片／權限。升級前仍應先備份試算表。
-   - 彈窗會顯示 **API Key（只顯示一次）→ 即刻複製**。
+   - ★ 係「**只追加**」：舊表只在最右加缺欄、在最底加缺行；舊借場／消息／帳戶／Cards／Perms／AwardTypes 的原有儲存格與工作表保護保持原樣。升級前仍要先備份。
+   - **只有全新 Config 或舊 Config 缺少 `API_KEY_HASH` 整行**，才生成新 API Key（只顯示一次，請私下複製）；已有行連空白值都不覆寫。空白時須由區方另外明確生成 Key 並同步前端，未完成勿部署。
 4. **部署前必設** Apps Script → 專案設定 → Script Properties：`PORTAL_TOKEN_SECRET`（每區獨立隨機、至少 32 字元；未設定會拒絕登入／token）；如要開啟維護登入，另設 `PORTAL_MASTER_PASSWORD`（至少 12 字元，否則停用）。不可再使用／提交原始碼中的公開示範金鑰或密碼。切換 token 密鑰會令舊 session／重設密碼連結失效。
 5. **更換預設 Users／Staff 初始密碼**，不再使用的帳戶應停用；尤其啟用 YMIS 卡之前必須完成。`MASTER_EMAIL`（帳號名稱）可按區方需要另改，密碼不可寫入 Code.gs。
-6. **部署 → 新增部署 → 網頁應用程式**（執行身分：我自己；存取：**任何人**）→ 攞 `/exec` 網址。
+6. **全新區**：部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：**任何人**）→ 攞 `/exec` 網址。**已有區**：管理部署 → 編輯**原有** Web App → 新版本；沿用舊 `/exec`。
 
 ### 第 2 步：填 Config 金鑰（喺「Config」工作表）
 
@@ -55,7 +55,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.19.0"` 即代表新版後台已上線。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.19.1"` 即代表新版後台已上線。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -68,7 +68,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.19.0"` 即代表用緊呢次更新嘅後台。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.19.1"` 即代表用緊呢次更新嘅後台。
 
 ---
 
@@ -222,17 +222,17 @@
 
 - 房間打通關係：1704A／1704B ⊂ 1704 ⊂ 1704+1705；睇任何一間都會自動計入相關日曆（標「經 XXXX 打通預約」）。
 - 開發／測試：`PORTAL_DEV_EXTERNAL_BASE=http://127.0.0.1:8787/upstream` 可把全部上游改經本機 fixture（同 `PORTAL_DEV_APIBASE` 一樣只喺非 production 生效）。
-- 後台 4.5.0：Cards 補 `rooms`／`orgchart`（全員 view）、`budget` todo→done（只改仍係舊預設值嘅行）、Config 補 `BUDGET_SHEET_URL`；舊 `annual` 週年會議文件卡片只停用，保留 Cards／Perms 原行（`app/annual-docs` 已刪）。
+- 後台升級只補缺少的 `rooms`／`orgchart` 卡及 `BUDGET_SHEET_URL`；既有 `budget` 狀態及 `annual` 卡原樣保留（`app/annual-docs` 已刪），如需隱藏舊卡請由區方自行操作。
 
 ## 🌦 天氣決策 / 📇 聯結簿 / 👤 層級授權 / 🙈 隱藏卡片（v4.4.0）
 
 - **天氣決策**（`lib/weatherDecision.ts`、`components/WeatherDecisionPanel.tsx`、主控台 `WeatherDecisionBanner`）：瀏覽器直接拉天文台開放數據 `warnsum`（公開、可跨域），對照活動指引通告 04/2018 表一，戶內／戶外／海上各自一個結論（✅／⚠️／⛔）＋原因；可模擬；AQHI 天文台 API 冇提供，人手揀。
 - **聯結簿**（`app/contacts/page.tsx`、`lib/contactsDirectory.ts`）：旅團（待區方資料）／港島地域／總會三分頁，來源及日期寫喺檔頭。v4.5.0 起港島地域只放職員電話並自動同步，總監架構搬去 `/orgchart`。
-- **帳戶層級**：`level` 0 超管 → 1 DC → 2 DDC → 3 ADC → 4 STAFF → 5 其他。`Users` 表新增 `level` / `mustChangePassword` / `delegatedBy`；`Roles` 表新增 `level`。只限全新／空白 Users 表先種預設帳戶（`PRESET_USERS`，初始密碼僅供首次設定、登入即須更改）；已有任何帳戶的區升級不會額外加示範管理員，亦不改已有密碼。
+- **帳戶層級**：`level` 0 超管 → 1 DC → 2 DDC → 3 ADC → 4 STAFF → 5 其他。`Users` 表新增 `level` / `mustChangePassword` / `delegatedBy`；`Roles` 表新增 `level`。**只有整本全新空白試算表**才按藍圖種預設帳戶（初始密碼只供首次設定、登入即須更改）；已有 Users 表就算只得表頭，或者已有資料但缺 Users 表，都唔自動新增示範管理員，亦唔改舊密碼／層級；缺 Users 表時請由區方自行開戶。
 - **忘記密碼**：`requestPasswordReset`（公開，寄去帳戶電郵，前端帶 `resetUrlBase` 即 `/?d=區碼`，連結 `&reset=TOKEN`）→ `resetPassword`。Token 綁定舊密碼雜湊，24 小時有效、用一次即失效。
 - **授權／收回**（`/delegate`）：`getDelegation` / `delegatePerms` / `revokePerms`，直接寫 `Perms` 表；只可授出自己擁有嘅權限、只可授俾層級較低嘅角色。
 - **隱藏卡片**：`Cards.enabled=FALSE` → `getCards` 只回傳俾 level 0（超管）；主控台超管每張卡有開關。
-- 舊「會議行事曆」入口已停用隱藏；`patchCardRows_` 保留原卡片行和權限，唔會刪資料。
+- `setupSheets()` 不再執行舊卡片遷移：舊「會議行事曆」等入口及權限、啟用狀態照舊保留；需要隱藏時由區方自行決定。
 
 ## 🚨 意外／應變（v4.3.0 完成）
 
@@ -321,7 +321,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 | 檔案 | 用途 |
 |---|---|
-| `gs/Code.gs` | 完整統一後台 v4.19.0（已用的 Sheet 請先依無損升級指引備份） |
+| `gs/Code.gs` | 完整統一後台 v4.19.1（已用的 Sheet 請先依只追加升級指引備份） |
 | `public/downloads/Code.gs.txt` | 與 `gs/Code.gs` 同一份內容，供網站「更新／下載」直接下載 |
 | `gs/Code.gs.course.js` | 每個訓練班嘅收表 Script 模板 |
 | `app/api/proxy/route.ts` | 前端 → Apps Script 嘅代理（API Key 唔出前端） |

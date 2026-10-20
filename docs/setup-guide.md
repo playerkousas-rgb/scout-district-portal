@@ -35,6 +35,9 @@ master GS 檔（已附標準 Script，只有區會存）
 ## 一、起後台（Google Sheet + Apps Script）
 
 ### 1. 主後台（每區一份）
+
+> 以下只適用**全新空白區後台**。已有 Google Sheet／Apps Script 必須沿用原專案，先按 [`GS 只追加升級指引`](gs-upgrade-no-data-loss.md) 備份；`setupSheets()` 只加缺少的表／欄／行，舊格不改。
+
 1. 新開一張 Google Sheet → 擴充功能 → Apps Script。
 2. 貼上 `gs/Code.gs` → 儲存。
 3. 執行一次 `setupSheets()`（首次授權：Review permissions → Advanced → Allow）。

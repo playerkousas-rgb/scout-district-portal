@@ -7,8 +7,8 @@ export default function SetupPage() {
 
       <div className="info-card">
         <h3>🔄 已有 Google Sheet？請更新，唔好重建</h3>
-        <p>先備份現有 Sheet 同 Apps Script；下載 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">完整 Code.gs v4.19.0</a> 貼到<strong>原有</strong> Apps Script 專案，再喺 Script Properties 設定每區獨立嘅 <code>PORTAL_TOKEN_SECRET</code>（至少 32 字元）。執行 <code>setupSheets()</code> 補缺，然後<strong>編輯原有 Web App 部署</strong>選新版本。舊 session 需要重新登入；唔好將真實帳密貼入程式碼／Sheet。</p>
-        <p>詳細步驟（包括備份、API Key、YMIS 帳密輪換及驗證）：<a href="https://github.com/playerkousas-rgb/scout-district-portal/blob/main/docs/gs-upgrade-no-data-loss.md" target="_blank" rel="noopener noreferrer">無損升級指引 ↗</a>。唔好執行只供獨立訓練班工作簿使用嘅 <code>setupCourseSheet()</code>。</p>
+        <p>先備份現有 Sheet 同 Apps Script；下載 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">完整 Code.gs v4.19.1</a> 貼到<strong>原有</strong> Apps Script 專案，再喺 Script Properties 設定每區獨立嘅 <code>PORTAL_TOKEN_SECRET</code>（至少 32 字元）。執行 <code>setupSheets()</code> 只追加缺表／缺欄／缺行，不改舊格，然後<strong>編輯原有 Web App 部署</strong>選新版本。原有 <code>API_KEY_HASH</code> 若為空白，須由區方另外明確生成 Key 並同步前端，部署前核對 <code>apiKeySet: true</code>；舊 session 需要重新登入。唔好將真實帳密貼入程式碼／Sheet。</p>
+        <p>詳細步驟（包括備份、API Key、YMIS 帳密輪換及驗證）：<a href="https://github.com/playerkousas-rgb/scout-district-portal/blob/main/docs/gs-upgrade-no-data-loss.md" target="_blank" rel="noopener noreferrer">只追加升級指引 ↗</a>。唔好執行只供獨立訓練班工作簿使用嘅 <code>setupCourseSheet()</code>。</p>
       </div>
 
       <div className="info-card">
