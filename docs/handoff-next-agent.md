@@ -128,7 +128,7 @@
 > 角色 → 預設支部：`VISIT_ROLE_SECTION`（ADC_GH/ADC_CUBS/ADC_SCOUT），前端仲會用 localStorage `skw.visit.section` 記住揀擇。
 > 純邏輯喺 `lib/visits.ts`（`troopStats`／`coverage`／`visitorStats`／`rangePresets`／`parseUnitPaste`）。
 > ⚠️ vm 測試提醒：`v instanceof Date` 跨 realm 會 false，所以 `visitDate_` 改用 `Object.prototype.toString.call(v)`。
-> 🧪 本機預覽用 `node scripts/mock-gs-server.js`（in-repo，sandbox 重置都唔會冇；apiKey 固定 `dev`，登入 sheep/0728）。
+> 🧪 本機預覽用 `node scripts/mock-gs-server.js`（in-repo，sandbox 重置都唔會冇；apiKey 固定 `dev`，登入 sheep/LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE，純假資料）。
 > 🛑 **委任系統／旅團管理系統暫時 hold**：用戶話委任資料難搞；旅團管理佢自己另有一套系統，日後先接，仲要處理私隱。
 > ⏭ **用戶未來想要**：全區領袖「委任年期 list」——有新委任就登記入去，令「無 → GSA（服務滿 7 年）」呢級真正計得準。
 > 而家係靠 `Awards.serviceStart` 逐個人填；下一步可以考慮同 Staff／成員系統委任資料對接，或者做一張 `Appointments` 表。
@@ -159,7 +159,7 @@
 > 登入 `getAnnouncements`（加 `expired`／`scheduled`／`live`）、`saveAnnouncement`／`deleteAnnouncement`／`setAnnouncementPinned`／`setAnnouncementActive`。
 > 權限用**新 helper `requireCardEdit_(token, cardId)`**（直接讀 Perms 矩陣，唔再加 `canXxx` 欄；level 0 超管永遠可）——之後新卡片照跟呢個做法。
 > 前端：卡片 `news`（order 4，opsEdit）、`app/news/page.tsx`（發佈／編輯／置頂／下架／刪除＋成員端預覽）、`components/NewsBanner.tsx`（主控台頂部，同成員睇到同一份資料）、`lib/types.ts` `Announcement`、`lib/api.ts` 6 個 wrapper、`app/globals.css` `.news-*`。
-> 測試：`node scripts/test-news-gs.js`（vm stub Apps Script，19 項，唔使開 GAS）。本機預覽：`/tmp/mockgs/server.js`（載入真 Code.gs + 記憶體 Sheet + seed 3 則消息）＋ `PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec npx next dev`，登入 `sheep` / `0728`（MASTER）。
+> 測試：`node scripts/test-news-gs.js`（vm stub Apps Script，唔使開 GAS）。本機預覽：`scripts/mock-gs-server.js`（載入真 Code.gs + 記憶體 Sheet + 假資料）＋ `PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec npx next dev`，登入 `sheep` / `LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE`（只限本機 mock）。
 > member-portal 嗰邊後來自己實作咗（`bb44fe6`），原本嘅 patch 已刪（見第六輪）。
 >
 > 2026-09-07（第三輪）v4.5.0：**外部資料全部由 Vercel `app/api/external/route.ts` 代抓**（sandbox 對外連線被封，只能用 fixture 測；`PORTAL_DEV_EXTERNAL_BASE` 指向 mock `/upstream?u=`）。解析器 `lib/externalParsers.ts`（職員表／總監架構／諮議會／各署／預算 CSV，純函數）、`lib/ics.ts`（ICS + RRULE 展開，香港時間）、`lib/roomsDirectory.ts`（11 間房日曆 ID、打通關係 `combo`）、`lib/orgDirectory.ts`（架構靜態備援）、`lib/externalSources.ts`（來源網址）。頁面：`/budget`（`api.extBudget`，Config `BUDGET_SHEET_URL` 覆蓋 Sheet）、`/rooms`（逐間房逐日／今日總覽／原版 iframe）、`/orgchart`（地域＋總會）、`/contacts` 港島地域只剩 `staff` 組並即時同步，`rc/dc/hq/ahq` 組已刪（搬去 orgchart 備援）。後台 Code.gs 4.5.0：Cards +`rooms`／`orgchart`（ALL_VIEW）、`budget` done、Config `BUDGET_SHEET_URL`、`getConfig` 回 `budgetSheetUrl`；**刪 `annual` 週年會議文件卡**（`removeIds` 內，`app/annual-docs` 已刪；刪 route 後記得 `rm -rf .next/types/app/annual-docs` 先過 tsc）。mock：`/tmp/mockgs/gas-emu.js`（Apps Script 模擬器）+ `server.js`（GS `/exec` + 上游 fixture `/upstream`）+ `test45.js`（33 assertions，包括 v4.4.0→4.5.0 升級路徑）——sandbox 重置會冇咗，要用時照 README 描述重寫。
@@ -181,7 +181,7 @@
 
 ## 用家而家要做（測試）
 
-1. 下載 `public/downloads/Code.gs.txt`（= `gs/Code.gs` v4.2.3）。
+1. 下載 `public/downloads/Code.gs.txt`（= `gs/Code.gs` v4.19.0）；已有後台請先讀 `docs/gs-upgrade-no-data-loss.md`，沿用原有專案／Sheet，唔好另開新表。
 2. Apps Script **全部覆蓋貼上** → 儲存。
 3. Sheet 選單「🧭 區統一後台」→「🧱 補建缺失表（不清空資料）」。
 4. **新部署／更新現有 Web App**（執行身分：我自己；存取：任何人）。`/exec` 唔好換就得。
@@ -264,7 +264,7 @@
 | 項目 | 說明 |
 |---|---|
 | `savePerms_` | 儲存權限矩陣仍 `clear()` Perms 表（管理員手動儲存先會，唔係 setup） |
-| `TOKEN_SECRET` / `MASTER_*` | GS 頂部示範值，部署前應改；**唔好寫入 chat** |
+| `PORTAL_TOKEN_SECRET` / `PORTAL_MASTER_PASSWORD` | 由區方在 Apps Script Script Properties 私密設定；token secret 未設時登入會拒絕；**唔好寫入 Git／chat** |
 | Rebase | 複製 `Code.gs.txt` 一定要喺 `Code.gs` **無衝突標記之後** `cp` |
 | 密碼 | 用家堅持 **phone4** 得；唔好改 random 6 位做預設 |
 | 開戶角色 | 唔好開放 DC / DDC / ADC / STAFF 批量開戶 |

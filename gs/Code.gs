@@ -59,10 +59,10 @@
  *   setCardEnabled / getCards：卡片 enabled=FALSE 時只有 level 0 超管仍可見（供私下升級）
  *
  * ── 區年度預算 / 地域房間 / 架構（v4.5.0）───────────────────
- * 預算、港島地域職員／總監架構、總會各署、房間日曆全部係公開網頁／Sheet／日曆，
- * 由前端 Vercel `/api/external` 伺服器端代抓，本檔唔使抓網頁。
- * 本檔只負責：Config `BUDGET_SHEET_URL`（區年度預算 Google Sheet 網址，getConfig 回傳 budgetSheetUrl）、
- * 新卡片 rooms（/rooms 地域房間使用情況）／orgchart（/orgchart 地域及總會架構），
+ * 預算、港島地域職員／總監架構、總會各署、地域房間日曆係公開網頁／Sheet／日曆，
+ * 由前端 Vercel `/api/external` 伺服器端代抓；區總部已確認借用另由本檔查私人 Teamup 子日曆。
+ * Config `BUDGET_SHEET_URL`（區年度預算 Google Sheet 網址，getConfig 回傳 budgetSheetUrl）、
+ * 卡片 rooms（/rooms 地域房間及區總部使用情況）／orgchart（/orgchart 地域及總會架構），
  * budget 卡片由 todo → done（patchCardRows_ 只改仍係舊預設值嘅行），
  * 以及刪除 annual（週年會議文件）卡片（setupSheets 會同步移除 Cards／Perms 舊行）。
  *
@@ -173,9 +173,13 @@ var SHEET = {
   CIRCULARS: 'Circulars',        // 區通告（職員專用；輸出係傳統格式 PDF）
 };
 
-// ===================== 安全設定（★ 部署前必改）=====================
+// ===================== 安全設定（★ 部署前必設 Script Properties）=====================
 
-var TOKEN_SECRET = 'CHANGE_ME_DISTRICT_SECRET_' + '請改成長亂碼';
+/** 簽署登入及重設密碼 token：勿寫入原始碼／Config；未設定時拒絕簽發及核實。 */
+function tokenSecret_() {
+  var secret = String(PropertiesService.getScriptProperties().getProperty('PORTAL_TOKEN_SECRET') || '').trim();
+  return secret.length >= 32 && !/^CHANGE_ME_/i.test(secret) ? secret : '';
+}
 var TOKEN_TTL_HOURS = 12;
 
 var DC_ROLE = 'DC';
@@ -236,9 +240,14 @@ function normalizeCreatableRole_(raw) {
   return u;
 }
 
-// 維護用最高存取（★ 改成只有你知道嘅值；勿沿用示範值）
+// 維護用最高存取：只用 Script Properties 的私人長密碼；不再內置公開示範密碼。
+// 區方可在 Apps Script 編輯器自行改維護帳號，請勿將私人密碼提交到 Git。
 var MASTER_EMAIL = 'sheep';
-var MASTER_PW    = '0728';
+function masterCredentialsMatch_(email, password) {
+  if (String(email || '').trim().toLowerCase() !== String(MASTER_EMAIL).trim().toLowerCase()) return false;
+  var pw = String(PropertiesService.getScriptProperties().getProperty('PORTAL_MASTER_PASSWORD') || '');
+  return pw.length >= 12 && String(password) === pw;
+}
 
 // 外掛清單（轉駁器）
 var REGISTRY_URL = 'https://YOUR-HUB.vercel.app/api/registry.json';
@@ -305,7 +314,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.18.0',
+      version: '4.19.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -439,6 +448,8 @@ function doPost(e) {
       case 'setAnnouncementActive': return json(setAnnouncementActive_(b.token, b.id, b.active));
       case 'getContactNames':       return json(getContactNames_(b.token));
       case 'saveContactName':       return json(saveContactName_(b.token, b.key, b.name));
+      case 'getDistrictHqBookings': return json(getDistrictHqBookings_(b.token, b.from, b.days));
+      case 'getYmisCredentials':  return json(getYmisCredentials_(b.token));
 
       // ---------- 意外／應變：意外報告（管理系統，需登入） ----------
       case 'submitIncidentReport': return json(submitIncidentReport_(b.token, b.report || b));
@@ -723,19 +734,25 @@ function guardLocked_() {
 // ===================== Token（兩套登入共用） =====================
 
 var TOKEN_TTL_REMEMBER_HOURS = 24 * 30; // 「記住我」：30 日
-function makeToken_(email, role, ttlHours) {
+function makeToken_(email, role, ttlHours, source) {
+  var secret = tokenSecret_();
+  if (!secret) throw new Error('未設定 PORTAL_TOKEN_SECRET（Apps Script Script Properties，至少 32 字元）');
   var exp = Date.now() + (Number(ttlHours) > 0 ? Number(ttlHours) : TOKEN_TTL_HOURS) * 3600 * 1000;
-  var payload = email + '|' + role + '|' + exp;
-  return Utilities.base64EncodeWebSafe(payload + '|' + sha256_(payload + TOKEN_SECRET).slice(0, 16));
+  // 簽署 token 來源，避免舊 Staff 密碼簽發的 token 冒充同電郵 Users 帳戶領取 YMIS 帳密。
+  var issuer = source || 'users';
+  var payload = email + '|' + role + '|' + exp + '|' + issuer;
+  return Utilities.base64EncodeWebSafe(payload + '|' + sha256_(payload + secret).slice(0, 16));
 }
 function checkToken_(token) {
   if (!token) return { valid: false };
+  var secret = tokenSecret_();
+  if (!secret) return { valid: false };
   try {
     var raw = Utilities.newBlob(Utilities.base64DecodeWebSafe(token)).getDataAsString();
-    var p = raw.split('|'), email = p[0], role = p[1], exp = Number(p[2]), sig = p[3];
-    if (Date.now() > exp) return { valid: false };
-    if (sig !== sha256_(email + '|' + role + '|' + exp + TOKEN_SECRET).slice(0, 16)) return { valid: false };
-    return { valid: true, email: email, role: role };
+    var p = raw.split('|'), email = p[0], role = p[1], exp = Number(p[2]), issuer = p[3], sig = p[4];
+    if (p.length !== 5 || ['users', 'staff', 'master'].indexOf(issuer) < 0 || !email || !role || !isFinite(exp) || Date.now() > exp) return { valid: false };
+    if (sig !== sha256_(email + '|' + role + '|' + exp + '|' + issuer + secret).slice(0, 16)) return { valid: false };
+    return { valid: true, email: email, role: role, source: issuer };
   } catch (e) { return { valid: false }; }
 }
 
@@ -744,14 +761,16 @@ function checkToken_(token) {
 /** 管理系統：Users 表（角色制） */
 function login_(email, password, remember) {
   if (!email || !password) return err('請輸入帳號及密碼');
+  if (!tokenSecret_()) return err('區系統未設定登入簽署金鑰，請聯絡管理員');
   email = String(email).trim();
   var ttl = isTrue_(remember) ? TOKEN_TTL_REMEMBER_HOURS : TOKEN_TTL_HOURS;
 
-  // 維護用最高存取（鎖定時仍可進）：層級 0 超管
-  if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase() && String(password) === MASTER_PW) {
+  // 維護用最高存取（鎖定時仍可進）：層級 0 超管；只接受 Script Properties 私密密碼。
+  if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase()) {
+    if (!masterCredentialsMatch_(email, password)) return err('帳號或密碼不正確');
     return ok({
       email: email, displayName: '系統維護', role: SYSADMIN_ROLE, roleLabel: '超管',
-      isAdmin: true, isDC: true, canManageAccounts: true, scopes: ['all'], token: makeToken_(email, SYSADMIN_ROLE, ttl),
+      isAdmin: true, isDC: true, canManageAccounts: true, scopes: ['all'], token: makeToken_(email, SYSADMIN_ROLE, ttl, 'master'),
       level: LEVEL_SUPER, levelLabel: levelLabel_(LEVEL_SUPER), isSuper: true, mustChangePassword: false,
     });
   }
@@ -821,9 +840,11 @@ function requestPasswordReset_(email, resetUrlBase) {
     return String(u.email).trim().toLowerCase() === email && String(u.active).toUpperCase() !== 'FALSE';
   })[0];
   if (!user || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return generic;
+  var secret = tokenSecret_();
+  if (!secret) return err('區系統未設定登入簽署金鑰，請聯絡管理員');
   var exp = Date.now() + 24 * 3600 * 1000;
   var payload = 'reset|' + email + '|' + exp;
-  var token = Utilities.base64EncodeWebSafe(payload + '|' + sha256_(payload + TOKEN_SECRET + String(user.passwordHash)).slice(0, 20));
+  var token = Utilities.base64EncodeWebSafe(payload + '|' + sha256_(payload + secret + String(user.passwordHash)).slice(0, 20));
   var districtName = getConfigValue_('districtName') || '童軍區';
   var base = String(resetUrlBase || '').trim();
   var link = base ? (base + (base.indexOf('?') >= 0 ? '&' : '?') + 'reset=' + encodeURIComponent(token)) : '';
@@ -839,6 +860,8 @@ function requestPasswordReset_(email, resetUrlBase) {
 function resetPassword_(resetToken, newPassword) {
   if (!resetToken) return err('缺少重設代碼');
   var v = validateNewPassword_(newPassword); if (v) return err(v);
+  var secret = tokenSecret_();
+  if (!secret) return err('區系統未設定登入簽署金鑰，請聯絡管理員');
   var raw = '';
   try { raw = Utilities.newBlob(Utilities.base64DecodeWebSafe(String(resetToken).trim())).getDataAsString(); } catch (e) { return err('重設代碼無效'); }
   var p = raw.split('|');
@@ -850,7 +873,7 @@ function resetPassword_(resetToken, newPassword) {
   })[0];
   if (!user) return err('帳戶不存在');
   var payload = 'reset|' + email + '|' + exp;
-  if (sig !== sha256_(payload + TOKEN_SECRET + String(user.passwordHash)).slice(0, 20)) return err('重設代碼無效或已使用');
+  if (sig !== sha256_(payload + secret + String(user.passwordHash)).slice(0, 20)) return err('重設代碼無效或已使用');
   var row = userRowIndex_(email); if (row < 0) return err('帳戶不存在');
   setPassword_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS), row, newPassword);
   return ok({ reset: true, email: email });
@@ -859,12 +882,14 @@ function resetPassword_(resetToken, newPassword) {
 /** 成員系統 /staff 舊介面：Staff 表（canVenue/canStock/…） */
 function staffLogin_(email, password) {
   if (!email || !password) return err('請輸入帳號及密碼');
+  if (!tokenSecret_()) return err('區系統未設定登入簽署金鑰，請聯絡管理員');
   email = String(email).trim();
 
-  // 維護帳號亦可用呢邊登入
-  if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase() && String(password) === MASTER_PW) {
+  // 維護帳號亦可用呢邊登入，但必須私下設定維護密碼。
+  if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase()) {
+    if (!masterCredentialsMatch_(email, password)) return err('帳號或密碼不正確');
     return ok({
-      email: email, name: '系統維護', role: DC_ROLE, token: makeToken_(email, DC_ROLE),
+      email: email, name: '系統維護', role: DC_ROLE, token: makeToken_(email, DC_ROLE, 0, 'master'),
       canVenue: true, canStock: true, canCourse: true, canStaff: true,
     });
   }
@@ -879,7 +904,7 @@ function staffLogin_(email, password) {
     var role = s.role || 'STAFF';
     return ok({
       email: String(s.email).trim(), name: s.name || s.email, role: role,
-      token: makeToken_(String(s.email).trim(), role),
+      token: makeToken_(String(s.email).trim(), role, 0, 'staff'),
       canVenue: isTrue_(s.canVenue), canStock: isTrue_(s.canStock),
       canCourse: isTrue_(s.canCourse), canStaff: isTrue_(s.canStaff),
     });
@@ -1307,9 +1332,11 @@ function updateVenueBooking_(token, id, patch) {
 function getPendingInbox_(token) {
   var t = requireLogin_(token); if (t.error) return err(t.error);
   var p = staffPerms_(t.email, t.role);
+  var visible = getCards_(token); if (!visible.ok) return visible;
+  var cardIds = visible.data.map(function (c) { return c.cardId; });
   var venue = [];
   var stock = [];
-  if (p.canVenue) {
+  if (p.canVenue && cardIds.indexOf('venueReg') >= 0) {
     venue = readSheet_(SHEET.VENUE_REQ).filter(function (r) {
       return String(r.status || 'pending').toLowerCase() === 'pending';
     }).map(function (r) {
@@ -1321,7 +1348,7 @@ function getPendingInbox_(token) {
       };
     });
   }
-  if (p.canStock) {
+  if (p.canStock && cardIds.indexOf('stockReg') >= 0) {
     stock = readSheet_(SHEET.STOCK_REQ).filter(function (r) {
       return String(r.status || 'pending').toLowerCase() === 'pending';
     }).map(function (r) {
@@ -4678,6 +4705,63 @@ function teamupApi_(method, path, body) {
   try { return JSON.parse(UrlFetchApp.fetch('https://api.teamup.com/' + path, options).getContentText()); }
   catch (e) { return null; }
 }
+
+/** Teamup 在 tz=Asia/Hong_Kong 下可能回傳冇 offset 嘅本地時間；明確當香港時間解析。 */
+function teamupHkEpoch_(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value < 100000000000 ? value * 1000 : value;
+  var s = String(value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) s += 'T00:00:00';
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?$/i.test(s)) return NaN;
+  return Date.parse(/(?:Z|[+-]\d{2}:\d{2})$/i.test(s) ? s : s + '+08:00');
+}
+
+/**
+ * 地域房間月曆疊加「區總部已確認借用」：只讀 Teamup 紅色子日曆。
+ * 不能由 VenueBookings.status 推斷：Teamup 亦可有人手加入嘅確認事件。
+ * 登入＋rooms 卡權限後才抓；回傳只有佔用時段，不回傳 title/notes/聯絡/門鎖密碼/Teamup event ID。
+ */
+function getDistrictHqBookings_(token, from, days) {
+  var access = getCards_(token);
+  if (!access.ok) return access;
+  if (!access.data.some(function (card) { return card.cardId === 'rooms'; })) return err('沒有房間日曆權限');
+
+  var date = String(from || '').trim(), n = Number(days);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isInteger(n) || n < 1 || n > 60) return err('日曆日期或範圍不正確');
+  var start = teamupHkEpoch_(date);
+  if (!Number.isFinite(start) || Utilities.formatDate(new Date(start), 'Asia/Hong_Kong', 'yyyy-MM-dd') !== date) return err('日曆日期不正確');
+
+  var c = teamupCfg_(), approvedId = String(c.approvedSub || '').trim();
+  if (!c.apiKey || !c.calendarId || !/^\d+$/.test(approvedId)) {
+    return ok({ configured: false, events: [] });
+  }
+  var endDate = Utilities.formatDate(new Date(start + (n - 1) * 86400000), 'Asia/Hong_Kong', 'yyyy-MM-dd');
+  var path = String(c.calendarId).trim() + '/events?startDate=' + encodeURIComponent(date)
+    + '&endDate=' + encodeURIComponent(endDate)
+    + '&subcalendarId%5B%5D=' + encodeURIComponent(approvedId)
+    + '&tz=Asia%2FHong_Kong';
+  var data = teamupApi_('get', path);
+  if (!data || !Array.isArray(data.events)) return err('Teamup 確認借用日曆暫時無法讀取');
+
+  var events = [];
+  data.events.forEach(function (e) {
+    if (!e || typeof e !== 'object') return;
+    // 雙重檢查子日曆，以防 Teamup 忽略 URL 篩選；拒絕/申請中絕不可當作已批准。
+    var ids = Array.isArray(e.subcalendar_ids) ? e.subcalendar_ids : [e.subcalendar_id];
+    if (!ids.some(function (id) { return String(id) === approvedId; }) || e.delete_dt) return;
+    var begins = teamupHkEpoch_(e.start_dt), ends = teamupHkEpoch_(e.end_dt);
+    if (!Number.isFinite(begins) || !Number.isFinite(ends)) return;
+    if (e.all_day && ends === begins) ends += 86400000;
+    if (ends <= begins) return;
+    events.push({
+      uid: 'district-hq-' + events.length,
+      summary: '已確認借用',
+      start: begins, end: ends, allDay: e.all_day === true,
+    });
+  });
+  events.sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+  return ok({ configured: true, events: events, fetchedAt: new Date().toISOString() });
+}
+
 function teamupFetch_(url, options) {
   var opt = options || {};
   opt.headers = { 'Teamup-Token': teamupCfg_().apiKey, 'Content-Type': 'application/json' };
@@ -4886,6 +4970,47 @@ function normalizeCard_(c) {
     category: String(c.category || 'done').trim() === 'todo' ? 'todo' : 'done',
   };
 }
+/** YMIS 共用核實帳戶只畀 DC／DDC／ADC／區職員；連 SYSADMIN／維護帳號都不可從頁面讀取。 */
+function ymisRoleCodeAllowed_(role) {
+  var r = String(role || '').trim().toUpperCase();
+  return r === 'DC' || r === 'STAFF'
+    || /^DDC(_|$)/.test(r) || /^ADC(_|$)/.test(r);
+}
+/** YMIS 須由 Users 登入且目前角色同 token 一致；舊 Staff／轉職 token 不得沿用。 */
+function ymisRoleAllowed_(email, tokenRole, source) {
+  if (source !== 'users') return false;
+  var lower = String(email || '').trim().toLowerCase();
+  if (lower === String(MASTER_EMAIL).trim().toLowerCase()) return false;
+  var u = readSheet_(SHEET.USERS).filter(function (x) {
+    return String(x.email).trim().toLowerCase() === lower && String(x.active).toUpperCase() !== 'FALSE';
+  })[0];
+  // 舊 Staff 專用帳戶冇 mustChangePassword 欄，唔可以憑舊示範密碼直接睇共用帳密；請用 Users 帳戶。
+  return !!u && ymisRoleCodeAllowed_(u.role) && String(u.role).trim().toUpperCase() === String(tokenRole || '').trim().toUpperCase();
+}
+
+/** 只經 POST 及已登入獲授權總監／區職員讀 Script Properties；絕不寫落 Config／Cards／公開 action。 */
+function getYmisCredentials_(token) {
+  var visible = getCards_(token);
+  if (!visible.ok) return visible;
+  var t = checkToken_(token);
+  if (!ymisRoleAllowed_(t.email, t.role, t.source) || !visible.data.some(function (c) { return c.cardId === 'ymis'; })) {
+    return err('沒有 YMIS 帳戶查閱權限');
+  }
+  // 預設區系統密碼未改之前唔可讀共用帳密；首頁強制改密碼之外，再喺 API 擋直接輸入網址。
+  var u = readSheet_(SHEET.USERS).filter(function (x) {
+    return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
+  })[0];
+  // 舊 Users 行升級後此欄可能留空；為安全起見一律要求改密碼流程明確標記 FALSE。
+  if (!u || String(u.mustChangePassword || '').trim().toUpperCase() !== 'FALSE') {
+    return err('請先更改區系統的初始密碼，才可查看 YMIS 帳戶');
+  }
+  var props = PropertiesService.getScriptProperties();
+  var username = String(props.getProperty('YMIS_VERIFY_USERNAME') || '').trim();
+  var password = String(props.getProperty('YMIS_VERIFY_PASSWORD') || '');
+  if (!username || !password) return ok({ configured: false });
+  return ok({ configured: true, username: username, password: password });
+}
+
 function getCards_(token) {
   var t = checkToken_(token);
   if (!t.valid) return err('登入已過期，請重新登入');
@@ -4893,12 +5018,33 @@ function getCards_(token) {
   var u = readSheet_(SHEET.USERS).filter(function (x) {
     return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
   })[0];
+  // 有效簽名嘅舊 token 唔代表帳戶仲啟用：區後台 Users／舊 Staff 帳戶都要實時核對。
+  if (String(t.email).trim().toLowerCase() !== String(MASTER_EMAIL).trim().toLowerCase()) {
+    if (u && String(u.active).toUpperCase() === 'FALSE') return err('帳戶不存在或已停用');
+    if (!u) {
+      var activeStaff = readSheet_(SHEET.STAFF).some(function (s) {
+        return String(s.email).trim().toLowerCase() === String(t.email).trim().toLowerCase()
+          && String(s.active).toUpperCase() !== 'FALSE';
+      });
+      if (!activeStaff) return err('帳戶不存在或已停用');
+    }
+  }
   var isSuper = levelOfUser_(t.email, t.role) === LEVEL_SUPER;
   var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
+  var venueAllowed;
   var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).filter(function (c) {
     // 隱藏卡片（enabled=FALSE）：只有層級 0 超管見到（用嚟私下加功能／升級），其他人一律睇唔到
     if (!c.enabled && !isSuper) return false;
+    // 即使 Perms 舊列／自訂值誤設 view，區長及一般領袖亦唔可睇區用 YMIS 帳密。
+    if (c.cardId === 'ymis' && !ymisRoleAllowed_(t.email, t.role, t.source)) return false;
     if (isSuper) { c.access = 'edit'; return true; }
+    // 查閱使用情況唔等於審批：已登入人士均可睇 rooms，唔受舊卡片範圍／舊矩陣所限。
+    if (c.cardId === 'rooms') { c.access = 'view'; return true; }
+    // venueReg 可能喺舊 Sheet 仍設咗 view；冇真正 canVenue 權限就唔可以顯示審批卡。
+    if (c.cardId === 'venueReg') {
+      if (venueAllowed === undefined) venueAllowed = staffPerms_(t.email, t.role).canVenue;
+      if (!venueAllowed) return false;
+    }
     if (scopeOverride && scopeOverride.indexOf(c.cardId) < 0) return false;
     var access = (perms[c.cardId] || {})[t.role] || '';
     c.access = access;
@@ -4976,6 +5122,7 @@ function savePerms_(token, matrix) {
     var row = [cid];
     roles.forEach(function (role) {
       var v = ((matrix[cid] || {})[role] || '').toString().toLowerCase();
+      if (cid === 'ymis') v = ymisRoleCodeAllowed_(role) && (v === 'view' || v === 'edit') ? 'view' : '';
       row.push(v === 'edit' || v === 'view' ? v : '');
     });
     rows.push(row);
@@ -5571,15 +5718,16 @@ function onOpen() {
 }
 function showSetupReminder() {
   uiAlert_('設定步驟',
-    '1. Config 填 districtName（區名）、districtCode（區碼）\n'
-    + '2. Users / Staff 改帳號密碼（示範密碼：' + DEFAULT_PASSWORD + '）\n'
-    + '3. 借場一條龍（選填）：Config 填 TEAMUP_*（Teamup）同 ttlock*（通通鎖）金鑰\n'
-    + '4. 部署為 Web App（執行身分：我自己；存取：任何人）→ 複製 /exec\n'
-    + '5. 選單 🔑 重新生成 API Key → 複製\n'
-    + '6. 兩個 Vercel 專案各設一個環境變數（同一個 Key 值）：\n'
+    '1. Script Properties 必設 PORTAL_TOKEN_SECRET（每區獨立亂碼，最少 32 字元），選設 PORTAL_MASTER_PASSWORD（最少 12 字元）\n'
+    + '2. Config 填 districtName（區名）、districtCode（區碼）\n'
+    + '3. Users / Staff 輪換全部預設密碼（示範密碼：' + DEFAULT_PASSWORD + '）\n'
+    + '4. 借場一條龍（選填）：Config 填 TEAMUP_*（Teamup）同 ttlock*（通通鎖）金鑰\n'
+    + '5. 部署為 Web App（執行身分：我自己；存取：任何人）→ 複製 /exec\n'
+    + '6. 選單 🔑 重新生成 API Key → 複製\n'
+    + '7. 兩個 Vercel 專案各設一個環境變數（同一個 Key 值）：\n'
     + '   · 管理系統 PORTAL_{區碼}_APIKEY\n'
     + '   · 成員系統 MEMBER_{區碼}_APIKEY\n'
-    + '7. 兩邊 lib/district.ts 嘅 apiBase 都填同一條 /exec 網址');
+    + '8. 兩邊 lib/district.ts 嘅 apiBase 都填同一條 /exec 網址');
 }
 
 // ===================== 表格藍圖（表頭取聯集） =====================
@@ -5608,7 +5756,8 @@ function blueprint_() {
     P.push(row('budget', adminEdit()));
     P.push(row('committee', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'edit' }));
     P.push(row('unit', adminEdit()));
-    P.push(row('venueReg', opsEdit()));
+    // 審批卡只畀真係有 canVenue 權限嘅角色；地域/區總部使用情況由 rooms 卡全員查閱。
+    P.push(row('venueReg', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'edit', DDC_TRAINING: 'edit', STAFF: 'edit' }));
     P.push(row('stockReg', opsEdit()));
     P.push(row('activity', opsEdit()));
     // v4.9.0：消息發佈搬咗去主控台頂（ADC+ 直接編輯），news 卡片已移除
@@ -5618,6 +5767,12 @@ function blueprint_() {
     P.push(row('fps', ALL_EDIT));
     P.push(row('rooms', ALL_VIEW));
     P.push(row('orgchart', ALL_VIEW));
+    // 總監級（DC／DDC／ADC）及區職員先可睇共用 YMIS 核實帳戶；區長／領袖不可見。
+    P.push(row('ymis', {
+      DC: 'view', DDC_ADMIN: 'view', DDC_TRAINING: 'view',
+      ADC_ROVER: 'view', ADC_VENTURE: 'view', ADC_SCOUT: 'view', ADC_CUBS: 'view', ADC_GH: 'view',
+      STAFF: 'view',
+    }));
     return P;
   })();
 
@@ -5713,6 +5868,7 @@ function blueprint_() {
       ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '獎勵名冊 · 自動計夠期可提名 · 年期自訂', 3, 'TRUE', 'FALSE', 'core', 'done'],
       ['circulars', '區通告', '📜', 'builtin', '/circulars', '開班資料自動帶入 · 傳統通告列印 PDF 上載區網', 4, 'TRUE', 'FALSE', 'core', 'done'],
       ['budget', '區年度預算', '📑', 'builtin', '/budget', '直讀區方預算 Sheet · 按月／支部 · 資助合計', 5, 'TRUE', 'FALSE', 'core', 'done'],
+      ['ymis', 'YMIS 會員核實', '🪪', 'builtin', '/ymis', '總監級／職員：前往 YMIS 並查看區方核實帳戶', 6, 'TRUE', 'FALSE', 'core', 'done'],
       ['committee', '委任系統', '🗂', 'builtin', '/committee', '委任 · 續任 · R02', 7, 'TRUE', 'FALSE', 'core', 'todo'],
       ['unit', '旅團管理系統', '🧭', 'builtin', '/unit', '旅名冊 · 人數統計', 8, 'TRUE', 'FALSE', 'core', 'todo'],
       ['venueReg', '場地借用審批', '🏛', 'builtin', '/venue-regs', '借場申請批核 · 場地清單', 9, 'TRUE', 'FALSE', 'core', 'done'],
@@ -5721,7 +5877,7 @@ function blueprint_() {
       ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '天氣決策 · 即時應變 · 總會指引 · 意外報告', 12, 'TRUE', 'FALSE', 'core', 'done'],
       ['training', '訓練班管理', '🎓', 'builtin', '/training', '開班登記 · 區會目錄', 13, 'TRUE', 'FALSE', 'core', 'done'],
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
-      ['rooms', '地域房間使用情況', '🏢', 'builtin', '/rooms', '17／18／19 樓逐間房睇用途時段 · 今日總覽', 15, 'TRUE', 'FALSE', 'core', 'done'],
+      ['rooms', '地域房間及區總部使用情況', '🏢', 'builtin', '/rooms', '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆', 15, 'TRUE', 'FALSE', 'core', 'done'],
       ['orgchart', '地域及總會架構', '🏛', 'builtin', '/orgchart', '港島地域總監架構 · 總會領導層，自動跟官網更新', 16, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
 
@@ -5885,16 +6041,17 @@ function setupSheets() {
   var key = generateApiKey_(ss);
 
   uiAlert_('✅ 補建完成（已有資料全部保留）',
-    '★ 只補缺失表／欄／Config 列，唔清空、唔覆寫已填格。\n\n'
+    '★ 原有工作表及業務記錄不刪除；補缺欄，僅調整舊版預設卡片及權限。\n\n'
     + '新建工作表：' + (created.length ? created.join('、') : '無') + '\n'
     + '補上欄位：' + (patched.length ? patched.join('、') : '無') + '\n'
     + 'API Key：' + (key ? '已新生成（下一個視窗顯示）' : '原有設定保持不變') + '\n\n'
-    + '示範密碼：' + DEFAULT_PASSWORD + '\n\n'
+    + '現有 Users 帳戶／密碼不會重設；如係全新空白表，請立即更改／停用初始密碼帳戶。\n\n'
     + '下一步：\n'
-    + '1. Config 填 districtName / districtCode\n'
-    + '2. 借場一條龍：Config 填 TEAMUP_*（Teamup）同 ttlock*（通通鎖）金鑰\n'
-    + '3. 部署為 Web App（存取：任何人）→ 複製 /exec\n'
-    + '4. 同一個 API Key 設定去兩個 Vercel 環境變數：\n'
+    + '1. Script Properties 必設 PORTAL_TOKEN_SECRET（每區獨立亂碼，最少 32 字元；未設不能登入）\n'
+    + '2. 輪換 Users／Staff 預設密碼；Config 填 districtName / districtCode\n'
+    + '3. 借場一條龍：Config 填 TEAMUP_*（Teamup）同 ttlock*（通通鎖）金鑰\n'
+    + '4. 部署為 Web App（存取：任何人）→ 複製 /exec\n'
+    + '5. 同一個 API Key 設定去兩個 Vercel 環境變數：\n'
     + '   PORTAL_{區碼}_APIKEY 同 MEMBER_{區碼}_APIKEY');
 
   if (key) showKeyDialog_('🔑 你的 API Key（只顯示一次）', key,
@@ -5949,7 +6106,8 @@ function patchCardRows_(ss) {
   var head = v[0].map(function (h) { return String(h).trim(); });
   var cId = head.indexOf('cardId'), cCat = head.indexOf('category'), cDesc = head.indexOf('description');
   if (cId < 0 || cCat < 0) return;
-  var cTitle = head.indexOf('title');
+  var cTitle = head.indexOf('title'), cEnabled = head.indexOf('enabled');
+  var cType = head.indexOf('type'), cSource = head.indexOf('source');
   // 只當該行仍然係藍圖舊值先改（用戶自行改過就唔掂）
   var patches = {
     incident: { oldDesc: '通報 · 惡劣天氣', desc: '即時應變 · 總會指引 · 意外報告' },
@@ -5957,15 +6115,26 @@ function patchCardRows_(ss) {
     contacts: { oldTitles: ['旅團聯絡簿', '聯結簿'], title: '聯絡簿', oldDesc: '聯絡資料 · 分組 · 群發', desc: '旅團 · 港島地域 · 總會 聯絡資料', oldDescs: ['旅團 · 港島地域 · 總會 聯絡資料'], desc2: '聯絡電話：旅團 · 港島地域 · 總會（職員姓名區方可改）' },
     // v4.5.0 區年度預算已完成（直讀區方 Google Sheet）
     budget: { oldDesc: '預算編列與追蹤', desc: '直讀區方預算 Sheet · 按月／支部 · 資助合計' },
+    // 舊區沿用現有 rooms 卡片，只更新仍屬預設嘅名稱/描述，唔動自行修改嘅值。
+    rooms: { oldTitles: ['地域房間使用情況'], title: '地域房間及區總部使用情況',
+      oldDesc: '17／18／19 樓逐間房睇用途時段 · 今日總覽', desc: '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆' },
     // v4.7.0 獎勵提名已完成（名冊 + 夠期提名推算 + 年期可自訂）；v4.9.0 限 DDC 或以上
     awards: { oldDesc: '讀獲獎名單 · 推下一級', desc: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', oldDescs: ['獎勵名冊 · 自動計夠期可提名 · 年期自訂'], desc2: '獎勵名冊 · 夠期自動推算 · 只限 DDC 或以上' },
   };
   var descOnly = { incident: { oldDesc: '即時應變 · 總會指引 · 意外報告', desc: '天氣決策 · 即時應變 · 總會指引 · 意外報告' } };
-  // v4.4.0 刪會議行事曆；v4.5.0 刪週年會議文件；v4.9.0 刪消息發佈卡片（搬咗去主控台頂）
-  var removeIds = { meeting: true, annual: true, news: true };
+  // 舊入口已由新版主控台取代：只停用「內建」卡片，原有 Cards／Perms 行一律留底。
+  // 升級現有區後台絕不刪除任何行；自訂卡片即使撞名亦不變。
+  var deprecatedIds = { meeting: true, annual: true, news: true };
   for (var i = v.length - 1; i >= 1; i--) {
     var id = String(v[i][cId] || '').trim();
-    if (removeIds[id]) { sh.deleteRow(i + 1); continue; }
+    if (deprecatedIds[id]) {
+      var isBuiltin = (cSource < 0 || String(v[i][cSource] || 'core').trim().toLowerCase() === 'core')
+        && (cType < 0 || String(v[i][cType] || 'builtin').trim().toLowerCase() === 'builtin');
+      if (isBuiltin && cEnabled >= 0 && String(v[i][cEnabled] || '').trim().toUpperCase() !== 'FALSE') {
+        sh.getRange(i + 1, cEnabled + 1).setValue('FALSE');
+      }
+      continue;
+    }
     var p = patches[id];
     var d = descOnly[id];
     if (d && cDesc >= 0 && String(v[i][cDesc] || '').trim() === d.oldDesc) sh.getRange(i + 1, cDesc + 1).setValue(d.desc);
@@ -5981,9 +6150,7 @@ function patchCardRows_(ss) {
     }
     if (String(v[i][cCat] || '').trim() === 'todo') sh.getRange(i + 1, cCat + 1).setValue('done');
   }
-  // Perms 表同步移除已刪卡片
-  var psh = ss.getSheetByName(SHEET.PERMS);
-  if (psh) Object.keys(removeIds).forEach(function (cid) { removeRowByFirstCol_(psh, cid); });
+  // Perms 行唔掂：被停用嘅舊卡片將來仍可由管理員復原。
 }
 
 /** Roles 表補 level 欄值（只填空格；已有數字唔改） */
@@ -6009,7 +6176,7 @@ function ensureRoleLevels_(ss) {
   }
 }
 
-/** 補建預設帳戶（只補缺，唔改已有帳戶；密碼 1234 + 首次登入必改）；同時為已有帳戶補 level 欄 */
+/** 新建／空白 Users 才種預設帳戶；現有區有帳戶時絕不新增公開初始密碼的高權限帳號。已有帳戶只補空白 level。 */
 function ensurePresetUsers_(ss) {
   var sh = ss.getSheetByName(SHEET.USERS);
   if (!sh) return;
@@ -6017,13 +6184,14 @@ function ensurePresetUsers_(ss) {
   readSheet_(SHEET.USERS).forEach(function (u) { if (u.email) existing[String(u.email).trim().toLowerCase()] = u; });
   var salt = 'skw' + new Date().getFullYear();
   var hash = sha256_(DEFAULT_PRESET_PASSWORD + salt);
-  PRESET_USERS.forEach(function (u) {
-    if (existing[u[0]]) return;
-    appendRowObj_(sh, {
-      email: u[0], passwordHash: hash, salt: salt, role: u[1], displayName: u[2], scopes: u[3],
-      cards: '', active: 'TRUE', level: u[4], mustChangePassword: 'TRUE', delegatedBy: '',
+  if (Object.keys(existing).length === 0) {
+    PRESET_USERS.forEach(function (u) {
+      appendRowObj_(sh, {
+        email: u[0], passwordHash: hash, salt: salt, role: u[1], displayName: u[2], scopes: u[3],
+        cards: '', active: 'TRUE', level: u[4], mustChangePassword: 'TRUE', delegatedBy: '',
+      });
     });
-  });
+  }
   // 已有帳戶：level 空白就按角色補上（唔掂已填值）
   var v = sh.getDataRange().getValues();
   var head = v[0].map(function (h) { return String(h).trim(); });
@@ -6063,9 +6231,9 @@ function ensurePermsRows_(ss) {
 }
 
 /**
- * v4.9.0 權限修訂：獎勵提名只限 DDC 或以上。
- * 只改「仍然同舊預設（全角色 view + DC/SYSADMIN/DDC_ADMIN edit）一樣」嘅行；
- * 用戶已自行自訂嘅矩陣絕對唔掂。
+ * 權限遷移：awards 同 venueReg 只更新舊預設行，保留其他自訂權限；
+ * rooms 係所有已登入用戶嘅共用查閱卡，所有已知角色都設 view。
+ * getCards_ 另有實時 canVenue／rooms 兜底檢查。
  */
 function patchPermsRows_(ss) {
   var sh = ss.getSheetByName(SHEET.PERMS);
@@ -6101,6 +6269,41 @@ function patchPermsRows_(ss) {
     for (var c2 = 1; c2 < header.length; c2++) {
       var role2 = header[c2], bi2 = bpHeader.indexOf(role2);
       sh.getRange(i + 1, c2 + 1).setValue(bi2 > 0 && bi2 < br.length ? br[bi2] : '');
+    }
+    break;
+  }
+
+  // 使用情況係登入後通用查閱卡：舊 Sheet 可能缺新加嘅角色欄或有舊限制，統一設 view。
+  for (var ri = 1; ri < v.length; ri++) {
+    if (String(v[ri][0] || '').trim() !== 'rooms') continue;
+    for (var rc = 1; rc < header.length; rc++) {
+      if (bpHeader.indexOf(header[rc]) > 0 && String(v[ri][rc] || '').trim().toLowerCase() !== 'view') {
+        sh.getRange(ri + 1, rc + 1).setValue('view');
+      }
+    }
+    break;
+  }
+
+  // 舊 venueReg 預設把 ADC／領袖等無 canVenue 權限嘅人設成 view；只修正仍屬預設嘅列。
+  // 自訂 edit 或已經收走嘅權限不變；getCards_ 另作實時 canVenue 檢查，防止舊資料漏出卡片。
+  var venueEditors = { DC: true, SYSADMIN: true, DDC_ADMIN: true, DDC_TRAINING: true, STAFF: true };
+  for (var vi = 1; vi < v.length; vi++) {
+    if (String(v[vi][0] || '').trim() !== 'venueReg') continue;
+    var defaultVenue = true;
+    for (var vc = 1; vc < header.length; vc++) {
+      if (bpHeader.indexOf(header[vc]) < 1) continue;
+      var cur = String(v[vi][vc] || '').trim().toLowerCase();
+      if (venueEditors[header[vc]] ? cur !== 'edit' : (cur !== 'view' && cur !== '')) {
+        defaultVenue = false;
+        break;
+      }
+    }
+    if (defaultVenue) {
+      for (var cc = 1; cc < header.length; cc++) {
+        if (!venueEditors[header[cc]] && String(v[vi][cc] || '').trim().toLowerCase() === 'view') {
+          sh.getRange(vi + 1, cc + 1).setValue('');
+        }
+      }
     }
     break;
   }

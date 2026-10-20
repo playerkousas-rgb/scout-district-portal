@@ -14,10 +14,12 @@ async function main() {
   console.log('===================================================');
   
   console.log('\n--- 第一部分：Teamup 日曆子日曆 ID 查詢 ---');
-  const teamupKey = await ask('請輸入 Teamup API Key (或直接按 Enter 使用預設): ') || '4032acf1e6d917809aeb334a16dd0bca82297e8f0f65cd6ec32e0d92bc37bbd2';
+  const teamupKey = (await ask('請輸入 Teamup API Key（或直接按 Enter 使用 TEAMUP_API_KEY 環境變數）: ')).trim() || process.env.TEAMUP_API_KEY;
   const teamupCalendarId = await ask('請輸入 Teamup Calendar ID (不能是 c/ 開頭的協作者連結，必須是分享連結的金鑰，例如 ks...): ');
   
-  if (teamupCalendarId) {
+  if (teamupCalendarId && !teamupKey) {
+    console.error('❌ 請輸入 Teamup API Key，或設定 TEAMUP_API_KEY 環境變數。');
+  } else if (teamupCalendarId) {
     console.log('正在讀取 Teamup 子日曆列表...');
     try {
       const res = await fetch(`https://api.teamup.com/${teamupCalendarId}/subcalendars`, {

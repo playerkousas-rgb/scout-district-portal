@@ -1,11 +1,9 @@
 'use client';
 /**
- * 🏢 地域房間使用情況（v4.5.0；v4.9.0 加返「月曆模式」做預設）
- * ─────────────────────────────────────────────────────────────────────
- * 來源：https://sites.google.com/hkirscout.org.hk/hkir-rooms（每間房一個公開 Google 日曆）。
- * v4.9.0：預設改成「月曆模式」— 成個月一目了然，逐日格仔列出邊個房邊段時間有人用；
- * 另外保留 逐間房／今日總覽／原版日曆。打通房（1704A／1704B／1704／1704+1705）
- * 會自動把相關日曆一齊計入。資料由 /api/external?kind=rooms 伺服器端拉公開 ICS（3 分鐘快取）。
+ * 🏢 地域房間及區總部使用情況
+ * 地域 17／18／19 樓：/api/external 拉公開 Google ICS（3 分鐘快取）；
+ * 區總部：共用後台讀 Teamup「確認借用」紅色子日曆，只傳佔用時段，不傳聯絡資料／鎖碼。
+ * 月曆、逐個地點及今日總覽將區總部當成一個展示樓層；Google ICS 房間來源維持獨立。
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -15,13 +13,14 @@ import BackLink, { BackBar } from '@/components/BackLink';
 import { FLOORS, ROOMS, ROOM_NOTES } from '@/lib/roomsDirectory';
 import { SOURCES } from '@/lib/externalSources';
 import { HK_OFFSET_MS, hkDayStart, hkDow, hkHm, hkStartOfDay, hkYmd, type IcsEvent } from '@/lib/ics';
+import { districtHqByDay, districtHqTimeOnDay, USAGE_FLOORS, type UsageFloorId } from '@/lib/districtHqCalendar';
 
 type Mode = 'calendar' | 'room' | 'today' | 'embed';
 const MODES: { id: Mode; label: string }[] = [
   { id: 'calendar', label: '📅 月曆' },
-  { id: 'room', label: '🚪 逐間房' },
+  { id: 'room', label: '🚪 逐個地點' },
   { id: 'today', label: '📆 今日總覽' },
-  { id: 'embed', label: '🗓 原版日曆' },
+  { id: 'embed', label: '🗓 地域原版日曆' },
 ];
 const RANGES = [7, 14, 30];
 const DOW = ['日', '一', '二', '三', '四', '五', '六'];
@@ -61,7 +60,7 @@ export default function RoomsPage() {
   const initialRoom = searchParams.get('room');
   const initialMode = searchParams.get('mode') as Mode | null;
   const [mode, setMode] = useState<Mode>(initialMode && MODES.some(m => m.id === initialMode) ? initialMode : 'calendar');
-  const [floor, setFloor] = useState<string>(() => ROOMS.find(r => r.id === initialRoom)?.floor || '17');
+  const [floor, setFloor] = useState<UsageFloorId>(() => initialRoom === 'hq' ? 'hq' : ROOMS.find(r => r.id === initialRoom)?.floor || '17');
   const [roomId, setRoomId] = useState<string>(() => (ROOMS.some(r => r.id === initialRoom) ? initialRoom! : '1702'));
   const [days, setDays] = useState(14);
   const [from, setFrom] = useState(() => ymdInput(hkStartOfDay(Date.now())));
@@ -69,9 +68,12 @@ export default function RoomsPage() {
   const nowParts = new Date(Date.now() + HK_OFFSET_MS);
   const [calY, setCalY] = useState(() => nowParts.getUTCFullYear());
   const [calM, setCalM] = useState(() => nowParts.getUTCMonth());
-  const [calFloor, setCalFloor] = useState<'all' | '17' | '18' | '19'>('all');
+  const [calFloor, setCalFloor] = useState<'all' | UsageFloorId>('all');
   const [selDay, setSelDay] = useState<string>('');   // YYYY-MM-DD
   const [data, setData] = useState<RoomEvents[]>([]);
+  const [hqEvents, setHqEvents] = useState<IcsEvent[]>([]);
+  const [hqConfigured, setHqConfigured] = useState<boolean | null>(null);
+  const [hqError, setHqError] = useState('');
   const [fetchedAt, setFetchedAt] = useState('');
   const [stale, setStale] = useState('');
   const [loading, setLoading] = useState(true);
@@ -84,24 +86,47 @@ export default function RoomsPage() {
 
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(id); }, []);
 
+  const todayKey = hkYmd(now);
+  const hqRoomMode = mode === 'room' && floor === 'hq';
+  const showHq = mode === 'calendar' || mode === 'today' || hqRoomMode;
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
     (async () => {
-      setLoading(true); setError('');
-      const useCal = mode === 'calendar';
-      const r = await api.extRooms('', useCal ? calFrom : from, useCal ? calDays : days);
-      if (cancelled) return;
-      if (r.ok && r.data) {
-        setData(r.data.rooms); setFetchedAt(r.data.fetchedAt);
-        setStale(r.data.stale ? (r.data.staleReason || '上游暫時無法連線') : '');
-      } else {
-        setError(r.error || '未能讀取房間日曆');
+      setLoading(true); setError(''); setHqError('');
+      const requestFrom = mode === 'calendar' ? calFrom : mode === 'today' ? todayKey : from;
+      const requestDays = mode === 'calendar' ? calDays : mode === 'today' ? 1 : days;
+      try {
+        const [r, hq] = await Promise.all([
+          hqRoomMode ? Promise.resolve(null) : api.extRooms('', requestFrom, requestDays),
+          showHq ? api.getDistrictHqBookings(session.token, requestFrom, requestDays) : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+        if (r) {
+          if (r.ok && r.data) {
+            setData(r.data.rooms); setFetchedAt(r.data.fetchedAt);
+            setStale(r.data.stale ? (r.data.staleReason || '上游暫時無法連線') : '');
+          } else {
+            setData([]); setError(r.error || '未能讀取房間日曆');
+          }
+        }
+        if (hq) {
+          if (hq.ok && hq.data) {
+            setHqConfigured(hq.data.configured);
+            setHqEvents(hq.data.events || []);
+          } else {
+            setHqEvents([]); setHqConfigured(null);
+            setHqError(hq.error || '未能讀取區總部確認借用日曆');
+          }
+        }
+      } catch {
+        if (!cancelled) { setError('房間日曆連線失敗'); setHqError('區總部日曆連線失敗'); setHqEvents([]); }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [session, from, days, tick, mode, calFrom, calDays]);
+  }, [session, from, days, tick, mode, calFrom, calDays, todayKey, hqRoomMode, showHq]);
 
   const room = ROOMS.find(r => r.id === roomId) || ROOMS[0];
   const byId = useMemo(() => { const m: Record<string, RoomEvents> = {}; data.forEach(d => { m[d.id] = d; }); return m; }, [data]);
@@ -151,9 +176,13 @@ export default function RoomsPage() {
         }
       });
     });
+    if (calFloor === 'all' || calFloor === 'hq') {
+      const hq = districtHqByDay(hqEvents, hkMonthStart(calY, calM), calDays);
+      Object.entries(hq).forEach(([day, bookings]) => { (map[day] = map[day] || []).push(...bookings); });
+    }
     Object.values(map).forEach(list => list.sort((a, b) => a.start - b.start || a.roomId.localeCompare(b.roomId)));
     return map;
-  }, [byId, calRooms, calY, calM, calDays]);
+  }, [byId, calRooms, calFloor, hqEvents, calY, calM, calDays]);
   const calLead = DOW.indexOf(hkDow(hkMonthStart(calY, calM)));
   const calTodayYmd = hkYmd(now);
   const selList = selDay ? (calByDay[selDay] || []) : [];
@@ -161,27 +190,36 @@ export default function RoomsPage() {
   if (!session) return <div className="center"><div className="spinner" /></div>;
 
   const todayStart = hkStartOfDay(now), todayEnd = todayStart + 86_400_000;
+  const todayHq = hqEvents.filter(b => b.start < todayEnd && b.end > todayStart).sort((a, b) => a.start - b.start);
+  const hqReady = hqConfigured === true && !hqError;
+  const hqRangeHasToday = dayKeys.includes(todayStart);
+  const hqCurrent = hqEvents.find(b => b.start <= now && b.end > now);
+  const hqNext = hqEvents.find(b => b.start > now);
 
   return (
     <>
       <BackLink />
-      <h1 className="page-title">🏢 地域房間使用情況</h1>
-      <p className="page-sub">灣仔 香港童軍百周年紀念大樓 17／18／19 樓房間 — 月曆一目了然；亦可以逐間房睇時段。</p>
+      <h1 className="page-title">🏢 地域房間及區總部使用情況</h1>
+      <p className="page-sub">同一張查閱卡：地域 17／18／19 樓房間及區總部（紅色），可用月曆、逐個地點及今日總覽查看；只有「地域原版日曆」不包含區總部。</p>
 
       <div className="inc-tabs" role="tablist">
         {MODES.map(m => (
-          <button key={m.id} role="tab" aria-selected={mode === m.id} className={`inc-tab ${mode === m.id ? 'on' : ''}`} onClick={() => setMode(m.id)}>{m.label}</button>
+          <button key={m.id} role="tab" aria-selected={mode === m.id} className={`inc-tab ${mode === m.id ? 'on' : ''}`} onClick={() => { if (m.id === 'embed' && floor === 'hq') setFloor(room.floor); setMode(m.id); }}>{m.label}</button>
         ))}
         <span className="dir-search muted" style={{ fontSize: 12, minWidth: 0, textAlign: 'right' }}>
-          {fetchedAt ? `同步 ${new Date(fetchedAt).toLocaleTimeString('zh-HK', { hour12: false })}` : ''}
+          {fetchedAt ? `地域同步 ${new Date(fetchedAt).toLocaleTimeString('zh-HK', { hour12: false })}` : ''}
           {stale ? ` · ⚠️ 上次成功結果` : ''}
           {' '}<button className="linkish" onClick={() => setTick(t => t + 1)} disabled={loading}>🔄 更新</button>
         </span>
       </div>
 
       {error && <div className="err">❌ {error}<div style={{ fontSize: 12, marginTop: 4 }}>可先到原網站查看：<a href={SOURCES.roomsSite} target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>hkir-rooms ↗</a></div></div>}
+      {showHq && !loading && hqConfigured === false &&
+        <div className="err">⚠️ 區總部日曆未設定：請管理員設定 Teamup API Key、日曆 ID 同紅色「確認借用區總部」子日曆 ID。以下只顯示地域房間，唔代表區總部冇預約。</div>}
+      {showHq && !loading && hqError &&
+        <div className="err">⚠️ 區總部已確認借用資料暫時讀唔到：{hqError}。以下只顯示地域房間，唔代表區總部冇預約。</div>}
 
-      {/* ── 📅 月曆模式（v4.9.0 預設）：成個月格仔，逐日列出邊個房有人用 ── */}
+      {/* ── 📅 月曆模式：地域房間 + 區總部紅色已確認借用 ── */}
       {mode === 'calendar' && (
         <>
           <div className="bud-toolbar">
@@ -190,8 +228,8 @@ export default function RoomsPage() {
             <button className="mini-btn ghost" onClick={() => { const m = calM === 11 ? 0 : calM + 1; setCalM(m); if (calM === 11) setCalY(y => y + 1); }}>下月 ▶</button>
             <b className="cal-title">{calY} 年 {calM + 1} 月</b>
             <span className="wx-sim" style={{ marginLeft: 'auto' }}>
-              <button className={`wx-chip ${calFloor === 'all' ? 'on' : ''}`} onClick={() => setCalFloor('all')}>全部樓層</button>
-              {FLOORS.map(f => <button key={f.id} className={`wx-chip ${calFloor === f.id ? 'on' : ''}`} onClick={() => setCalFloor(f.id as '17' | '18' | '19')}>{f.label}</button>)}
+              <button className={`wx-chip ${calFloor === 'all' ? 'on' : ''}`} onClick={() => setCalFloor('all')}>全部地點</button>
+              {USAGE_FLOORS.map(f => <button key={f.id} className={`wx-chip ${calFloor === f.id ? 'on' : ''}`} onClick={() => setCalFloor(f.id)}>{f.id === 'hq' ? '🔴 ' : ''}{f.label}</button>)}
             </span>
           </div>
 
@@ -207,6 +245,12 @@ export default function RoomsPage() {
                   const isToday = ymd === calTodayYmd;
                   const isSel = ymd === selDay;
                   const dow = hkDow(d);
+                  // 格仔最多列三節；有區總部時至少保留一個紅色標記，其餘點格仔睇晒。
+                  const preview = list.slice(0, 3);
+                  if (list.length > 3 && !preview.some(b => b.floor === 'hq')) {
+                    const confirmed = list.find(b => b.floor === 'hq');
+                    if (confirmed) { preview[2] = confirmed; preview.sort((a, b) => a.start - b.start); }
+                  }
                   return (
                     <button
                       key={ymd} className={`cal-cell ${list.length ? 'has' : 'free'} ${isToday ? 'today' : ''} ${isSel ? 'sel' : ''} ${dow === '日' || dow === '六' ? 'wknd' : ''}`}
@@ -217,9 +261,9 @@ export default function RoomsPage() {
                         <span className="cal-free">—</span>
                       ) : (
                         <span className="cal-events">
-                          {list.slice(0, 3).map((b, j) => (
+                          {preview.map((b, j) => (
                             <span key={j} className={`cal-ev f-${b.floor}`}>
-                              <i>{b.allDay ? '全日' : `${hkHm(b.start)}–${hkHm(b.end)}`}</i> {b.roomId} {parseTitle(b.summary).activity}
+                              <i>{b.allDay ? '全日' : `${hkHm(b.start)}–${hkHm(b.end)}`}</i> {b.roomId} {b.floor === 'hq' ? '已確認借用' : parseTitle(b.summary).activity}
                             </span>
                           ))}
                           {list.length > 3 && <span className="cal-more">+{list.length - 3}</span>}
@@ -240,20 +284,21 @@ export default function RoomsPage() {
                     <button className="mini-btn ghost" onClick={() => setSelDay('')}>收起</button>
                   </div>
                   {selList.length === 0 ? (
-                    <p className="empty">全日冇預約。</p>
+                    <p className="empty">{calFloor === 'hq' && hqConfigured !== true ? '區總部資料暫時不可用，請勿當作空置。' : '未見預約；請留意上方資料來源提示。'}</p>
                   ) : (
                     <div className="cal-day-list">
                       {selList.map((b, i) => {
-                        const t = parseTitle(b.summary);
+                        const hq = b.floor === 'hq';
+                        const t = hq ? null : parseTitle(b.summary);
                         return (
-                          <div key={i} className="room-ev">
-                            <div className="room-ev-time">{b.allDay ? '全日' : `${b.start < hkDayStart(selDay) ? '00:00' : hkHm(b.start)}–${b.end > hkDayStart(selDay) + 86_400_000 ? '24:00' : hkHm(b.end)}`}</div>
+                          <div key={i} className={`room-ev ${hq ? 'hq' : ''}`}>
+                            <div className="room-ev-time">{b.allDay ? '全日' : `${b.start < hkDayStart(selDay) ? '00:00' : hkHm(b.start)}–${b.end >= hkDayStart(selDay) + 86_400_000 ? '24:00' : hkHm(b.end)}`}</div>
                             <div className="room-ev-body">
-                              <b>{b.roomId} · {t.activity}</b>
-                              <small>
+                              <b>{b.roomId} · {hq ? '已確認借用' : t?.activity}</b>
+                              {t && <small>
                                 {[t.unit, t.pax ? `${t.pax} 人` : '', t.ref ? `#${t.ref}` : ''].filter(Boolean).join(' · ')}
                                 {t.contact && <> · 📞 {t.contact}</>}
-                              </small>
+                              </small>}
                               {b.via !== b.roomId && <small className="room-via">經 {b.via} 打通預約</small>}
                             </div>
                           </div>
@@ -265,10 +310,11 @@ export default function RoomsPage() {
               )}
 
               <div className="legend" style={{ marginTop: 10 }}>
+                <span><i className="sq" style={{ background: '#fee2e2' }} /> 區總部 · 已確認借用</span>
                 <span><i className="sq" style={{ background: '#dbeafe' }} /> 17 樓</span>
                 <span><i className="sq" style={{ background: '#dcfce7' }} /> 18 樓</span>
                 <span><i className="sq" style={{ background: '#fef9c3' }} /> 19 樓</span>
-                <span>點日子睇詳情 · 撳「🚪 逐間房」睇單一房間</span>
+                <span>點日子睇詳情 · 撳「🚪 逐個地點」睇單一房間或區總部</span>
               </div>
             </>
           )}
@@ -279,12 +325,26 @@ export default function RoomsPage() {
         <>
           <div className="room-pick">
             <div className="room-floors">
-              {FLOORS.map(f => (
-                <button key={f.id} className={`wx-chip ${floor === f.id ? 'on' : ''}`} onClick={() => { setFloor(f.id); const first = ROOMS.find(r => r.floor === f.id); if (first && room.floor !== f.id) setRoomId(first.id); }}>{f.label}</button>
+              {(mode === 'room' ? USAGE_FLOORS : FLOORS).map(f => (
+                <button key={f.id} className={`wx-chip ${floor === f.id ? 'on' : ''}`} onClick={() => {
+                  setFloor(f.id);
+                  if (f.id !== 'hq') {
+                    const first = ROOMS.find(r => r.floor === f.id);
+                    if (first && room.floor !== f.id) setRoomId(first.id);
+                  }
+                }}>{f.id === 'hq' ? '🔴 ' : ''}{f.label}</button>
               ))}
             </div>
             <div className="room-list">
-              {ROOMS.filter(r => r.floor === floor).map((r) => {
+              {hqRoomMode ? (
+                <div className="room-btn on" aria-current="true">
+                  <b>🔴 區總部</b>
+                  <span>已確認借用時段 · Teamup</span>
+                  {!loading && <em className={!hqReady || !hqRangeHasToday ? 'unknown' : hqCurrent ? 'busy' : 'free'}>
+                    {!hqReady ? '資料不可用' : !hqRangeHasToday ? '查看所選日期' : hqCurrent ? '使用中' : todayHq.length ? `今日 ${todayHq.length} 節` : '今日未見借用'}
+                  </em>}
+                </div>
+              ) : ROOMS.filter(r => r.floor === floor).map((r) => {
                 const bs = mode === 'room' ? bookingsFor(r.id) : [];
                 const busy = bs.some(b => b.start <= now && b.end > now);
                 const todayN = bs.filter(b => b.start < todayEnd && b.end > todayStart).length;
@@ -301,17 +361,28 @@ export default function RoomsPage() {
 
           <div className="dir-office room-head">
             <div>
-              <b>{room.name}</b>
-              <div className="dir-office-line">
-                {room.capacity && <>👥 {room.capacity} · </>}{room.use && <>🎯 {room.use}</>}
-              </div>
-              {room.combo && room.combo.length > 0 && (
-                <div className="dir-office-line">🔗 已一併計入打通房日曆：{room.combo.join('、')}</div>
+              <b>{hqRoomMode ? '🔴 區總部' : room.name}</b>
+              {hqRoomMode ? (
+                <div className="dir-office-line">Teamup「確認借用區總部」· 只顯示匿名佔用時段，申請中不顯示</div>
+              ) : (
+                <>
+                  <div className="dir-office-line">
+                    {room.capacity && <>👥 {room.capacity} · </>}{room.use && <>🎯 {room.use}</>}
+                  </div>
+                  {room.combo && room.combo.length > 0 && (
+                    <div className="dir-office-line">🔗 已一併計入打通房日曆：{room.combo.join('、')}</div>
+                  )}
+                </>
               )}
             </div>
             {mode === 'room' && !loading && (
               <div className="room-now">
-                {current ? (
+                {hqRoomMode ? (
+                  !hqReady ? <span className="room-state unknown">⚪ 資料不可用</span>
+                    : !hqRangeHasToday ? <span className="room-state unknown">查閱所選日期</span>
+                    : hqCurrent ? <><span className="room-state busy">🔴 使用中</span><small>已確認借用至 {hkHm(hqCurrent.end)}</small></>
+                    : <><span className="room-state free">🟢 現在未見確認借用</span>{hqNext && <small>下一節 {hkYmd(hqNext.start) === hkYmd(now) ? '今日' : `${hkYmd(hqNext.start)}(${hkDow(hqNext.start)})`} {hkHm(hqNext.start)}</small>}</>
+                ) : current ? (
                   <><span className="room-state busy">🔴 使用中</span><small>至 {hkHm(current.end)} · {parseTitle(current.summary).activity}</small></>
                 ) : (
                   <><span className="room-state free">🟢 現在空置</span>{next && <small>下一節 {hkYmd(next.start) === hkYmd(now) ? '今日' : `${hkYmd(next.start)}(${hkDow(next.start)})`} {hkHm(next.start)}</small>}</>
@@ -334,7 +405,29 @@ export default function RoomsPage() {
                 <span className="wx-sim">{RANGES.map(d => <button key={d} className={`wx-chip ${days === d ? 'on' : ''}`} onClick={() => setDays(d)}>{d} 日</button>)}</span>
               </div>
 
-              {loading ? <div className="center"><div className="spinner" /></div> : (
+              {loading ? <div className="center"><div className="spinner" /></div> : hqRoomMode ? (
+                !hqReady ? <p className="fps-notice">區總部資料不可用，請勿當作空置。</p> :
+                <div className="room-days">
+                  {dayKeys.map((d0) => {
+                    const d1 = d0 + 86_400_000;
+                    const list = hqEvents.filter(b => b.start < d1 && b.end > d0).sort((a, b) => a.start - b.start);
+                    return (
+                      <div key={d0} className={`room-day ${list.length ? '' : 'empty'} ${d0 === todayStart ? 'today' : ''} ${['日', '六'].includes(hkDow(d0)) ? 'wknd' : ''}`}>
+                        <div className="room-day-head">
+                          <b>{hkYmd(d0).slice(5).replace('-', '/')}</b><span>（{hkDow(d0)}）{d0 === todayStart && <i className="wx-now">今日</i>}</span>
+                          <small>{list.length ? `${list.length} 節確認借用` : '未見確認借用'}</small>
+                        </div>
+                        {list.map((b, i) => (
+                          <div key={`${b.uid}-${b.start}-${i}`} className="room-ev hq">
+                            <div className="room-ev-time">{districtHqTimeOnDay(b, d0)}</div>
+                            <div className="room-ev-body"><b>區總部 · 已確認借用</b></div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
                 <>
                   {ownFailed && <p className="fps-notice">⚠️ {room.id} 本身嘅日曆暫時讀唔到（{byId[room.id]?.error}），以下只顯示打通房嘅預約。</p>}
                   <div className="room-days">
@@ -381,11 +474,21 @@ export default function RoomsPage() {
         <>
           {loading ? <div className="center"><div className="spinner" /></div> : (
             <div className="room-overview">
-              {FLOORS.map(f => (
+              {USAGE_FLOORS.map(f => (
                 <section className="info-card" key={f.id}>
-                  <div className="section-head"><div><h3>🏢 {f.label}</h3></div></div>
+                  <div className="section-head"><div><h3>{f.id === 'hq' ? '🔴' : '🏢'} {f.label}</h3></div></div>
                   <div className="room-ov-grid">
-                    {ROOMS.filter(r => r.floor === f.id).map((r) => {
+                    {f.id === 'hq' ? (
+                      <button className={`room-ov ${!hqReady ? 'unknown' : hqCurrent ? 'busy' : todayHq.length ? 'later' : 'free'}`}
+                        onClick={() => { setFloor('hq'); setMode('room'); setFrom(ymdInput(todayStart)); }}>
+                        <div className="room-ov-head"><b>區總部</b><span>{!hqReady ? '⚪ 資料不可用' : hqCurrent ? '🔴 使用中' : todayHq.length ? '🔴 今日有確認借用' : '🟢 今日未見確認借用'}</span></div>
+                        <small>Teamup 已確認時段 · 申請中不顯示</small>
+                        {hqReady && <ul>
+                          {todayHq.slice(0, 4).map((b, i) => <li key={i}>{districtHqTimeOnDay(b, todayStart)} 已確認借用</li>)}
+                          {todayHq.length > 4 && <li>…另 {todayHq.length - 4} 節</li>}
+                        </ul>}
+                      </button>
+                    ) : ROOMS.filter(r => r.floor === f.id).map((r) => {
                       const bs = bookingsFor(r.id).filter(b => b.start < todayEnd && b.end > todayStart);
                       const busy = bs.some(b => b.start <= now && b.end > now);
                       const failed = byId[r.id] && !byId[r.id].ok;
@@ -409,9 +512,9 @@ export default function RoomsPage() {
       )}
 
       <section className="info-card" style={{ marginTop: 16 }}>
-        <div className="section-head"><div><h3>ℹ️ 使用須知</h3></div></div>
+        <div className="section-head"><div><h3>ℹ️ 地域房間使用須知</h3></div></div>
         <ul>{ROOM_NOTES.map((n, i) => <li key={i}>{n}</li>)}</ul>
-        <p className="fps-help">來源：<a href={SOURCES.roomsSite} target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>港島地域房間日曆網站 ↗</a>（公開 Google 日曆，每 3 分鐘同步一次）。本頁只供查閱，唔會改動任何預約。</p>
+        <p className="fps-help">地域房間來源：<a href={SOURCES.roomsSite} target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>港島地域房間日曆網站 ↗</a>（公開 Google 日曆，每 3 分鐘同步一次）。區總部來源：Teamup 紅色「確認借用區總部」子日曆（每次開頁／更新時讀取，只顯示匿名佔用時段；申請中不顯示）。本頁只供查閱，唔會改動任何預約。</p>
       </section>
       <BackBar />
     </>

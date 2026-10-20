@@ -10,9 +10,9 @@
  */
 
 import {
-  freshDemoDb, demoUserFor, demoRoomEvents, demoBudget, demoCourseProfile,
-  demoCourseSetup, demoCourseSheetRaw,
-  DEMO_ORG_GROUPS, DEMO_STAFF_ROWS, DEMO_HKSA_COUNCIL, DEMO_HKSA_DEPTS,
+  freshDemoDb, demoUserFor, demoRoomEvents, demoDistrictHqEvents, demoBudget, demoCourseProfile,
+  demoCourseSetup, demoCourseSheetRaw, demoDefaultMatrix,
+  DEMO_CARDS, DEMO_ORG_GROUPS, DEMO_STAFF_ROWS, DEMO_HKSA_COUNCIL, DEMO_HKSA_DEPTS,
   DEMO_TOKEN, type DemoDb, type DemoUser,
 } from './seed.ts';
 
@@ -29,7 +29,20 @@ function loadDb(): DemoDb {
   try {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       const raw = window.sessionStorage.getItem(SNAPSHOT_KEY);
-      if (raw) { db = JSON.parse(raw) as DemoDb; return db; }
+      if (raw) {
+        db = JSON.parse(raw) as DemoDb;
+        // v1 快照缺 YMIS 卡：只補首次升級，往後仍容許管理員移除／自訂卡片。
+        if (!db.schemaVersion || db.schemaVersion < 2) {
+          const card = DEMO_CARDS.find(c => c.cardId === 'ymis');
+          if (card && !db.cards.some(c => c.cardId === 'ymis')) {
+            db.cards.push({ ...card });
+            db.matrix.ymis = { ...demoDefaultMatrix().ymis };
+          }
+          db.schemaVersion = 2;
+          persistDb();
+        }
+        return db;
+      }
     }
   } catch { /* ignore */ }
   db = freshDemoDb();
@@ -163,6 +176,20 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
     case 'getCards': {
       if (!u) return fail('未登入或登入已過期（示範版）。');
       return ok(visibleCards(u));
+    }
+    case 'getYmisCredentials': {
+      if (method !== 'POST' || !u || !visibleCards(u).some(c => c.cardId === 'ymis')) return fail('沒有 YMIS 帳戶查閱權限（示範版）。');
+      // 純虛構、無法登入的字串；示範版絕不向正式後台讀取或保存任何帳密。
+      return ok({ configured: true, username: 'DEMO-ACCOUNT-NOT-REAL', password: 'DEMO-NOT-A-REAL-PASSWORD' });
+    }
+    case 'getDistrictHqBookings': {
+      if (!u) return fail('未登入或登入已過期（示範版）。');
+      if (!visibleCards(u).some(c => c.cardId === 'rooms')) return fail('沒有房間日曆權限');
+      const from = String(payload.from || ''), days = Number(payload.days);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !Number.isInteger(days) || days < 1 || days > 60) return fail('日曆日期或範圍不正確');
+      const start = Date.parse(`${from}T00:00:00+08:00`);
+      if (!Number.isFinite(start) || new Date(start + 8 * 3600000).toISOString().slice(0, 10) !== from) return fail('日曆日期不正確');
+      return ok({ configured: true, events: demoDistrictHqEvents(start, days), fetchedAt: nowIso() });
     }
     case 'getPerms': {
       const r = requireUser(token, 1); if (isErr(r)) return r;
@@ -983,7 +1010,8 @@ export function demoExternal(kind: string, params: AnyObj): ApiResultLike {
       return ok({ ...meta, rows, summary, sheetUrl: '' });
     }
     case 'rooms': {
-      const from = Number(params.from || Date.now());
+      const rawFrom = String(params.from || '');
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(rawFrom) ? Date.parse(`${rawFrom}T00:00:00+08:00`) : Number(rawFrom || Date.now());
       const days = Number(params.days || 14);
       const ids = params.room ? [String(params.room)] : ROOM_IDS;
       const map = demoRoomEvents(ids, from, days);

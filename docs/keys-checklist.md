@@ -1,22 +1,30 @@
 # 🔑 借場一條龍 — API Key 找回 + 驗證 Checklist（統一後台 v4.0）
 
-> 你唔記得啲 Key 邊度嚟，好正常 — 因為佢哋收埋喺 **Vercel**（booking 專案）嘅環境變數，
-> 同你 **booking 系統 code** 入面嘅預設值。以下教你逐個倒返出嚟 + 驗證，唔使靠記憶。
+> 你唔記得啲 Key 邊度嚟，好正常 — 安全嘅 Key 應該存喺 **Vercel**（booking 專案）嘅環境變數或區後台受保護 Config；
+> 唔好寫入 Git。以下教你核對設定；舊版 Teamup Token 曾被寫入 repo，請先輪換。
 >
 > v4.0 統一後台 Config 主用 **`TEAMUP_*`** 欄名；舊欄名（`teamupApiKey` 等）仍然讀到（自動 fallback），
 > 舊 Config 冇搬都照行。
 
 ## 邊度搵 Key（3 個來源）
 1. **Vercel**：`skw-booking` 專案 → **Settings → Environment Variables**（大部分 Key 喺度）
-2. **booking code 預設值**：`services/skw-booking/get-ids.js`（Teamup API Key 喺度有現成）
+2. **區後台 Config**：確認 `TEAMUP_API_KEY`／`TEAMUP_CALENDAR_KEY`／`TEAMUP_APPROVED_SUBCAL_ID` 設定（唔好貼 Key 入 Git／訊息）
 3. **重新跑工具**：用 `get-ids.js` / `get-lock-id.js` 重新登入撈返（如果上面搵唔到）
+
+---
+
+## 登入及 YMIS 保障（Apps Script Script Properties，唔係 Config）
+
+- **必設** `PORTAL_TOKEN_SECRET`：每區獨立、至少 32 字元亂碼，用於簽署登入及重設代碼；未設／太短時登入會拒絕，切換後所有舊登入／重設連結失效。
+- **選設** `PORTAL_MASTER_PASSWORD`：至少 12 字元長密碼，未設則維護帳號不能登入；舊原始碼示範密碼已不能使用。
+- **YMIS 卡啟用時**，先輪換先前披露的 YMIS 密碼及全部預設 DC／DDC／ADC／STAFF 區系統登入密碼，再私密設定 `YMIS_VERIFY_USERNAME`、`YMIS_VERIFY_PASSWORD`。詳見 [`YMIS 人工登入卡部署指引`](ymis-verification-feasibility.md)。勿將上述私密值交到 Git、Google Sheet、對話或公開環境變數。
 
 ---
 
 ## A. Teamup（共 3 條）
 | # | Config 欄位（v4.0） | 舊欄名（仍兼容） | 係咩 | 去邊度攞 | 點驗證 |
 |---|---|---|---|---|---|
-| A1 | `TEAMUP_API_KEY` | `teamupApiKey` | Teamup API Token | `get-ids.js` 預設值：`4032acf1e6d917809aeb334a16dd0bca82297e8f0f65cd6ec32e0d92bc37bbd2`（你話冇改過，可直接重用） | 見下面「驗證 Teamup」 |
+| A1 | `TEAMUP_API_KEY` | `teamupApiKey` | Teamup API Token | 從區後台受保護嘅 Config／Teamup 後台取得；`get-ids.js` 已移除寫死嘅 Token，請用 `TEAMUP_API_KEY` 環境變數或執行時輸入。舊 Token 曾進入 Git 紀錄，應於 Teamup 輪換後更新 Config | 見下面「驗證 Teamup」 |
 | A2 | `TEAMUP_CALENDAR_KEY` | `teamupCalendarId` | 日曆金鑰 `ks...` | Vercel env `TEAMUP_CALENDAR_ID` | 見下面「驗證 Teamup」 |
 | A3 | `TEAMUP_APPROVED_SUBCAL_ID` | `teamupApprovedSubId` | 「確認借用區總部」子日曆 ID | Vercel env `TEAMUP_APPROVED_SUB_ID` | 用 `get-ids.js` 列出子日曆核對 |
 

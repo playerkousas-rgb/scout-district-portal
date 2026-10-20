@@ -11,7 +11,7 @@
  *
  * 前端點指去呢度：
  *   PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec PORTAL_SKW_APIKEY=dev npx next dev -H 0.0.0.0
- * 登入：sheep / 0728（超級管理員）
+ * 登入：sheep / LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE（僅本機超級管理員）
  */
 const fs = require('fs');
 const path = require('path');
@@ -86,7 +86,11 @@ const ss = {
   toast: () => {}, setActiveSheet: () => {}, moveActiveSheet: () => {},
 };
 
-const props = {};
+// 僅供本機 mock；正式 GAS 必須由區方自行於 Script Properties 設獨立長亂碼。
+const props = {
+  PORTAL_TOKEN_SECRET: 'FAKE_LOCAL_MOCK_PRIVATE_TOKEN_SECRET_0123456789',
+  PORTAL_MASTER_PASSWORD: 'LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE',
+};
 const ctx = {
   console,
   SpreadsheetApp: {
@@ -265,12 +269,7 @@ setCfg('districtCode', 'SKW');
 setCfg('districtName', '筲箕灣區');
 setCfg('API_KEY_HASH', ctx.sha256_('dev'));   // 本機一律用 apiKey=dev，唔使每次抄新 key
 
-// 超級管理員（示範帳號）
-sheets.Users.appendRow(['sheep', 'DC', 'TRUE', '牧羊人', '', '', ctx.hashPassword_ ? ctx.hashPassword_('0728') : '0728']);
-try {
-  const idx = ctx.rowIndexByCol_(sheets.Users, 'email', 'sheep');
-  if (idx > 0) ctx.setPassword_(sheets.Users, idx, '0728');
-} catch (e) { /* 舊版冇 setPassword_ 就當明文 */ }
+// 維護帳號由上方假 Script Properties 提供，唔喺 Users 表埋弱密碼。
 
 // 幾筆假探訪（睇得出「邊個幹部探咗邊啲旅」）
 const Y = new Date().getFullYear();
@@ -316,6 +315,6 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n🧪 mock Apps Script 後台：http://127.0.0.1:${PORT}/exec`);
-  console.log('   登入：sheep / 0728');
+  console.log('   登入（僅本機）：sheep / LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE');
   console.log('   前端：PORTAL_DEV_APIBASE=http://127.0.0.1:' + PORT + '/exec PORTAL_SKW_APIKEY=dev npx next dev -H 0.0.0.0\n');
 });

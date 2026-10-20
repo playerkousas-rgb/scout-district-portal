@@ -3,7 +3,13 @@ export default function SetupPage() {
   return (
     <>
       <h1 className="page-title">🧩 區接入教學</h1>
-      <p className="page-sub">本平台採「統一前端 + 各區獨立 Google Sheet / Apps Script 後台」。你這區不用寫程式，照步驟建立自己的後台，再把 Web App /exec 網址和 API Key 交給平台管理員即可。</p>
+      <p className="page-sub">本平台採「統一前端 + 各區獨立 Google Sheet / Apps Script 後台」。下方新區接入教學只供從零開始；已有區資料請沿用原本後台。</p>
+
+      <div className="info-card">
+        <h3>🔄 已有 Google Sheet？請更新，唔好重建</h3>
+        <p>先備份現有 Sheet 同 Apps Script；下載 <a href="/downloads/Code.gs.txt" download="Code.gs.txt">完整 Code.gs v4.19.0</a> 貼到<strong>原有</strong> Apps Script 專案，再喺 Script Properties 設定每區獨立嘅 <code>PORTAL_TOKEN_SECRET</code>（至少 32 字元）。執行 <code>setupSheets()</code> 補缺，然後<strong>編輯原有 Web App 部署</strong>選新版本。舊 session 需要重新登入；唔好將真實帳密貼入程式碼／Sheet。</p>
+        <p>詳細步驟（包括備份、API Key、YMIS 帳密輪換及驗證）：<a href="https://github.com/playerkousas-rgb/scout-district-portal/blob/main/docs/gs-upgrade-no-data-loss.md" target="_blank" rel="noopener noreferrer">無損升級指引 ↗</a>。唔好執行只供獨立訓練班工作簿使用嘅 <code>setupCourseSheet()</code>。</p>
+      </div>
 
       <div className="info-card">
         <h3>你需要先準備</h3>
@@ -16,14 +22,15 @@ export default function SetupPage() {
       </div>
 
       <div className="info-card">
-        <h3>詳細步驟</h3>
+        <h3>全新地區接入步驟（已有資料請依上方升級指引）</h3>
         <ol>
           <li>到「更新 / 下載」取得後台程式碼 <code>Code.gs</code>。</li>
           <li>建立一張全新的 Google Sheet。</li>
           <li>選單：擴充功能 → Apps Script，把 <code>Code.gs</code> 整份貼上、儲存。</li>
           <li>函數選 <code>setupSheets</code> → 執行（首次需授權：Review permissions → 你的帳戶 → Advanced → Allow）。</li>
           <li>🔑 Setup 彈窗會顯示你的 <b>API Key</b>（只顯示一次！）。請即複製。</li>
-          <li>回到 Sheet，填 <code>Config</code> 分頁：區名等；在 <code>Users</code> 分頁設定帳號密碼。</li>
+          <li>回到 Sheet，填 <code>Config</code> 分頁：區名等；在 <code>Users</code> 分頁設定帳號，立即更改／停用初始密碼帳戶。</li>
+          <li>喺 Apps Script 專案設定 → Script Properties 新增每區獨立 <code>PORTAL_TOKEN_SECRET</code>（至少 32 字元亂碼；唔好貼喺 Sheet／原始碼），否則無法登入。</li>
           <li>部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：所有人）。</li>
           <li>複製 <code>/exec</code> 網址。</li>
           <li>把「區碼 + 區名 + /exec 網址 + API Key」交給平台管理員登記。</li>

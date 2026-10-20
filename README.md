@@ -17,14 +17,18 @@
 > `services/skw-booking/` 係**選用**嘅舊獨立方案，主流程唔使理佢。
 
 ### 第 1 步：起後台（Google Sheet + Apps Script）
+
+**已有原有資料要更新，而唔係新建？請先依照 [`GS 無損升級步驟`](docs/gs-upgrade-no-data-loss.md) 備份及更新原有專案。**
+
 1. 開一張 Google Sheet（或沿用你已有嗰張）→ **擴充功能 → Apps Script**。
-2. 將 `gs/Code.gs`（最新版 4.0.1）**全部內容覆蓋貼上** → 儲存。
+2. 將最新版 `gs/Code.gs` **全部內容覆蓋貼上** → 儲存。
 3. 函數選單揀 **`setupSheets`** → 執行（首次要授權：Review permissions → Advanced → Allow）。
    - 自動建齊所有工作表（Config / Users / Venues / VenueBookings / CourseLinks …）。
-   - ★ 係「**補建唔清空**」：重跑唔會洗走你已有資料。
+   - ★ 係「**補建唔清空**」：重跑唔會刪除現有工作表／借場／消息／帳戶等記錄；只補缺欄及調整舊預設卡片／權限。升級前仍應先備份試算表。
    - 彈窗會顯示 **API Key（只顯示一次）→ 即刻複製**。
-4. 改安全設定（喺 `Code.gs` 頂部）：`TOKEN_SECRET`、`MASTER_EMAIL`、`MASTER_PW`、`DEFAULT_PASSWORD`。
-5. **部署 → 新增部署 → 網頁應用程式**（執行身分：我自己；存取：**任何人**）→ 攞 `/exec` 網址。
+4. **部署前必設** Apps Script → 專案設定 → Script Properties：`PORTAL_TOKEN_SECRET`（每區獨立隨機、至少 32 字元；未設定會拒絕登入／token）；如要開啟維護登入，另設 `PORTAL_MASTER_PASSWORD`（至少 12 字元，否則停用）。不可再使用／提交原始碼中的公開示範金鑰或密碼。切換 token 密鑰會令舊 session／重設密碼連結失效。
+5. **更換預設 Users／Staff 初始密碼**，不再使用的帳戶應停用；尤其啟用 YMIS 卡之前必須完成。`MASTER_EMAIL`（帳號名稱）可按區方需要另改，密碼不可寫入 Code.gs。
+6. **部署 → 新增部署 → 網頁應用程式**（執行身分：我自己；存取：**任何人**）→ 攞 `/exec` 網址。
 
 ### 第 2 步：填 Config 金鑰（喺「Config」工作表）
 
@@ -51,7 +55,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.10.0"` 即通。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.19.0"` 即代表新版後台已上線。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -64,7 +68,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.10.0"` 即代表用緊最新後台。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.19.0"` 即代表用緊呢次更新嘅後台。
 
 ---
 
@@ -90,14 +94,14 @@
 1. **獎勵規則（用戶提供）**：長期服務線改為 LAY 階梯 — `FIVE` 五年獎狀（服務 5 年）→ `TEN` 十年獎狀（＋5）→ `LSM` 長期服務獎章（共 15 年，**由服務開始計，唔再由上一級推**）→ `LSM1/2/3` 一／二／三星（每 10 年），全部自動推算。`CCM` 香港總監嘉許／`CCH` 高級嘉許／`HAB` 民青局局長嘉許／`THANKS` 感謝狀 = **自行申請，唔會自動推算**（CCH 唔再由 CCM 年份計、舊 HAB 歸入 hab 提名期）。名冊狀態新增 **「沒有提名資格」**（`noNomination`）— 揀咗嘅人永不會出現喺提名建議。
 2. **HAB 提名期**：新提名期 `hab` — 區→總會 `01-15`、總會→民青局 `02-03`（2026 年度：2026-02-03 前交表，附件 II 加蓋印簽署）— 喺「⚙️ 年期設定」可改（`getAwardsBoard.deadlineCfg`／`saveAwardDeadlines`，收 `MM-DD` 或 `YYYY-MM-DD`）。
 3. **獎勵提名只限 DDC 或以上**：`Perms.awards = ddcUp`，ADC／區職員／區長領袖睇唔到張卡，直接打 URL 都會擋（`levelOf() <= 2`）。
-4. **消息發佈搬去主控台最頂**（`NewsTopPanel`）：一入管理系統就新增／編輯／刪除／置頂／下架，**ADC（level 3）或以上**（`requireNewsEdit_`）— news 卡片同佢嘅 Perms 行已移除。刪除改為**軟刪除**（`deleted/deletedAt/deletedBy`），Sheet 永遠留底，`/news` =「完整紀錄」可以還原；成員系統公開 API 永遠唔會出現已刪消息。
+4. **消息發佈搬去主控台最頂**（`NewsTopPanel`）：一入管理系統就新增／編輯／刪除／置頂／下架，**ADC（level 3）或以上**（`requireNewsEdit_`）— 舊 news 卡會停用隱藏，但 Cards／Perms 原始行留底，唔會刪除。刪除改為**軟刪除**（`deleted/deletedAt/deletedBy`），Sheet 永遠留底，`/news` =「完整紀錄」可以還原；成員系統公開 API 永遠唔會出現已刪消息。
 5. **聯結簿 → 聯絡簿**：地域職員**姓名**可以由 ADC+ 直接改（電話固定由官網同步，「電話不變但人會轉」）— 存後台 `ContactNames` 表，全區同步；留空即還原同步名（`getContactNames`／`saveContactName`）。
 6. **地域架構**：7 區區總監合併做一個大格（`xx區` ＋ 姓名並排）。
 7. **主控台卡片自排**：拖拽或 ▲▼，次序存瀏覽器 localStorage（每位用戶各自記住）；房間頁預設改為「📅 月曆」逐日總覽模式。
 8. **🎭 模擬示範版（Mock）**：未登入都可以演示成個系統 — 參考 event 系統做法：登入頁／使用地區頁有「🎭 模擬示範版」入口（或直接分享 `?demo=1` 連結）→ 一鍵以**助理區總監（ADC）**示範身份進入（管理系統大部分日常嘢都係 ADC 處理；示範版**權限全開**＝mock_admin，唔搞多重權限；成人獎勵（awards）不設示範：卡片收起、`/awards` 被卡片門禁直接 redirect 返主控台，engine 對全部 awards 動作統一擋），每頁頂部橫額有 ↺ 重設示範資料、✕ 離開示範版。**100% 本地沙盒**：示範資料（`lib/demo/seed.ts`）內建 18 類獎項名冊／9 個旅探訪／借場借物資／消息（含軟刪除示範行）／房間日曆等，全部改動只存瀏覽器 sessionStorage，唔會打去任何後端（`lib/api.ts` 三個出口 callGet／callPost／callExternal 全部攔截，`lib/demo/engine.ts` 模擬後台語義包括權限閘、一日一旅一次、死線儲存、軟刪除）。測試：`node --experimental-strip-types scripts/test-demo-engine.ts`（19 項）＋`scripts/test-demo-wiring.ts`（7 項）。
 
-- **舊部署升級**：貼新 `Code.gs` → 跑一次 `setupSheets()` → 重新部署。setupSheets 會自動：升級 AwardTypes 舊預設（你自己改過嘅數值唔會被掂）、Perms `awards` → `ddcUp`、移除 news 卡＋Perms 行、News 表補 `deleted/deletedAt/deletedBy`、新建 `ContactNames` 表、contacts 卡改名「聯絡簿」— **已有資料全部保留**。
-- 測試：`node scripts/test-upgrade-gs.js`（7 項 4.8.1→4.9.0 升級模擬）、`node scripts/test-awards-gs.js`（21 項）、`node --experimental-strip-types scripts/test-awards-logic.ts`（27 項）、`node scripts/test-news-gs.js`（38 項）、`node scripts/check-member-alignment.js`（成員 API 對齊）。
+- **舊部署升級**：貼新 `Code.gs` → 跑一次 `setupSheets()` → 重新部署。setupSheets 會自動：升級 AwardTypes 舊預設（你自己改過嘅數值唔會被掂）、Perms `awards` → `ddcUp`、舊 news 卡停用留底（Cards／Perms 行不刪）、News 表補 `deleted/deletedAt/deletedBy`、新建 `ContactNames` 表、contacts 卡改名「聯絡簿」— **已有資料全部保留**。
+- 測試：`node scripts/test-upgrade-gs.js`（18 項舊 Sheet 升級／保留資料測試）、`node scripts/test-awards-gs.js`（21 項）、`node --experimental-strip-types scripts/test-awards-logic.ts`（27 項）、`node scripts/test-news-gs.js`（38 項）、`node scripts/check-member-alignment.js`（成員 API 對齊）。
 
 ## 🏕 旅團探訪（v4.8.1 → v4.10.0 總會格式匯報）
 
@@ -184,6 +188,23 @@
 - 後台邏輯測試（唔使開 Apps Script）：`node scripts/test-news-gs.js`（35 項）。
 - 對齊檢查：`node scripts/check-member-alignment.js`（action／欄位名／`level` 值域／proxy 安全邊界）。
 
+## 🏢 地域房間及區總部使用情況（`/rooms`）
+
+主控台 `rooms` 卡片及頁面已改名；**所有已登入區系統人士均可查閱**，即使個別帳戶 `cards` 欄有限制。借場**審批係另一張 `venueReg` 卡**：只顯示畀真係有 `canVenue` 權限嘅人（預設 DC／SYSADMIN／DDC_ADMIN／DDC_TRAINING／STAFF），睇日曆唔等於有審批權。示範模式嘅 mockAdmin 為全權功能示範身份，唔代表 ADC 正式權限。月曆／逐個地點／今日總覽同時顯示：
+
+- **地域房間**：17／18／19 樓公開 Google Calendar ICS，沿用原本逐間房／打通房計算及 3 分鐘快取。
+- **區總部**：管理後台用已登入 `rooms` 卡權限即時查 **Teamup 紅色「確認借用區總部」子日曆**（`TEAMUP_APPROVED_SUBCAL_ID`）；唔會只按借場表已批准記錄，直接喺 Teamup 建嘅確認事件亦會顯示。作為 **17／18／19 樓以外的同一個樓層**，可在月曆揀區總部篩選、在「逐個地點」查看逐日時段，以及在今日總覽看當天狀態並按入詳情。為保障私隱，只回傳時間與「已確認借用」，唔會回傳人名、notes、入場密碼或原始 Teamup ID；未設定／讀取失敗會顯示警告，**唔代表區總部空置**。
+
+**正式啟用**：更新 `gs/Code.gs`、執行 `setupSheets()` 保留既有資料及自訂卡片名稱、重新部署 Apps Script Web App，再部署新版前端；Config 核對 `TEAMUP_API_KEY`、`TEAMUP_CALENDAR_KEY`、`TEAMUP_APPROVED_SUBCAL_ID` 指向同一個 Teamup 紅色已確認子日曆。現有 `PORTAL_{區碼}_APIKEY` 代理設定照舊，**不要將 Teamup Token 放喺前端**。舊版 `get-ids.js`／文件曾將 Token 提交到 Git，今次已移除明文，但 Git 歷史仍可能見到：請喺 Teamup **輪換舊 Token** 並更新後台 Config，唔好重用舊值。用手動建立嘅紅色 Teamup 事件核實，而唔係只睇借場批核表。詳見 [`docs/venue-booking-flow.md`](docs/venue-booking-flow.md)。
+
+本地示範 `?demo=1` 有匿名示範事件；測試：`node scripts/test-district-hq-gs.js`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node scripts/test-upgrade-gs.js`、`node --experimental-strip-types scripts/test-demo-engine.ts`、`npm run build`。以上測試唔需要真 Teamup 憑據；**尚需部署後用真實 Teamup 日曆做端到端核對**。
+
+## 🪪 YMIS 會員核實（人工登入卡）
+
+區方改用較簡單嘅方案：DC／DDC／ADC 總監級同區職員登入區系統後，可喺主控台撳「YMIS 會員核實」卡；入頁開官方 YMIS 登入網站，按「顯示帳密（60 秒）」短暫查看**區獲發嘅核實帳戶**，再自行喺 YMIS 網站輸入。SYSADMIN／維護帳號、區長／一般領袖／助理區領袖不可見。呢個功能**唔係 YMIS SSO／自動查會員**；示範版只顯示無法登入的虛構資料。
+
+真實帳密**不可寫入程式碼／Google Sheet／聊天**。區方管理員須先輪換曾在對話中披露的 YMIS 密碼及區系統初始登入密碼，按上方步驟在 **Script Properties** 設 `PORTAL_TOKEN_SECRET`、部署新版 `gs/Code.gs` 並執行 `setupSheets()`，再私密設定 `YMIS_VERIFY_USERNAME`／`YMIS_VERIFY_PASSWORD`、更新 Web App 版本及前端。部署後由區方自行核實能否在官方 YMIS 登入；本地未測真實帳密。權限及風險見 [`YMIS 部署指引`](docs/ymis-verification-feasibility.md)，現有資料更新順序見 [`GS 無損升級步驟`](docs/gs-upgrade-no-data-loss.md)。
+
 ## 📑 區年度預算 / 🏢 地域房間 / 📇 聯結簿自動同步 / 🏛 架構（v4.5.0）
 
 外部公開資料一律由 Vercel **`app/api/external/route.ts`** 伺服器端代抓（瀏覽器直接抓會撞 CORS；Apps Script 唔使改），
@@ -201,17 +222,17 @@
 
 - 房間打通關係：1704A／1704B ⊂ 1704 ⊂ 1704+1705；睇任何一間都會自動計入相關日曆（標「經 XXXX 打通預約」）。
 - 開發／測試：`PORTAL_DEV_EXTERNAL_BASE=http://127.0.0.1:8787/upstream` 可把全部上游改經本機 fixture（同 `PORTAL_DEV_APIBASE` 一樣只喺非 production 生效）。
-- 後台 4.5.0：Cards 補 `rooms`／`orgchart`（全員 view）、`budget` todo→done（只改仍係舊預設值嘅行）、Config 補 `BUDGET_SHEET_URL`；刪除 `annual` 週年會議文件卡片（`patchCardRows_` 移除舊行，`app/annual-docs` 已刪）。
+- 後台 4.5.0：Cards 補 `rooms`／`orgchart`（全員 view）、`budget` todo→done（只改仍係舊預設值嘅行）、Config 補 `BUDGET_SHEET_URL`；舊 `annual` 週年會議文件卡片只停用，保留 Cards／Perms 原行（`app/annual-docs` 已刪）。
 
 ## 🌦 天氣決策 / 📇 聯結簿 / 👤 層級授權 / 🙈 隱藏卡片（v4.4.0）
 
 - **天氣決策**（`lib/weatherDecision.ts`、`components/WeatherDecisionPanel.tsx`、主控台 `WeatherDecisionBanner`）：瀏覽器直接拉天文台開放數據 `warnsum`（公開、可跨域），對照活動指引通告 04/2018 表一，戶內／戶外／海上各自一個結論（✅／⚠️／⛔）＋原因；可模擬；AQHI 天文台 API 冇提供，人手揀。
 - **聯結簿**（`app/contacts/page.tsx`、`lib/contactsDirectory.ts`）：旅團（待區方資料）／港島地域／總會三分頁，來源及日期寫喺檔頭。v4.5.0 起港島地域只放職員電話並自動同步，總監架構搬去 `/orgchart`。
-- **帳戶層級**：`level` 0 超管 → 1 DC → 2 DDC → 3 ADC → 4 STAFF → 5 其他。`Users` 表新增 `level` / `mustChangePassword` / `delegatedBy`；`Roles` 表新增 `level`。預設帳戶（`PRESET_USERS`）密碼 `1234`、首次登入必改；`setupSheets()` 只補缺，唔改已有帳戶。
+- **帳戶層級**：`level` 0 超管 → 1 DC → 2 DDC → 3 ADC → 4 STAFF → 5 其他。`Users` 表新增 `level` / `mustChangePassword` / `delegatedBy`；`Roles` 表新增 `level`。只限全新／空白 Users 表先種預設帳戶（`PRESET_USERS`，初始密碼僅供首次設定、登入即須更改）；已有任何帳戶的區升級不會額外加示範管理員，亦不改已有密碼。
 - **忘記密碼**：`requestPasswordReset`（公開，寄去帳戶電郵，前端帶 `resetUrlBase` 即 `/?d=區碼`，連結 `&reset=TOKEN`）→ `resetPassword`。Token 綁定舊密碼雜湊，24 小時有效、用一次即失效。
 - **授權／收回**（`/delegate`）：`getDelegation` / `delegatePerms` / `revokePerms`，直接寫 `Perms` 表；只可授出自己擁有嘅權限、只可授俾層級較低嘅角色。
 - **隱藏卡片**：`Cards.enabled=FALSE` → `getCards` 只回傳俾 level 0（超管）；主控台超管每張卡有開關。
-- 已刪除「會議行事曆」卡片（`patchCardRows_` 會移除舊行）。
+- 舊「會議行事曆」入口已停用隱藏；`patchCardRows_` 保留原卡片行和權限，唔會刪資料。
 
 ## 🚨 意外／應變（v4.3.0 完成）
 
@@ -300,7 +321,8 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 | 檔案 | 用途 |
 |---|---|
-| `gs/Code.gs` | 統一後台（登入/角色/權限/借場一條龍/訓練班/借物資/知會） |
+| `gs/Code.gs` | 完整統一後台 v4.19.0（已用的 Sheet 請先依無損升級指引備份） |
+| `public/downloads/Code.gs.txt` | 與 `gs/Code.gs` 同一份內容，供網站「更新／下載」直接下載 |
 | `gs/Code.gs.course.js` | 每個訓練班嘅收表 Script 模板 |
 | `app/api/proxy/route.ts` | 前端 → Apps Script 嘅代理（API Key 唔出前端） |
 | `lib/district.ts` | 區目錄（區碼 → apiBase 對照） |
@@ -311,6 +333,6 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 | `scripts/test-awards-gs.js` | 獎勵提名後台測試（21 項） |
 | `scripts/test-visit-gs.js` | 旅團探訪後台測試（15 項） |
 | `scripts/test-visit-logic.ts` | 探訪報告／支部篩選測試（16 項，`node --experimental-strip-types`） |
-| `scripts/mock-gs-server.js` | 本機模擬 Apps Script 後台（`node scripts/mock-gs-server.js` → `PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec PORTAL_SKW_APIKEY=dev npx next dev`，登入 `sheep`／`0728`） |
+| `scripts/mock-gs-server.js` | 本機模擬 Apps Script 後台（`node scripts/mock-gs-server.js` → `PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec PORTAL_SKW_APIKEY=dev npx next dev`，本機 mock 登入 `sheep`／`LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE`） |
 | `scripts/test-awards-logic.ts` | 獎勵夠期推算／Excel 匯入解析測試（24 項，`node --experimental-strip-types`） |
 | `scripts/check-member-alignment.js` | 成員系統 ↔ 後台對齊檢查（action 缺漏 / proxy 白名單 / 安全邊界） |

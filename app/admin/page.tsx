@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
+import { canViewYmisRole } from '@/lib/accountRoles';
 import { loadSession } from '@/lib/session';
 import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession, PermsBundle, AccessLevel, RoleDef } from '@/lib/types';
@@ -45,19 +46,24 @@ export default function AdminPage() {
     setSession(s); reload(s.token);
   }, [router, withDistrict]);
 
-  function cellVal(c: string, r: string): AccessLevel { return (matrix[c] && matrix[c][r]) || ''; }
+  function cellVal(c: string, r: string): AccessLevel {
+    if (c === 'ymis' && !canViewYmisRole(r)) return '';
+    const value = (matrix[c] && matrix[c][r]) || '';
+    return c === 'ymis' && value ? 'view' : value;
+  }
   function toggle(c: string, r: string) {
+    if (c === 'ymis' && !canViewYmisRole(r)) return;
     setMsg('');
     setMatrix(prev => {
       const cur = (prev[c] && prev[c][r]) || '';
-      return { ...prev, [c]: { ...(prev[c] || {}), [r]: NEXT[cur] } };
+      return { ...prev, [c]: { ...(prev[c] || {}), [r]: c === 'ymis' ? (cur ? '' : 'view') : NEXT[cur] } };
     });
   }
   function setRow(c: string, v: AccessLevel) {
     if (!bundle) return;
     setMatrix(prev => {
       const row: Record<string, AccessLevel> = {};
-      bundle.roles.forEach(r => (row[r.role] = v));
+      bundle.roles.forEach(r => (row[r.role] = c === 'ymis' ? (canViewYmisRole(r.role) && v ? 'view' : '') : v));
       return { ...prev, [c]: row };
     });
   }
@@ -132,7 +138,7 @@ export default function AdminPage() {
     <>
       <BackLink />
       <h1 className="page-title">⚙️ 權限 / 角色管理</h1>
-      <p className="page-sub">點格子切換：— 不可見 → 👁 可看 → ✏️ 可管理。受保護角色（標🔒）不可刪改。「開關」關掉＝隱藏卡片：其他人一律睇唔到，只有 L0 超管仍可見及進入。</p>
+      <p className="page-sub">點格子切換：— 不可見 → 👁 可看 → ✏️ 可管理。受保護角色（標🔒）不可刪改。「開關」關掉＝隱藏卡片：一般卡片仍可由 L0 超管管理；YMIS 帳密卡例外，只限 DC／DDC／ADC／STAFF。</p>
 
       {/* 系統鎖定 */}
       <div className="lock-panel">
@@ -186,6 +192,7 @@ export default function AdminPage() {
           </div>
 
           {/* 權限矩陣 */}
+          <p className="fps-help" style={{ marginBottom: 10 }}>🪪 YMIS 會員核實卡係特別查閱權限：只可授予 DC／DDC／ADC／區職員，其他角色即使誤設為可看亦不能顯示共用帳密。</p>
           <div className="toolbar">
             <button className="btn-sm" onClick={save} disabled={saving}>{saving ? '儲存中…' : '💾 儲存權限'}</button>
             {msg && <span className="ok-msg">{msg}</span>}
@@ -209,11 +216,12 @@ export default function AdminPage() {
                     </td>
                     {bundle.roles.map(r => {
                       const v = cellVal(c.cardId, r.role);
-                      return <td key={r.role} className={`pcell ${CELL[v].cls}`} onClick={() => toggle(c.cardId, r.role)}>{CELL[v].txt}</td>;
+                      const fixed = c.cardId === 'ymis' && !canViewYmisRole(r.role);
+                      return <td key={r.role} className={`pcell ${CELL[v].cls} ${fixed ? 'locked' : ''}`} title={fixed ? 'YMIS 帳戶只限總監級及職員' : undefined} onClick={() => toggle(c.cardId, r.role)}>{CELL[v].txt}</td>;
                     })}
                     <td style={{ whiteSpace: 'nowrap' }}>
                       <button className="mini-btn" onClick={() => setRow(c.cardId, 'view')}>👁</button>{' '}
-                      <button className="mini-btn" onClick={() => setRow(c.cardId, 'edit')}>✏️</button>{' '}
+                      <button className="mini-btn" onClick={() => setRow(c.cardId, 'edit')} disabled={c.cardId === 'ymis'} title={c.cardId === 'ymis' ? 'YMIS 只有查閱權限' : undefined}>✏️</button>{' '}
                       <button className="mini-btn danger" onClick={() => setRow(c.cardId, '')}>✕</button>
                     </td>
                     <td>

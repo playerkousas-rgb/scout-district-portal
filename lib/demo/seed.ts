@@ -61,6 +61,7 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'awards', title: '獎勵提名', icon: '🎖', type: 'builtin', url: '/awards', description: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', order: 3, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'circulars', title: '區通告', icon: '📜', type: 'builtin', url: '/circulars', description: '開班資料自動帶入 · 傳統通告列印 PDF 上載區網', order: 4, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'budget', title: '區年度預算', icon: '📑', type: 'builtin', url: '/budget', description: '直讀區方預算 Sheet · 按月／支部 · 資助合計', order: 5, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'ymis', title: 'YMIS 會員核實', icon: '🪪', type: 'builtin', url: '/ymis', description: '總監級／職員：前往 YMIS 並查看區方核實帳戶', order: 6, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'committee', title: '委任系統', icon: '🗂', type: 'builtin', url: '/committee', description: '委任 · 續任 · R02', order: 7, enabled: true, embed: false, source: 'core', category: 'todo' },
   { cardId: 'unit', title: '旅團管理系統', icon: '🧭', type: 'builtin', url: '/unit', description: '旅名冊 · 人數統計', order: 8, enabled: true, embed: false, source: 'core', category: 'todo' },
   { cardId: 'venueReg', title: '場地借用審批', icon: '🏛', type: 'builtin', url: '/venue-regs', description: '借場申請批核 · 場地清單', order: 9, enabled: true, embed: false, source: 'core', category: 'done' },
@@ -69,7 +70,7 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'incident', title: '意外 / 應變', icon: '🚨', type: 'builtin', url: '/incident', description: '天氣決策 · 即時應變 · 總會指引 · 意外報告', order: 12, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'training', title: '訓練班管理', icon: '🎓', type: 'builtin', url: '/training', description: '開班登記 · 區會目錄', order: 13, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'fps', title: 'FPS QR 製作', icon: '💳', type: 'builtin', url: '/fps', description: '轉數快 QR 碼：綁區會戶口，填銀碼即生成', order: 14, enabled: true, embed: false, source: 'core', category: 'done' },
-  { cardId: 'rooms', title: '地域房間使用情況', icon: '🏢', type: 'builtin', url: '/rooms', description: '17／18／19 樓逐間房睇用途時段 · 今日總覽', order: 15, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'rooms', title: '地域房間及區總部使用情況', icon: '🏢', type: 'builtin', url: '/rooms', description: '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆', order: 15, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'orgchart', title: '地域及總會架構', icon: '🏛', type: 'builtin', url: '/orgchart', description: '港島地域總監架構 · 總會領導層，自動跟官網更新', order: 16, enabled: true, embed: false, source: 'core', category: 'done' },
 ];
 
@@ -88,6 +89,9 @@ export const DEMO_ROLES: Record<string, any>[] = [
 /**
  * 權限矩陣（v4.9.0 語義）：
  * - awards：只有 level ≤ 2（DC／DDC）有 view／edit
+ * - venueReg：只有 DC／DDC／STAFF 見到（實際後台仍須 canVenue）
+ * - rooms：全部登入角色 view（審批權同查閱權分開）
+ * - ymis：只限 DC／DDC／ADC／STAFF view，唔會包含真帳密
  * - visit：DC／DDC／ADC edit，STAFF view
  * - 其餘：DC／DDC edit，ADC／STAFF view
  */
@@ -99,6 +103,9 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
     Object.keys(roleLevel).forEach(role => {
       const lv = roleLevel[role];
       if (c.cardId === 'awards') m[c.cardId][role] = lv <= 2 ? 'edit' : '';
+      else if (c.cardId === 'venueReg') m[c.cardId][role] = lv <= 2 || role === 'STAFF' ? 'edit' : '';
+      else if (c.cardId === 'rooms') m[c.cardId][role] = 'view';
+      else if (c.cardId === 'ymis') m[c.cardId][role] = 'view';
       else if (c.cardId === 'visit') m[c.cardId][role] = lv <= 3 ? 'edit' : 'view';
       else if (c.cardId === 'circulars') m[c.cardId][role] = lv <= 4 ? 'edit' : 'view';
       else m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
@@ -425,25 +432,38 @@ export function demoBudget(): { rows: Record<string, any>[]; summary: Record<str
 /** 房間日曆示範事件：以「今日」為基準生成，保證今日／本月有嘢睇 */
 export function demoRoomEvents(roomIds: string[], fromMs: number, days: number): Record<string, Record<string, any>[]> {
   const map: Record<string, Record<string, any>[]> = {};
-  const day0 = new Date(fromMs); day0.setHours(0, 0, 0, 0);
   const H = 3600000;
+  const day0 = Math.floor((fromMs + 8 * H) / 86400000) * 86400000 - 8 * H;
   roomIds.forEach((rid, ri) => {
     const evs: Record<string, any>[] = [];
     // 今日一個上午活動 + 後日會議＋本月一個全日活動（確定示範有嘢睇）
-    const t9 = day0.getTime() + (9 + (ri % 3)) * H;
+    const t9 = day0 + (9 + (ri % 3)) * H;
     evs.push({ uid: `dm-${rid}-t1`, summary: `（示範）${['旅團領袖會議', '訓練班', '委員會會議', '活動籌備'][ri % 4]}`, start: t9, end: t9 + 3 * H, allDay: false, location: `${rid} 室`, description: '模擬示範版資料' });
-    const t2 = day0.getTime() + (2 + (ri % 5)) * 86400000 + 14 * H;
+    const t2 = day0 + (2 + (ri % 5)) * 86400000 + 14 * H;
     evs.push({ uid: `dm-${rid}-t2`, summary: `（示範）${['支部會議', '獎勵委員會', '急救班', '親子活動'][ri % 4]}`, start: t2, end: t2 + 2 * H, allDay: false, location: `${rid} 室`, description: '' });
-    const t3 = day0.getTime() + (8 + (ri % 10)) * 86400000;
+    const t3 = day0 + (8 + (ri % 10)) * 86400000;
     evs.push({ uid: `dm-${rid}-t3`, summary: '（示範）全日活動 — 區慶祝活動綵排', start: t3, end: t3 + 86400000 - 1, allDay: true, location: `${rid} 室`, description: '' });
     map[rid] = evs;
   });
   return map;
 }
 
+/** 紅色 Teamup 子日曆嘅匿名示範事件；獨立於借場表，包含直接在 Teamup 建立嘅確認時段。 */
+export function demoDistrictHqEvents(fromMs: number, days: number): { uid: string; summary: string; start: number; end: number; allDay: boolean }[] {
+  const DAY = 86400000, H = 3600000;
+  const todayHk = Math.floor((Date.now() + 8 * H) / DAY) * DAY - 8 * H;
+  const events = [
+    { uid: 'demo-teamup-hq-manual-1', summary: '已確認借用', start: todayHk + 10 * H, end: todayHk + 12 * H, allDay: false },
+    { uid: 'demo-teamup-hq-manual-2', summary: '已確認借用', start: todayHk + 2 * DAY + 14 * H, end: todayHk + 2 * DAY + 17 * H, allDay: false },
+    { uid: 'demo-teamup-hq-manual-3', summary: '已確認借用', start: todayHk + 4 * DAY + 22 * H, end: todayHk + 5 * DAY + H, allDay: false },
+  ];
+  return events.filter(e => e.start < fromMs + days * DAY && e.end > fromMs);
+}
+
 // ───────────────────────── 完整示範資料庫 ─────────────────────────
 
 export interface DemoDb {
+  schemaVersion?: number;
   config: Record<string, any>;
   system: { locked: boolean; lockMessage: string };
   cards: Record<string, any>[];
@@ -472,6 +492,7 @@ export interface DemoDb {
 
 export function freshDemoDb(): DemoDb {
   return {
+    schemaVersion: 2,
     config: {
       districtName: '筲箕灣區（示範）',
       theme: '',
