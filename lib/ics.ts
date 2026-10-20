@@ -166,10 +166,30 @@ function expandRrule(ev: RawEvent, windowStart: number, windowEnd: number, skip:
       }
     }
   } else if (freq === 'MONTHLY') {
+    // Teamup 確認借用日曆有「每月第 1 個星期五」等 RRULE:BYDAY=1FR。
+    // 必須按該月星期幾重新計日期，不能沿用 DTSTART 的日號（亦不能將整個 feed 判為空置）。
+    const nthDays = rule.BYDAY?.split(',').map(s => {
+      const m = /^([+-]?[1-5])(SU|MO|TU|WE|TH|FR|SA)$/.exec(s);
+      return m ? { ordinal: Number(m[1]), dow: DAY_CODES.indexOf(m[2]) } : null;
+    });
     for (let i = 0; i < 600; i += interval) {
-      const t = hkDate(base.y, base.m + i, base.d, base.msOfDay);
-      if (hkParts(t).d !== base.d) continue; // 該月無此日（例如 31 號）
-      if (!consider(t)) break;
+      const month = new Date(Date.UTC(base.y, base.m + i, 1));
+      const y = month.getUTCFullYear(), m = month.getUTCMonth();
+      const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+      const dates = nthDays?.length ? nthDays.map(item => {
+        if (!item) return NaN;
+        if (item.ordinal > 0) {
+          const firstDow = new Date(Date.UTC(y, m, 1)).getUTCDay();
+          return 1 + (item.dow - firstDow + 7) % 7 + (item.ordinal - 1) * 7;
+        }
+        const lastDow = new Date(Date.UTC(y, m, lastDay)).getUTCDay();
+        return lastDay - (lastDow - item.dow + 7) % 7 + (item.ordinal + 1) * 7;
+      }).filter(d => Number.isInteger(d) && d >= 1 && d <= lastDay).sort((a, b) => a - b)
+        : [base.d <= lastDay ? base.d : NaN];
+      for (const d of dates) {
+        if (Number.isNaN(d)) continue;
+        if (!consider(hkDate(y, m, d, base.msOfDay))) return starts;
+      }
     }
   } else if (freq === 'YEARLY') {
     for (let i = 0; i < 60; i += interval) if (!consider(hkDate(base.y + i, base.m, base.d, base.msOfDay))) break;

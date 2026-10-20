@@ -1,72 +1,30 @@
 import { createHash } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { DISTRICTS } from '@/lib/district';
+import { publicTeamupLink } from '@/lib/teamupPublicSource.server';
 import { hkDayStart, hkStartOfDay, hkYmd } from '@/lib/ics';
-import { approvedTeamupSlots, memberTeamupLinkFromSource, teamupFeedUrl, teamupPublicKey, withinTeamupIcsWindow } from '@/lib/teamupHqIcs';
+import { approvedTeamupSlots, SKW_APPROVED_SUBCAL_ID, teamupFeedUrl, teamupPublicKey, withinTeamupIcsWindow } from '@/lib/teamupHqIcs';
 
 /**
  * SKW 區總部只讀日曆：Vercel 抓 Teamup 公開 ICS，絕不使用舊 GS 4.18 沒有的 action。
  * 優先使用共用 GS getPublicInfo.TEAMUP_BOOKING_URL；留空時從成員系統公開程式按需取得其後備連結。
- * 可選 TEAMUP_APPROVED_SUB_ID = Config.TEAMUP_APPROVED_SUBCAL_ID（指定紅色 feed，空 feed 也可確認來源）。
+ * 紅色子日曆 ID 經用戶核對，沿用既有 Config 編號；可選 TEAMUP_APPROVED_SUB_ID 僅在日後改 ID 時覆蓋。
  * 如公開後備來源失效而 Config 沒網址，另可選 TEAMUP_PUBLIC_BOOKING_URL = 成員系統公開 Teamup 連結。
- * 未設時僅從公開 combined ICS 選「確認借用區總部」類別，未能驗證類別則顯示不可用。
+ * 即使只讀紅色 feed，仍核對「確認借用區總部」類別／日曆名稱，讀錯來源不能當空置。
  * 即使 Teamup 上游含電話／密碼，回應亦僅輸出匿名時段，並不快取原始 ICS。
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30; // 公開設定 + 成員系統後備網址 + Teamup ICS 最多三個唯讀上游
 
-// 公開後備連結只從成員系統公開原始碼按需取得，唔好複製 ks 分享金鑰入本 repo。
-const MEMBER_PUBLIC_LINK_SOURCE = 'https://api.github.com/repos/playerkousas-rgb/member-portal/contents/components/TeamupCalendar.tsx?ref=main';
 const MAX_ICS_BYTES = 8_000_000;
 const TTL_MS = 3 * 60_000;
 const NO_STORE = { headers: { 'Cache-Control': 'private, no-store, max-age=0' } };
 
 type Result = { configured: true; events: ReturnType<typeof approvedTeamupSlots>; fetchedAt: string };
 const memo = new Map<string, { at: number; data: Result }>();
-let publicKeyMemo: { at: number; key: string; ttl: number } | null = null;
 
 function bad(error: string, status = 502) {
   return NextResponse.json({ ok: false, error }, { status, ...NO_STORE });
-}
-
-/** 成員系統已有公佈後備網址；只取該固定公開檔案，無需新增環境變數或複製 ks 金鑰到此倉庫。 */
-async function memberPublicTeamupLink(): Promise<string> {
-  const response = await fetch(MEMBER_PUBLIC_LINK_SOURCE, {
-    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'scout-district-portal' },
-    next: { revalidate: 600 }, // 只快取公開原始碼，減少 GitHub API 呼叫；Teamup ICS 絕不快取原文。
-    redirect: 'error', signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error('成員系統公開 Teamup 連結暫時無法讀取');
-  const body = await response.json() as { content?: string; encoding?: string; size?: number };
-  if (body.encoding !== 'base64' || !body.content || (body.size || 0) > 50_000) {
-    throw new Error('成員系統公開 Teamup 連結格式不正確');
-  }
-  const source = Buffer.from(body.content, 'base64').toString('utf8');
-  const link = memberTeamupLinkFromSource(source);
-  if (!link) throw new Error('成員系統未提供公開 Teamup 後備連結');
-  return link;
-}
-
-async function publicTeamupKey(): Promise<string> {
-  if (publicKeyMemo && Date.now() - publicKeyMemo.at < publicKeyMemo.ttl) return publicKeyMemo.key;
-  const apiKey = process.env.PORTAL_SKW_APIKEY;
-  if (!apiKey) throw new Error('區系統 Vercel 原有 PORTAL_SKW_APIKEY 未設定');
-  const url = new URL(DISTRICTS.SKW.apiBase);
-  url.searchParams.set('action', 'getPublicInfo');
-  url.searchParams.set('apiKey', apiKey);
-  // 此處的 Apps Script URL 是倉庫固定值，不由瀏覽器參數指定。
-  const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(12_000) });
-  if (!response.ok) throw new Error('區系統公開設定暫時無法讀取');
-  const body = await response.json() as { ok?: boolean; data?: { teamupBookingUrl?: string } };
-  if (!body.ok || !body.data) throw new Error('區系統公開設定暫時無法讀取');
-  const configuredLink = String(body.data.teamupBookingUrl || '').trim();
-  const envLink = String(process.env.TEAMUP_PUBLIC_BOOKING_URL || '').trim();
-  const link = configuredLink || envLink || await memberPublicTeamupLink();
-  const key = teamupPublicKey(link);
-  if (!key) throw new Error('公開 Teamup 分享連結格式不正確；請核對區系統 TEAMUP_BOOKING_URL／Vercel TEAMUP_PUBLIC_BOOKING_URL');
-  publicKeyMemo = { at: Date.now(), key, ttl: configuredLink ? 2 * 60_000 : 10 * 60_000 };
-  return key;
 }
 
 async function fetchIcs(url: string): Promise<string> {
@@ -110,9 +68,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const key = await publicTeamupKey();
-    const approvedSubId = String(process.env.TEAMUP_APPROVED_SUB_ID || '').trim();
-    // 指定 ID 時才會讀取該子日曆；無 ID 時讀已公開的 combined feed，嚴格按類別過濾。
+    const key = teamupPublicKey(await publicTeamupLink())!;
+    const approvedSubId = String(process.env.TEAMUP_APPROVED_SUB_ID || SKW_APPROVED_SUBCAL_ID).trim();
+    // 直接讀已核對的紅色子日曆；毋須新增 Vercel env，亦不會取藍色「申請中」。
     const icsUrl = teamupFeedUrl(key, approvedSubId || undefined);
     const cacheKey = `${createHash('sha256').update(key).digest('hex')}:${approvedSubId}:${fromText}:${days}`;
     const hit = memo.get(cacheKey);

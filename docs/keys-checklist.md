@@ -1,6 +1,6 @@
 # 🔑 借場一條龍 — API Key 找回 + 驗證 Checklist（統一後台 v4.0）
 
-> **版本提示（2026-10）**：現時正式共用後台係已恢復登入的 **4.18.0**。本頁 Script Properties／貼上新版 GS 等步驟**只適用於日後另行決定升級 4.19.1**，唔係維持 4.18.0 或開啟房間卡的必要條件。今次 Teamup 公開 ICS 只改 Vercel，可選 `TEAMUP_APPROVED_SUB_ID` = 現有 Config 的 `TEAMUP_APPROVED_SUBCAL_ID`，詳見[房間使用情況](venue-booking-flow.md)。**唔好照本頁先升級 GS 而斷登入。**
+> **版本提示（2026-10）**：現時正式共用後台係已恢復登入的 **4.18.0**。本頁 Script Properties／貼上新版 GS 等步驟**只適用於日後另行決定升級 4.19.1**，唔係維持 4.18.0 或開啟房間卡的必要條件。今次房間查閱只改 Vercel，已按現有 Config 的紅色子日曆 ID 設定預設值，**毋須新增環境變數／Teamup API Token**；`TEAMUP_APPROVED_SUB_ID` 僅於 ID 日後變更時選用，詳見[房間使用情況](venue-booking-flow.md)。**唔好照本頁先升級 GS 而斷登入。**
 >
 > 你唔記得啲 Key 邊度嚟，好正常 — 安全嘅 Key 應該存喺 **Vercel**（booking 專案）嘅環境變數或區後台受保護 Config；
 > 唔好寫入 Git。以下教你核對設定；舊版 Teamup Token 曾被寫入 repo，請先輪換。

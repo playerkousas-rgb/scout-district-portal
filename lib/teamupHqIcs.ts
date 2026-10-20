@@ -3,6 +3,8 @@ import { hkStartOfDay, parseIcsEvents, parseIcsDate, unfoldIcs, type IcsEvent } 
 /** Teamup 的公開分享連結只提供用戶身份；不可當成 JSON API 的 Teamup-Token。 */
 export const HQ_APPROVED_CATEGORY = '確認借用區總部';
 export const HQ_ICS_HOST = 'ics.teamup.com';
+/** SKW 現有 Config 的公開子日曆編號（用戶核對 2026-10-20）；不是 API Token 或分享連結。 */
+export const SKW_APPROVED_SUBCAL_ID = '11188257';
 
 /** 從成員系統固定公開元件的備用常量讀連結，不抄寫 ks 分享金鑰進本倉庫。 */
 export function memberTeamupLinkFromSource(source: string): string | null {
@@ -80,20 +82,24 @@ function blocksFromIcs(text: string): EventBlock[] {
 /**
  * 4.18.0 無讀取 Teamup 的後台 action。Vercel 可以用成員系統已公開的分享連結，
  * 優先讀指定紅色子日曆的 ICS；未提供 ID 時讀公開 combined feed，只選 CATEGORIES 精確吻合紅色的事件。
- * 當 combined feed 內連一個紅色類別都沒有，無法證明紅色日曆有包含在公開連結，必須報錯，不能當空置。
+ * 如 feed 無紅色事件，指定 ID 時仍要由 Teamup 日曆名稱確認係紅色子日曆；否則報錯，不能當空置。
  * 回傳只含匿名時間，絕不傳出事件標題、聯絡人、備註或原始 UID。
  */
 export function approvedTeamupSlots(text: string, from: number, days: number, approvedSubId?: string): IcsEvent[] {
   if (!Number.isFinite(from) || !Number.isInteger(days) || days < 1 || days > 60) throw new Error('日曆查詢範圍不正確');
   const blocks = blocksFromIcs(text);
-  if (!approvedSubId && !blocks.some(b => b.approved)) {
-    throw new Error('公開日曆未能確認紅色「確認借用區總部」子日曆；如有需要，將原有 Config TEAMUP_APPROVED_SUBCAL_ID 複製到 Vercel TEAMUP_APPROVED_SUB_ID');
+  // 指定 ID 時核對 Teamup ICS 子日曆名稱；有事件時亦要有紅色類別，防止用錯藍色 ID 而報「未見借用」。
+  const namedRed = unfoldIcs(text).some(line => /^X-WR-CALNAME:/i.test(line) &&
+    line.slice(line.indexOf(':') + 1).replace(/\\\|/g, '|').split('|').at(-1)?.trim() === HQ_APPROVED_CATEGORY);
+  if ((approvedSubId && (!namedRed || (blocks.length > 0 && !blocks.some(b => b.approved)))) ||
+      (!approvedSubId && !blocks.some(b => b.approved))) {
+    throw new Error('公開日曆未能確認紅色「確認借用區總部」子日曆；請核對現有子日曆 ID');
   }
   const redRecurringUids = new Set(blocks.filter(b => b.approved && !b.override).map(b => b.uid));
   const chosen: string[] = [];
   for (const b of blocks) {
     const inheritedRed = b.override && !b.hasCategories && redRecurringUids.has(b.uid);
-    if (!approvedSubId && !b.approved && !inheritedRed) {
+    if (!b.approved && !inheritedRed) {
       // 某次重複事件明確轉往其他子日曆：須排除該次，否則主事件仍會展開成「已確認」。
       if (b.override && redRecurringUids.has(b.uid)) {
         const rec = b.lines.find(x => /^RECURRENCE-ID(?:;[^:]*)?:/i.test(x));
@@ -124,7 +130,9 @@ export function approvedTeamupSlots(text: string, from: number, days: number, ap
         const names = r.split(';').map(p => p.split('=')[0]);
         if (!freq || !['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'].includes(freq) ||
             names.some(n => !['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'BYDAY', 'WKST'].includes(n)) ||
-            ((freq === 'DAILY' || freq === 'MONTHLY' || freq === 'YEARLY') && names.includes('BYDAY')) ||
+            ((freq === 'DAILY' || freq === 'YEARLY') && names.includes('BYDAY')) ||
+            (freq === 'MONTHLY' && names.includes('BYDAY') &&
+              !/(?:^|;)BYDAY=[+-]?[1-5](?:SU|MO|TU|WE|TH|FR|SA)(?:,[+-]?[1-5](?:SU|MO|TU|WE|TH|FR|SA))*(?:;|$)/.test(r)) ||
             (freq === 'WEEKLY' && /(?:^|;)BYDAY=[^;]*\d/i.test(r))) {
           throw new Error('Teamup iCalendar 有未支援的重複時段規則');
         }

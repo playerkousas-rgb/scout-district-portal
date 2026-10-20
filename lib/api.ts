@@ -378,6 +378,18 @@ export const api = {
   /** 地域房間日曆（公開 ICS）；room 留空 = 全部 */
   extRooms: (room = '', from = '', days = 14): Promise<ApiResult<ExternalMeta & { from: number; to: number; days: number; rooms: RoomEvents[] }>> =>
     callExternal('rooms', { room, from, days: String(days) }),
+  /** 成員系統同一公開 Teamup 連結；只供房間頁 iframe 使用，從未傳 Teamup 私人 API Token。 */
+  extTeamupCalendarLink: async (): Promise<ApiResult<{ url: string }>> => {
+    if (isDemoMode()) return { ok: false, error: '示範模式不嵌入正式 Teamup 日曆' };
+    try {
+      const url = new URL('/api/rooms/teamup', window.location.origin);
+      url.searchParams.set('districtCode', getDistrictCode());
+      const res = await fetch(url.toString(), { cache: 'no-store' });
+      return await res.json();
+    } catch {
+      return { ok: false, error: '成員系統公開 Teamup 日曆連線失敗' };
+    }
+  },
   /** 區總部已確認借用：Vercel 只讀公開 Teamup ICS、只回傳匿名時段；不經 4.18.0 區後台新 action。 */
   extDistrictHqBookings: async (token: string, from: string, days: number): Promise<ApiResult<DistrictHqBookings>> => {
     if (isDemoMode()) return demoCall('getDistrictHqBookings', { token, from, days }, 'POST') as ApiResult<DistrictHqBookings>;
