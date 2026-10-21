@@ -36,10 +36,11 @@ async function callGet<T = any>(action: string, params: Record<string, string> =
   try {
     const res = await fetch(url.toString(), { cache: 'no-store' });
     const data = await res.json();
+    if (!res.ok && data && data.error) return { ok: false, error: data.error };
     return data;
-  } catch (error) {
+  } catch (error: any) {
     console.error('GET Error:', error);
-    return { ok: false, error: '連線失敗：請確認該區後台已部署且 API Key 已設定。' };
+    return { ok: false, error: '連線失敗：' + (error?.message || '請確認該區後台已部署且 API Key 已設定。') };
   }
 }
 
@@ -73,10 +74,11 @@ async function callPost<T = any>(action: string, body: Record<string, unknown> =
       cache: 'no-store',
     });
     const data = await res.json();
+    if (!res.ok && data && data.error) return { ok: false, error: data.error };
     return data;
-  } catch (error) {
+  } catch (error: any) {
     console.error('POST Error:', error);
-    return { ok: false, error: '連線失敗：請確認該區後台已部署且 API Key 已設定。' };
+    return { ok: false, error: '連線失敗：' + (error?.message || '請確認該區後台已部署且 API Key 已設定。') };
   }
 }
 

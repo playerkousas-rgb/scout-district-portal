@@ -81,11 +81,15 @@ export async function GET(request: NextRequest) {
     const res = await fetch(url.toString(), { cache: 'no-store' });
     const text = await res.text();
     if (/<!doctype html|<html/i.test(text)) {
-      return NextResponse.json({ ok: false, error: 'Apps Script not public (Deploy → Anyone)' }, { status: 502 });
+      return NextResponse.json({ ok: false, error: 'Apps Script not public (Deploy → Anyone): ' + text.slice(0, 100) }, { status: 502 });
     }
-    return NextResponse.json(JSON.parse(text));
+    try {
+      return NextResponse.json(JSON.parse(text));
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: 'Apps Script returned non-JSON: ' + text.slice(0, 200) }, { status: 502 });
+    }
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err.message || 'Proxy fetch failed' }, { status: 502 });
+    return NextResponse.json({ ok: false, error: 'Proxy POST error: ' + (err.message || String(err)) }, { status: 502 });
   }
 }
 
@@ -124,13 +128,19 @@ export async function POST(request: NextRequest) {
     });
     const text = await res.text();
     if (/<!doctype html|<html/i.test(text)) {
-      return NextResponse.json({ ok: false, error: 'Apps Script not public (Deploy → Anyone)' }, { status: 502 });
+      return NextResponse.json({ ok: false, error: 'Apps Script not public (Deploy → Anyone): ' + text.slice(0, 100) }, { status: 502 });
     }
-    const response = NextResponse.json(JSON.parse(text));
+    let parsedJson;
+    try {
+      parsedJson = JSON.parse(text);
+    } catch (e) {
+      return NextResponse.json({ ok: false, error: 'Apps Script returned non-JSON: ' + text.slice(0, 200) }, { status: 502 });
+    }
+    const response = NextResponse.json(parsedJson);
     // YMIS 帳密只畀獲授權職員按掣查閱，絕不可喺 CDN／瀏覽器快取。
     if (action === 'getYmisCredentials') response.headers.set('Cache-Control', 'private, no-store, max-age=0');
     return response;
   } catch (err: any) {
-    return NextResponse.json({ ok: false, error: err.message || 'Proxy fetch failed' }, { status: 502 });
+    return NextResponse.json({ ok: false, error: 'Proxy POST error: ' + (err.message || String(err)) }, { status: 502 });
   }
 }
