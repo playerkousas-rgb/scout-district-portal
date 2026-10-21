@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
+import { canManageBudget } from '@/lib/accountRoles';
 import BackLink, { BackBar } from '@/components/BackLink';
 import { SOURCES } from '@/lib/externalSources';
 import {
@@ -100,6 +101,11 @@ export default function BudgetPage() {
   const [q, setQ] = useState('');
   const [onlyActive, setOnlyActive] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
+  const [editingUrl, setEditingUrl] = useState(false);
+  const [inputUrl, setInputUrl] = useState('');
+  const [savingUrl, setSavingUrl] = useState(false);
+  const [urlMessage, setUrlMessage] = useState('');
+  const canEditUrl = canManageBudget(session);
 
   useEffect(() => {
     if (!session) return;
@@ -152,6 +158,26 @@ export default function BudgetPage() {
   }, [rows]);
 
   const sheetTotal = summary.find(s => /總計/.test(s.label))?.amount;
+  const handleSaveUrl = async () => {
+    if (!session) return;
+    setSavingUrl(true);
+    setUrlMessage('');
+    try {
+      const res = await api.setBudgetSheetUrl(session.token, inputUrl.trim());
+      if (res.ok) {
+        setUrlMessage('✅ 預算表網址已更新並儲存至後端！');
+        setEditingUrl(false);
+        setReloadKey(k => k + 1);
+      } else {
+        setUrlMessage('❌ 更新失敗：' + (res.error || '未知錯誤'));
+      }
+    } catch (e: any) {
+      setUrlMessage('❌ 發生錯誤：' + (e?.message || String(e)));
+    } finally {
+      setSavingUrl(false);
+    }
+  };
+
 
   if (!session) return <div className="center"><div className="spinner" /></div>;
 
@@ -166,6 +192,18 @@ export default function BudgetPage() {
       <div className="bud-toolbar">
         <a className="mini-btn" href={sheetUrl} target="_blank" rel="noopener">📗 開啟 Google Sheet ↗</a>
         <button className="mini-btn ghost" onClick={() => setReloadKey(k => k + 1)} disabled={loading}>🔄 重新讀取</button>
+        {canEditUrl && (
+          <button
+            className="mini-btn ghost"
+            onClick={() => {
+              setInputUrl(sheetUrl);
+              setEditingUrl(v => !v);
+              setUrlMessage('');
+            }}
+          >
+            ⚙️ {editingUrl ? '關閉設定' : '修改預算表網址／年度'}
+          </button>
+        )}
         <span className="muted" style={{ fontSize: 12 }}>
           {fetchedAt ? `同步時間 ${new Date(fetchedAt).toLocaleString('zh-HK', { hour12: false })}` : ''}
           {stale ? ` · ⚠️ 顯示上次成功結果（${stale}）` : ''}

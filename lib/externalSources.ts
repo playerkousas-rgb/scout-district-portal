@@ -14,8 +14,8 @@ export const SOURCES = {
   hksaEc: 'https://www.scout.org.hk/tc/scouting/ahq-executive-committee.html',
   hksaHq: 'https://www.scout.org.hk/tc/scout-units/association-headquarters/index.html',
   roomsSite: 'https://sites.google.com/hkirscout.org.hk/hkir-rooms',
-  /** 預設：筲箕灣區 2025-26 Year Plan（Config BUDGET_SHEET_URL 可覆蓋） */
-  budgetSheet: 'https://docs.google.com/spreadsheets/d/1dvrBDIcmk1zXHXb02qPFrDv46UvPDmfd/edit?gid=308655146',
+  /** 預設：筲箕灣區 2026-27 Year Plan（Config BUDGET_SHEET_URL 可覆蓋） */
+  budgetSheet: 'https://docs.google.com/spreadsheets/d/1dvrBDIcmk1zXHXb02qPFrDv46UvPDmfd/edit?gid=1857030773',
 };
 
 /** 總會 11 個署（scout.org.hk 總部頁 ?id=） */

@@ -195,6 +195,11 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const r = requireUser(token, 1); if (isErr(r)) return r;
       return ok({ cards: d.cards.slice().sort((a, b) => a.order - b.order), roles: d.roles, matrix: d.matrix });
     }
+    case 'setBudgetSheetUrl': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      d.config.budgetSheetUrl = String(payload.budgetSheetUrl || '').trim();
+      return ok({ saved: true, budgetSheetUrl: d.config.budgetSheetUrl });
+    }
     case 'savePerms': {
       const r = requireUser(token, 1); if (isErr(r)) return r;
       const inMatrix = (payload.matrix || {}) as AnyObj;
