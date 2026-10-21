@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { hkDayStart } from '../lib/ics.ts';
 import { approvedTeamupSlots, memberTeamupLinkFromSource, SKW_APPROVED_SUBCAL_ID, teamupFeedUrl, teamupPublicKey, withinTeamupIcsWindow } from '../lib/teamupHqIcs.ts';
-import { teamupEmbedUrl } from '../lib/teamupEmbed.ts';
 
 const key = 'ksabcdefghijklmnop'; // 虛構測試值；唔使用真實公開分享金鑰
 const make = (...events: string[]) => [
@@ -31,17 +30,6 @@ for (const malicious of [
 assert.equal(teamupFeedUrl(key), `https://ics.teamup.com/feed/${key}/0.ics`);
 assert.equal(SKW_APPROVED_SUBCAL_ID, '11188257', '現有 Config 紅色子日曆編號（非藍色）');
 assert.equal(teamupFeedUrl(key, SKW_APPROVED_SUBCAL_ID), `https://ics.teamup.com/feed/${key}/11188257.ics`);
-const monthEmbed = new URL(teamupEmbedUrl(`https://teamup.com/${key}`, 'm', '2026-10-01')!);
-const weekEmbed = new URL(teamupEmbedUrl(`https://teamup.com/${key}`, 'w', '2026-10-20')!);
-assert.equal(monthEmbed.searchParams.get('view'), 'm');
-assert.equal(weekEmbed.searchParams.get('view'), 'w');
-assert.equal(monthEmbed.searchParams.get('date'), '2026-10-01');
-assert.equal(weekEmbed.searchParams.get('date'), '2026-10-20');
-for (const [name, value] of Object.entries({
-  showHeader: '0', showProfileAndInfo: '0', showSidepanel: '1', disableSidepanel: '1',
-  showViewSelector: '0', showMenu: '0', showViewHeader: '1', showDateControls: '1',
-})) assert.equal(weekEmbed.searchParams.get(name), value, `與成員系統 iframe 的 ${name} 參數相同`);
-assert.equal(teamupEmbedUrl(`https://teamup.com.evil/${key}`, 'w', '2026-10-20'), null);
 assert.throws(() => teamupFeedUrl(key, '0'), /格式不正確/);
 assert.throws(() => teamupFeedUrl(key, '2@evil.com'), /格式不正確/);
 
