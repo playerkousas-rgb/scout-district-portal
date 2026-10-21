@@ -78,3 +78,13 @@ export function accountsToJson(rows: AccountRow[] = ACCOUNT_TEMPLATE_ROWS): stri
     cards: r.cards || '',
   })), null, 2) + '\n';
 }
+
+/** DC、SYSADMIN 或 DDC（副總監）：可修改預算表網址指向 */
+export function canManageBudget(s: UserSession | null | undefined): boolean {
+  if (!s) return false;
+  if (s.isDC || s.isAdmin) return true;
+  const r = String(s.role || '').trim().toUpperCase();
+  if (r === 'DC' || r === 'SYSADMIN' || r === 'DDC_ADMIN' || r === 'DDC_TRAINING') return true;
+  if (s.level !== undefined && s.level !== null && s.level <= 2) return true;
+  return false;
+}

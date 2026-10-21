@@ -375,6 +375,8 @@ export const api = {
   /** 區年度預算（Google Sheet gviz CSV） */
   extBudget: (sheetUrl = ''): Promise<ApiResult<ExternalMeta & { rows: BudgetRow[]; summary: BudgetSummary[]; sheetUrl: string }>> =>
     callExternal('budget', { sheet: sheetUrl }),
+  setBudgetSheetUrl: (token: string, budgetSheetUrl: string): Promise<ApiResult<{ saved: boolean; budgetSheetUrl: string }>> =>
+    callPost('setBudgetSheetUrl', { token, budgetSheetUrl }),
   /** 地域房間日曆（公開 ICS）；room 留空 = 全部 */
   extRooms: (room = '', from = '', days = 14): Promise<ApiResult<ExternalMeta & { from: number; to: number; days: number; rooms: RoomEvents[] }>> =>
     callExternal('rooms', { room, from, days: String(days) }),

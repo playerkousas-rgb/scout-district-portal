@@ -469,6 +469,7 @@ function doPost(e) {
       case 'saveCircular':         return json(saveCircular_(b.token, b.circular || {}));
       case 'deleteCircular':       return json(deleteCircular_(b.token, b.id));
       case 'getYmisCredentials':  return json(getYmisCredentials_(b.token));
+      case 'setBudgetSheetUrl':   return json(setBudgetSheetUrl_(b.token, b.budgetSheetUrl));
       case 'setCircularStatus':    return json(setCircularStatus_(b.token, b.id, b.status));
 
       // ---------- 角色／權限／帳戶（管理系統） ----------
@@ -6206,4 +6207,16 @@ function getYmisCredentials_(token) {
   var password = String(props.getProperty('YMIS_VERIFY_PASSWORD') || '');
   if (!username || !password) return ok({ configured: false });
   return ok({ configured: true, username: username, password: password });
+}
+
+// ===================== 區年度預算網址設定 =====================
+function setBudgetSheetUrl_(token, budgetSheetUrl) {
+  var t = checkToken_(token);
+  if (!t.valid) return err('請先登入系統');
+  // DC / SYSADMIN / DDC / level <= 2 可修改
+  var isAllowed = isAdminRole_(t.role) || String(t.role).indexOf('DDC') >= 0 || levelOfUser_(t.email, t.role) <= LEVEL_DDC;
+  if (!isAllowed) return err('只有區總監或副區總監可以修改預算表網址');
+  budgetSheetUrl = String(budgetSheetUrl || '').trim();
+  setConfigValue_('BUDGET_SHEET_URL', budgetSheetUrl);
+  return ok({ saved: true, budgetSheetUrl: budgetSheetUrl });
 }
