@@ -195,7 +195,7 @@
 主控台 `rooms` 卡片及頁面已改名；**所有已登入區系統人士均可查閱**，即使個別帳戶 `cards` 欄有限制。借場**審批係另一張 `venueReg` 卡**：只顯示畀真係有 `canVenue` 權限嘅人（預設 DC／SYSADMIN／DDC_ADMIN／DDC_TRAINING／STAFF），睇日曆唔等於有審批權。示範模式嘅 mockAdmin 為全權功能示範身份，唔代表 ADC 正式權限。月曆／逐個地點／今日總覽同時顯示：
 
 - **地域房間**：17／18／19 樓公開 Google Calendar ICS，沿用原本逐間房／打通房計算及 3 分鐘快取。
-- **區總部**：月曆及「逐個地點」直接嵌入**成員系統同一公開 Teamup 日曆**（地域房間照舊顯示）；原有月曆格仔、逐日時段及今日總覽保留。今日「有冇已 BOOK」由 Vercel 唯讀紅色「確認借用區總部」iCalendar 子日曆判斷，包括手動加入的確認事件，**不計藍色申請中**，亦唔靠借場表批准狀態。JSON 僅含匿名時段，唔回傳人名、備註、入場密碼或原始 Teamup ID；來源讀不到會顯示警告，**唔代表區總部空置**。
+- **區總部**：只保留同地域房間並列的**原有月曆格仔、逐個地點的逐日時段及今日總覽**，不另開 Teamup 月曆窗。今日「有冇已 BOOK」由 Vercel 唯讀紅色「確認借用區總部」iCalendar 子日曆判斷，包括手動加入的確認事件，**不計藍色申請中**，亦唔靠借場表批准狀態。JSON 僅含匿名時段，唔回傳人名、備註、入場密碼或原始 Teamup ID；來源讀不到會顯示警告，**唔代表區總部空置**。
 
 **正式啟用（維持可登入的 GS v4.18.0）**：只部署此 Next.js/Vercel 改動；**唔使**更新 Apps Script、執行 `setupSheets()`、改 Sheet 或任何登入密碼。原有 `PORTAL_SKW_APIKEY` 照舊，網址優先讀共用 Config `TEAMUP_BOOKING_URL`（透過 `getPublicInfo.teamupBookingUrl`），留空先沿用成員系統公開後備網址；本倉唔硬編碼公開分享連結。已按用戶提供的現有 Config 數字確認**紅色 11188257**、藍色 11188256，直接讀紅色 feed；預設**唔使加 Vercel env**。日後 ID 變更才可選用 `TEAMUP_APPROVED_SUB_ID` 覆蓋，但會驗證來源屬紅色日曆。**不用 Teamup API Token**。不要將本倉 v4.19.1 GS 覆蓋正式 4.18.0（未設 `PORTAL_TOKEN_SECRET` 會阻擋登入）。詳細對照見 [`docs/venue-booking-flow.md`](docs/venue-booking-flow.md)。
 

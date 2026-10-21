@@ -530,11 +530,6 @@ a{color:inherit;text-decoration:none;}
 .room-ev-body .room-via{color:#6d28d9;font-weight:700;}
 .room-embed{height:auto;}
 .room-embed .embed-frame{min-height:620px;border:1px solid var(--line);border-radius:14px;background:#fff;}
-.room-section-title{font-size:16px;color:var(--p);margin:16px 0 10px;}
-.teamup-panel .section-head{align-items:center;gap:12px;}
-.teamup-panel .section-head p{color:var(--muted);font-size:12px;margin:4px 0 10px;}
-.teamup-frame{display:block;width:100%;height:680px;border:1px solid var(--line);border-radius:10px;background:#fff;}
-@media(max-width:640px){.teamup-frame{height:560px;}.teamup-panel .section-head{flex-wrap:wrap;}}
 .room-ov-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;}
 .room-ov{background:#fff;border:2px solid var(--line);border-radius:12px;padding:10px 12px;text-align:left;cursor:pointer;font:inherit;display:flex;flex-direction:column;gap:4px;}
 .room-ov.busy{border-color:#fca5a5;background:#fff5f5;}
