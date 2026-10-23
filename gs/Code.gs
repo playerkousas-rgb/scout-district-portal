@@ -171,6 +171,7 @@ var SHEET = {
   COURSE_PARAMS: 'CourseParams', // 下拉參數（支部／地域／區會／徽章）
   ALL_RECORDS: 'AllRecords',     // 綜合記錄流水帳
   CIRCULARS: 'Circulars',        // 區通告（職員專用；輸出係傳統格式 PDF）
+  DEBIT_NOTES: 'DebitNotes',     // DEBIT NOTE 帳簿（文件、FPS QR 快照及審計欄）
 };
 
 // ===================== 安全設定（★ 部署前必改）=====================
@@ -181,6 +182,13 @@ var TOKEN_TTL_HOURS = 12;
 var DC_ROLE = 'DC';
 var SYSADMIN_ROLE = 'SYSADMIN';
 function isAdminRole_(role) { return role === DC_ROLE || role === SYSADMIN_ROLE; }
+
+// DEBIT NOTE 屬區會財務文件：硬性只限 DC、行政 DDC 及區職員。
+// 即使超管或管理員誤改 Perms，都不會擴大此卡的可用角色範圍。
+var DEBIT_NOTE_ROLES = ['DC', 'DDC_ADMIN', 'STAFF'];
+function canGenerateDebitNoteRole_(role) {
+  return DEBIT_NOTE_ROLES.indexOf(String(role || '').trim().toUpperCase()) >= 0;
+}
 
 // ── 帳戶層級（v4.4.0）─────────────────────────────────────
 // 0 超管（隱藏、最高）／1 區總監／2 副區總監／3 助理區總監／4 區職員／5 區長、區領袖、助理區領袖及自訂角色
@@ -305,7 +313,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.18.0',
+      version: '4.22.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -340,6 +348,7 @@ function doGet(e) {
       // ---------- 管理系統（角色制） ----------
       case 'verify':              return json(verify_(p.token));
       case 'getCards':            return json(getCards_(p.token));
+      case 'listDebitNotes':      return json(listDebitNotes_(p.token));
       case 'getPerms':            return json(getPerms_(p.token));
       case 'getUsers':            return json(getUsers_(p.token));
       case 'getDelegation':       return json(getDelegation_(p.token));
@@ -431,6 +440,8 @@ function doPost(e) {
       // ---------- 旅團探訪（v4.8.1） ----------
       case 'saveVisit':           return json(saveVisit_(b.token, b.visit || b));
       case 'deleteVisit':         return json(deleteVisit_(b.token, b.id));
+      case 'saveDebitNote':       return json(saveDebitNote_(b.token, b.note || b.debitNote || {}));
+      case 'importDebitNotes':    return json(importDebitNotes_(b.token, b.rows));
       case 'saveUnits':           return json(saveUnits_(b.token, b.units));
       case 'saveAnnouncement':      return json(saveAnnouncement_(b.token, b.announcement || b.news || b));
       case 'deleteAnnouncement':    return json(deleteAnnouncement_(b.token, b.id));
@@ -975,10 +986,282 @@ function requirePerm_(token, perm) {
 function requireCardEdit_(token, cardId) {
   var t = checkToken_(token);
   if (!t.valid) return { error: '登入已過期' };
+  if (String(cardId).trim() === 'debitNote') {
+    var debitUser = readSheet_(SHEET.USERS).filter(function (x) {
+      return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
+    })[0];
+    if (!debitUser || String(debitUser.active).toUpperCase() === 'FALSE' || !canGenerateDebitNoteRole_(debitUser.role)) {
+      return { error: 'DEBIT NOTE 只限 DC、DDC_ADMIN 及區職員使用' };
+    }
+  }
   if (levelOfUser_(t.email, t.role) === LEVEL_SUPER) return { ok: true, email: t.email, role: t.role };
   var access = (readPerms_()[String(cardId).trim()] || {})[t.role] || '';
   if (access !== 'edit') return { error: '你沒有此功能嘅權限' };
   return { ok: true, email: t.email, role: t.role };
+}
+
+// ===================== DEBIT NOTE 帳簿（v4.21.0） =====================
+// 專用工作表保存完整文件、FPS QR 快照及審計欄。三個入口都經 requireCardEdit_，
+// 該 helper 會再核對 Users 目前有效帳戶／角色，不能只靠 Perms 或舊 token 繞過。
+
+function debitNoteText_(value) {
+  return String(value === undefined || value === null ? '' : value).trim();
+}
+
+function debitNoteDate_(raw) {
+  if (Object.prototype.toString.call(raw) === '[object Date]' && !isNaN(raw.getTime())) {
+    return Utilities.formatDate(raw, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  var value = debitNoteText_(raw);
+  if (!value) return '';
+  var match = value.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  var year, month, day;
+  if (match) {
+    year = Number(match[1]); month = Number(match[2]); day = Number(match[3]);
+  } else {
+    match = value.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/);
+    if (!match) return '';
+    day = Number(match[1]); month = Number(match[2]); year = Number(match[3]);
+    if (match[3].length === 2) year += 2000;
+  }
+  if (year < 1900 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) return '';
+  var check = new Date(Date.UTC(year, month - 1, day));
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return '';
+  return String(year) + '-' + ('0' + month).slice(-2) + '-' + ('0' + day).slice(-2);
+}
+
+function debitNoteAmount_(raw) {
+  var value = debitNoteText_(raw).replace(/HK\$/gi, '').replace(/[$,\s]/g, '');
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)) return '';
+  var amount = Number(value);
+  if (!isFinite(amount) || amount <= 0 || value.length > 18) return '';
+  var normalized = amount.toFixed(2);
+  return normalized.length <= 13 ? normalized : '';
+}
+
+function debitNoteValidate_(raw) {
+  raw = raw && typeof raw === 'object' ? raw : {};
+  var out = {
+    to: debitNoteText_(raw.to),
+    attention: debitNoteText_(raw.attention),
+    date: debitNoteDate_(raw.date),
+    ref: debitNoteText_(raw.ref),
+    amount: debitNoteAmount_(raw.amount),
+    particulars: debitNoteText_(raw.particulars),
+    status: debitNoteText_(raw.status),
+    remarks: debitNoteText_(raw.remarks),
+    reminder: isTrue_(raw.reminder),
+  };
+  if (!out.to) return { error: '請填寫收款對象（TO）' };
+  if (out.to.length > 140) return { error: 'TO 最多 140 個字元' };
+  if (out.attention.length > 100) return { error: 'Attention 最多 100 個字元' };
+  if (!out.date) return { error: '日期無效' };
+  if (!out.ref) return { error: '請填寫 Ref No.' };
+  if (out.ref.length > 25 || !/^[A-Za-z0-9 ._:\/@+()\-]+$/.test(out.ref)) {
+    return { error: 'Ref No. 最多 25 個字元，只可用英文、數字、空格及常用符號' };
+  }
+  if (!out.amount) return { error: '金額必須是大於 0 的數字，最多兩位小數（含小數點總長最多 13 字元）' };
+  if (!out.particulars) return { error: '請填寫款項內容（PARTICULARS）' };
+  if (out.particulars.length > 500) return { error: 'PARTICULARS 最多 500 個字元' };
+  if (out.status.length > 80) return { error: 'S/S 最多 80 個字元' };
+  if (out.remarks.length > 500) return { error: 'Remarks 最多 500 個字元' };
+  return { data: out };
+}
+
+function debitNoteTlv_(id, value) {
+  value = String(value);
+  if (value.length > 99) throw new Error('FPS QR 欄位 ' + id + ' 過長');
+  return id + ('0' + value.length).slice(-2) + value;
+}
+
+function debitNoteCrc16_(value) {
+  var crc = 0xffff;
+  for (var i = 0; i < value.length; i++) {
+    crc ^= value.charCodeAt(i) << 8;
+    for (var bit = 0; bit < 8; bit++) {
+      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+      crc &= 0xffff;
+    }
+  }
+  var hex = crc.toString(16).toUpperCase();
+  return ('0000' + hex).slice(-4);
+}
+
+/** 與前端 lib/fps.ts 同一 HKICL payload；後端自行生成，不信任 client 傳入的 QR 字串。 */
+function debitNoteBuildFpsPayload_(fpsId, amount, reference) {
+  var payload = '';
+  payload += debitNoteTlv_('00', '01');
+  payload += debitNoteTlv_('01', '12');
+  payload += debitNoteTlv_('26', debitNoteTlv_('00', 'hk.com.hkicl') + debitNoteTlv_('02', fpsId));
+  payload += debitNoteTlv_('52', '0000');
+  payload += debitNoteTlv_('53', '344');
+  payload += debitNoteTlv_('54', amount);
+  payload += debitNoteTlv_('58', 'HK');
+  payload += debitNoteTlv_('59', 'NA');
+  payload += debitNoteTlv_('60', 'HK');
+  if (reference) payload += debitNoteTlv_('62', debitNoteTlv_('05', reference));
+  return payload + '6304' + debitNoteCrc16_(payload + '6304');
+}
+
+function debitNoteFpsAccount_() {
+  var fpsId = debitNoteText_(getConfigValue_('FPS_ACCOUNT_NUMBER') || DEFAULT_FPS_ACCOUNT_NUMBER);
+  if (!/^\d{7,9}$/.test(fpsId)) return { error: 'Config 的 FPS_ACCOUNT_NUMBER 不是有效的 7 至 9 位 FPS ID' };
+  return { data: {
+    fpsAccountName: debitNoteText_(getConfigValue_('FPS_ACCOUNT_NAME') || DEFAULT_FPS_ACCOUNT_NAME),
+    fpsAccountNumber: fpsId,
+  } };
+}
+
+function debitNoteWithPayment_(data, account) {
+  data.fpsAccountName = account.fpsAccountName;
+  data.fpsAccountNumber = account.fpsAccountNumber;
+  data.fpsQrPayload = debitNoteBuildFpsPayload_(account.fpsAccountNumber, data.amount, data.ref);
+  return data;
+}
+
+function debitNoteSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.DEBIT_NOTES);
+  var bp = blueprint_().filter(function (b) { return b.name === SHEET.DEBIT_NOTES; })[0];
+  if (!bp) throw new Error('DEBIT NOTE 藍圖缺失');
+  if (!sh || sh.getLastRow() < 1) sh = ensureSheet_(ss, SHEET.DEBIT_NOTES, bp.rows, bp.headerColor, bp.frozenCols);
+  else ensureSheetColumns_(bp);
+  return sh;
+}
+
+function debitNotePublic_(r) {
+  return {
+    id: debitNoteText_(r.id),
+    districtCode: debitNoteText_(r.districtCode),
+    ref: debitNoteText_(r.ref),
+    to: debitNoteText_(r.to),
+    attention: debitNoteText_(r.attention),
+    date: debitNoteDate_(r.date) || debitNoteText_(r.date),
+    amount: debitNoteAmount_(r.amount) || debitNoteText_(r.amount),
+    particulars: debitNoteText_(r.particulars),
+    status: debitNoteText_(r.status),
+    remarks: debitNoteText_(r.remarks),
+    reminder: isTrue_(r.reminder),
+    fpsAccountName: debitNoteText_(r.fpsAccountName),
+    fpsAccountNumber: debitNoteText_(r.fpsAccountNumber),
+    fpsQrPayload: debitNoteText_(r.fpsQrPayload),
+    createdAt: debitNoteText_(r.createdAt),
+    createdBy: debitNoteText_(r.createdBy),
+    updatedAt: debitNoteText_(r.updatedAt),
+    updatedBy: debitNoteText_(r.updatedBy),
+  };
+}
+
+function debitNoteDistrictRows_() {
+  var district = String(districtCode_());
+  return readSheet_(SHEET.DEBIT_NOTES).filter(function (r) {
+    return String(r.districtCode || '') === district;
+  });
+}
+
+function listDebitNotes_(token) {
+  var auth = requireCardEdit_(token, 'debitNote'); if (auth.error) return err(auth.error);
+  debitNoteSheet_();
+  var rows = debitNoteDistrictRows_().map(debitNotePublic_);
+  rows.sort(function (a, b) {
+    var byDate = String(b.date || '').localeCompare(String(a.date || ''));
+    if (byDate) return byDate;
+    var byRef = String(b.ref || '').localeCompare(String(a.ref || ''), 'en', { numeric: true });
+    if (byRef) return byRef;
+    return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+  });
+  return ok(rows);
+}
+
+function saveDebitNote_(token, raw) {
+  var auth = requireCardEdit_(token, 'debitNote'); if (auth.error) return err(auth.error);
+  var checked = debitNoteValidate_(raw); if (checked.error) return err(checked.error);
+  var account = debitNoteFpsAccount_(); if (account.error) return err(account.error);
+  var sh = debitNoteSheet_();
+  var id = debitNoteText_(raw && raw.id);
+  if (id.length > 100) return err('記錄 ID 無效');
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return err('另一筆 DEBIT NOTE 正在儲存，請稍後再試');
+  try {
+    var rows = debitNoteDistrictRows_();
+    var existing = id ? rows.filter(function (r) { return String(r.id || '') === id; })[0] : null;
+    if (id && !existing) return err('找不到這張 DEBIT NOTE，或它屬於另一區');
+    var duplicate = rows.filter(function (r) {
+      return String(r.ref || '').trim().toLowerCase() === checked.data.ref.toLowerCase()
+        && String(r.id || '') !== id;
+    })[0];
+    if (duplicate) return err('Ref No.「' + checked.data.ref + '」已存在，請使用下一編號或開啟舊記錄修改');
+    var now = new Date().toISOString();
+    var record = debitNoteWithPayment_(checked.data, account.data);
+    record.id = id || genId_('dn');
+    record.districtCode = String(districtCode_());
+    record.createdAt = existing ? debitNoteText_(existing.createdAt) || now : now;
+    record.createdBy = existing ? debitNoteText_(existing.createdBy) || auth.email : auth.email;
+    record.updatedAt = now;
+    record.updatedBy = auth.email;
+    if (existing) {
+      var rowIndex = rowIndexByCol_(sh, 'id', id);
+      if (rowIndex < 2) return err('找不到舊記錄的 Sheet 行，請重新整理後再試');
+      Object.keys(record).forEach(function (key) { setCellByHeader_(sh, rowIndex, key, record[key]); });
+    } else {
+      appendRowObj_(sh, record);
+    }
+    return ok({ saved: true, record: debitNotePublic_(record) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function importDebitNotes_(token, rows) {
+  var auth = requireCardEdit_(token, 'debitNote'); if (auth.error) return err(auth.error);
+  if (!Array.isArray(rows)) return err('匯入資料格式不正確');
+  if (!rows.length) return err('沒有可匯入的 DEBIT NOTE');
+  if (rows.length > 500) return err('每次最多匯入 500 筆，請分批處理');
+  var valid = [];
+  var errors = [];
+  rows.forEach(function (raw, index) {
+    var checked = debitNoteValidate_(raw);
+    var sourceRow = Number(raw && raw.sourceRow) || index + 2;
+    if (checked.error) errors.push({ row: sourceRow, ref: debitNoteText_(raw && raw.ref), error: checked.error });
+    else valid.push({ data: checked.data, sourceRow: sourceRow });
+  });
+  // 有任何格式錯誤就整批不寫，避免財務帳簿只匯入一半。
+  if (errors.length) return ok({ imported: 0, duplicates: 0, duplicateRefs: [], errors: errors, aborted: true });
+  var account = debitNoteFpsAccount_(); if (account.error) return err(account.error);
+  var sh = debitNoteSheet_();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return err('另一筆 DEBIT NOTE 正在儲存，請稍後再試');
+  try {
+    var seen = {};
+    debitNoteDistrictRows_().forEach(function (r) {
+      var ref = debitNoteText_(r.ref).toLowerCase(); if (ref) seen[ref] = true;
+    });
+    var now = new Date().toISOString();
+    var imported = 0;
+    var duplicateRefs = [];
+    valid.forEach(function (item) {
+      var key = item.data.ref.toLowerCase();
+      if (seen[key]) { duplicateRefs.push(item.data.ref); return; }
+      seen[key] = true;
+      var record = debitNoteWithPayment_(item.data, account.data);
+      record.id = genId_('dn');
+      record.districtCode = String(districtCode_());
+      record.createdAt = now;
+      record.createdBy = auth.email;
+      record.updatedAt = now;
+      record.updatedBy = auth.email;
+      appendRowObj_(sh, record);
+      imported++;
+    });
+    return ok({
+      imported: imported,
+      duplicates: duplicateRefs.length,
+      duplicateRefs: duplicateRefs.slice(0, 30),
+      errors: [], aborted: false,
+    });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ===================== 綜合記錄（AllRecords） =====================
@@ -4898,6 +5181,8 @@ function getCards_(token) {
   var isSuper = levelOfUser_(t.email, t.role) === LEVEL_SUPER;
   var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
   var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).filter(function (c) {
+    // DEBIT NOTE 是硬性角色白名單；SYSADMIN 及自訂角色也不能靠超管繞過。
+    if (c.cardId === 'debitNote' && (!u || String(u.active).toUpperCase() === 'FALSE' || !canGenerateDebitNoteRole_(u.role))) return false;
     // 隱藏卡片（enabled=FALSE）：只有層級 0 超管見到（用嚟私下加功能／升級），其他人一律睇唔到
     if (!c.enabled && !isSuper) return false;
     if (isSuper) { c.access = 'edit'; return true; }
@@ -4978,7 +5263,8 @@ function savePerms_(token, matrix) {
     var row = [cid];
     roles.forEach(function (role) {
       var v = ((matrix[cid] || {})[role] || '').toString().toLowerCase();
-      row.push(v === 'edit' || v === 'view' ? v : '');
+      if (cid === 'debitNote') row.push(canGenerateDebitNoteRole_(role) && (v === 'edit' || v === 'view') ? 'edit' : '');
+      else row.push(v === 'edit' || v === 'view' ? v : '');
     });
     rows.push(row);
   });
@@ -5091,6 +5377,7 @@ function myCardAccess_(t) {
   var perms = readPerms_();
   var out = {};
   readSheet_(SHEET.CARDS).map(normalizeCard_).forEach(function (c) {
+    if (c.cardId === 'debitNote' && !canGenerateDebitNoteRole_(t.role)) return;
     if (lv === LEVEL_SUPER) { out[c.cardId] = 'edit'; return; }
     var a = (perms[c.cardId] || {})[t.role] || '';
     if (a === 'edit' || a === 'view') out[c.cardId] = a;
@@ -5144,6 +5431,7 @@ function delegatePerms_(token, targetRole, grants) {
   Object.keys(grants).forEach(function (cid) {
     var want = String(grants[cid] || '').toLowerCase();
     if (want !== 'edit' && want !== 'view' && want !== '') { rejected.push(cid + '：值不正確'); return; }
+    if (cid === 'debitNote' && want && !canGenerateDebitNoteRole_(targetRole)) { rejected.push(cid + '：此角色不可使用 DEBIT NOTE'); return; }
     var have = mine[cid] || '';
     if (want === 'edit' && have !== 'edit') { rejected.push(cid + '：你本身冇「可管理」權限'); return; }
     if (want === 'view' && !have) { rejected.push(cid + '：你本身冇此卡片權限'); return; }
@@ -5510,7 +5798,7 @@ function showNewApiKey() { regenerateApiKeyMenu(); }
 function protectSensitiveSheets_(ss) {
   var me = '';
   try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { me = ''; }
-  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ].forEach(function (name) {
+  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ, SHEET.DEBIT_NOTES].forEach(function (name) {
     try {
       var sh = ss.getSheetByName(name);
       if (!sh) return;
@@ -5618,6 +5906,7 @@ function blueprint_() {
     P.push(row('training', trainingEdit()));
     P.push(row('circulars', circularsEdit()));
     P.push(row('fps', ALL_EDIT));
+    P.push(row('debitNote', { DC: 'edit', DDC_ADMIN: 'edit', STAFF: 'edit' }));
     P.push(row('rooms', ALL_VIEW));
     P.push(row('orgchart', ALL_VIEW));
     P.push(row('ymis', ALL_VIEW));
@@ -5727,6 +6016,7 @@ function blueprint_() {
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
       ['rooms', '地域房間使用情況', '🏢', 'builtin', '/rooms', '17／18／19 樓逐間房睇用途時段 · 今日總覽', 15, 'TRUE', 'FALSE', 'core', 'done'],
       ['orgchart', '地域及總會架構', '🏛', 'builtin', '/orgchart', '港島地域總監架構 · 總會領導層，自動跟官網更新', 16, 'TRUE', 'FALSE', 'core', 'done'],
+      ['debitNote', 'DEBIT NOTE 生成', '🧾', 'builtin', '/debit-note', '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（DC／DDC_ADMIN／職員）', 17, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
 
     { name: SHEET.UNITS, headerColor: '#bbf7d0', rows: [
@@ -5814,6 +6104,11 @@ function blueprint_() {
         'publicCourseId'],
     ] },
 
+    // DEBIT NOTE 完整帳簿：原 Excel 欄位 + QR／戶口快照 + 建立／更新審計。
+    { name: SHEET.DEBIT_NOTES, headerColor: '#fce7f3', frozenCols: 1, rows: [
+      ['id', 'districtCode', 'ref', 'to', 'attention', 'date', 'amount', 'particulars', 'status', 'remarks', 'reminder',
+        'fpsAccountName', 'fpsAccountNumber', 'fpsQrPayload', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'],
+    ] },
     { name: SHEET.CIRCULARS, rows: [
       ['id', 'districtCode', 'circularNo', 'category', 'title', 'sections', 'sessions',
         'leader', 'eligibility', 'fee', 'originalFee', 'subsidyNote', 'feeNote', 'quota', 'deadline',
@@ -5964,7 +6259,10 @@ function patchCardRows_(ss) {
     // v4.7.0 獎勵提名已完成（名冊 + 夠期提名推算 + 年期可自訂）；v4.9.0 限 DDC 或以上
     awards: { oldDesc: '讀獲獎名單 · 推下一級', desc: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', oldDescs: ['獎勵名冊 · 自動計夠期可提名 · 年期自訂'], desc2: '獎勵名冊 · 夠期自動推算 · 只限 DDC 或以上' },
   };
-  var descOnly = { incident: { oldDesc: '即時應變 · 總會指引 · 意外報告', desc: '天氣決策 · 即時應變 · 總會指引 · 意外報告' } };
+  var descOnly = {
+    incident: { oldDesc: '即時應變 · 總會指引 · 意外報告', desc: '天氣決策 · 即時應變 · 總會指引 · 意外報告' },
+    debitNote: { oldDesc: '區會範本 · CSV 帶入 · FPS QR · 列印 PDF（DC／DDC_ADMIN／職員）', desc: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（DC／DDC_ADMIN／職員）' },
+  };
   // v4.4.0 刪會議行事曆；v4.5.0 刪週年會議文件；v4.9.0 刪消息發佈卡片（搬咗去主控台頂）
   var removeIds = { meeting: true, annual: true, news: true };
   for (var i = v.length - 1; i >= 1; i--) {

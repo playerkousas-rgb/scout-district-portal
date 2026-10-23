@@ -13,6 +13,15 @@ import type {
   CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec, HubCoursesResult,
 } from './types.ts';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers.ts';
+import type { DebitNoteDraft, DebitNoteRecord } from './debitNote.ts';
+
+export interface DebitNoteImportSummary {
+  imported: number;
+  duplicates: number;
+  duplicateRefs: string[];
+  errors: Array<{ row: number; ref: string; error: string }>;
+  aborted: boolean;
+}
 import type { IcsEvent } from './ics.ts';
 import { isDemoMode } from './demo/session.ts';
 import { demoCall, demoExternal } from './demo/engine.ts';
@@ -322,6 +331,14 @@ export const api = {
     callPost('importAwardMembers', { token, rows, mode }),
   /** 儲存獎項及年期設定（整張表覆寫） */
   // ── 🏕 旅團探訪（v4.8.1）──────────────────────────────
+  // DEBIT NOTE：完整後端帳簿、舊單重開及整批 Excel／CSV 遷移。
+  listDebitNotes: (token: string): Promise<ApiResult<DebitNoteRecord[]>> =>
+    callGet('listDebitNotes', { token }),
+  saveDebitNote: (token: string, note: DebitNoteDraft & { id?: string }): Promise<ApiResult<{ saved: boolean; record: DebitNoteRecord }>> =>
+    callPost('saveDebitNote', { token, note }),
+  importDebitNotes: (token: string, rows: Array<DebitNoteDraft & { sourceRow?: number }>):
+    Promise<ApiResult<DebitNoteImportSummary>> => callPost('importDebitNotes', { token, rows }),
+
   getVisitBoard: (token: string, from?: string, to?: string): Promise<ApiResult<VisitBoard>> =>
     callGet('getVisitBoard', { token, ...(from ? { from } : {}), ...(to ? { to } : {}) }),
   saveVisit: (token: string, visit: Partial<Visit>): Promise<ApiResult<{ saved: boolean; id: string; troop: string; visitDate: string }>> =>

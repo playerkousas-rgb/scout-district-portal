@@ -89,6 +89,23 @@
 
 ---
 
+## 🧾 DEBIT NOTE 生成（v4.22.0）
+
+主控台 **「🧾 DEBIT NOTE 生成」**可直接取代現有 Excel 輸入及帳簿流程：
+
+- **正式文件＋可選 REMINDER＋FPS QR**：填寫 TO／Attention／Date／Ref No.／HK$ 金額／PARTICULARS，即時預覽區會範本；QR 自動帶入指定金額及 Ref No.。剔選「加 REMINDER 印」後，DEBIT NOTE 標題右方會顯示紅字紅框，無剔選或舊記錄預設無印。
+- **整頁 PDF／A4 列印**：「下載整頁 PDF」直接輸出單頁 210 × 297 mm A4 整頁影像，檔名跟 Ref No.；「瀏覽器列印（A4）」開系統列印視窗，亦可選「另存為 PDF」保留可搜尋文字。新單或有改動時，兩個操作都會先成功儲存才輸出。
+- **後端持久化帳簿**：`DebitNotes` 工作表保存完整文件、`S/S`、`Remarks`、`reminder`、區碼、FPS 戶口／QR 快照及建立／更新人／時間。重開舊單仍顯示當時保存的 QR，不會因 Config 改動而靜默改變。
+- **舊記錄翻查**：按關鍵字、年份及 `S/S` 篩選，顯示篩選金額合計；可重開、修改、重印或下載舊單 PDF；列表會標示有 REMINDER 的記錄。手機以逐筆卡片顯示，桌面用完整帳表。
+- **完整下載**：一鍵下載標準 Excel `.xlsx` 或 CSV；每次先向後端取最新全部記錄，不受畫面篩選影響。首八欄沿用 `Ref／姓名字／Date／amount／PAR／S/S／Remarks`，再加入 `REMINDER`（TRUE／FALSE）、Attention、FPS 及審計欄；完整匯出可再匯入並保留紅印狀態。
+- **現有帳簿遷移**：在 Excel 另存 CSV UTF-8，然後於卡片內整批匯入。重複 Ref No.（包括批次內重複）會略過而不覆蓋；任何格式錯誤會令整批不寫入，避免只遷移一半。歷史資料不會內建在公開程式碼，只在用戶明確匯入時保存。
+- **硬性角色白名單**：只限 `DC`、`DDC_ADMIN`、`STAFF`；卡片、直接 URL 及 `listDebitNotes／saveDebitNote／importDebitNotes` 後端 API 都會核對 Users 目前有效帳戶／角色。ADC、其他 DDC、領袖及 SYSADMIN 均不能繞過。
+- **部署**：更新 `gs/Code.gs` → 執行 `setupSheets()`（只補 `DebitNotes`／`reminder` 欄、新卡片及權限行，不清空或重排舊資料）→ 重新部署 Apps Script；首次授權讀寫亦會自動補建帳簿分頁。健康檢查版本為 `4.22.0`。
+- **示範版**：提供虛構舊單及相同操作流程，但只存瀏覽器 sessionStorage，QR 明確不可付款，不會寫入正式 Google Sheet。
+- **測試**：`node --experimental-strip-types scripts/test-debit-note.ts`（CSV／Excel／資料處理）、`node scripts/test-debit-note-gs.js`（本機 mock 角色門禁、持久化、QR、重複 Ref 及整批 rollback，不接觸正式 Sheet）。
+
+---
+
 ## 🎖 獎勵規則修訂 + 📢 消息搬主控台頂（v4.9.0）
 
 七大改動（詳細見 app/updates 頁）：

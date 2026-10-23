@@ -5,6 +5,41 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.22.0 — 🟥 DEBIT NOTE 可選 REMINDER 印＋整頁 A4 PDF</h3>
+        <p>按正式單據樣式在標題右方加紅字紅框 REMINDER；整張文件可直接下載 PDF，或用瀏覽器以 A4 列印。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.22.0</a></p>
+        <ul>
+          <li>☑️ 新增「加 REMINDER 印」剔格：有剔先顯示，舊單及舊 CSV 預設無印；狀態會隨後端記錄、重開舊單、完整 CSV／Excel 匯出保存，亦可取消並寫回 FALSE。</li>
+          <li>⬇ 「下載整頁 PDF」直接輸出單頁 A4（210 × 297 mm），包括正式信頭、REMINDER、文件明細、FPS QR、TOTAL 及簽署欄；檔名跟 Ref No.，不會包含表單或帳簿按鈕。</li>
+          <li>🖨 「瀏覽器列印（A4）」保留可搜尋文字；在系統列印視窗選「另存為 PDF」亦可儲存整張文件。建議 A4、直向、比例 100%。</li>
+          <li>💾 新單或有改動時，直接 PDF 及瀏覽器列印都會先成功保存後端，避免文件與帳簿／QR 快照不一致。</li>
+          <li>⚠️ 部署：更新 <code>Code.gs</code> → 執行 <code>setupSheets()</code> 為現有 <code>DebitNotes</code> 只追加 <code>reminder</code> 欄（不清空或重排舊資料）→ 重新部署；健康檢查應回傳 <code>4.22.0</code>。</li>
+        </ul>
+      </div>
+      <div className="info-card">
+        <h3>v4.21.0 — 🧾 DEBIT NOTE 完整取代 Excel 帳簿</h3>
+        <p>由正式單據、固定金額 FPS QR，到後端保存、舊單翻查及完整 Excel 下載，全部可在同一張卡片完成。</p>
+        <ul>
+          <li>💾 新增 <code>DebitNotes</code> 後端帳簿：保存完整文件、S/S、Remarks、FPS 戶口／QR 快照及建立／更新審計；列印新單或改動前會先成功儲存。</li>
+          <li>🗂 「舊記錄」支援關鍵字、年份、狀態篩選及金額合計；可重開、修改及重印。手機改用逐筆卡片，操作按鈕不用再橫向捲動。</li>
+          <li>⬇ 完整 Excel（.xlsx）及 CSV 下載每次先取最新全部記錄，不受篩選影響；保留原帳簿首八欄，另附 Attention、FPS 及審計資料。</li>
+          <li>📥 現有 Excel 另存 CSV UTF-8 後可整批遷移；重複 Ref No. 不覆蓋，格式錯誤整批不寫入。後端會自行生成與前端一致的 FPS payload。</li>
+          <li>🔐 三角色限制擴展至資料 API：<code>listDebitNotes／saveDebitNote／importDebitNotes</code> 都核對 Users 目前有效帳戶及角色，不能靠直接 URL 或誤授 Perms 繞過。</li>
+          <li>⚠️ 部署：更新 <code>Code.gs</code> → 執行 <code>setupSheets()</code> 補建 <code>DebitNotes</code>（不清空舊資料）→ 重新部署；健康檢查應回傳 <code>4.21.0</code>。</li>
+        </ul>
+      </div>
+      <div className="info-card">
+        <h3>v4.20.0 — 🧾 DEBIT NOTE 生成（DC／DDC_ADMIN／區職員專用）</h3>
+        <p>按照區會提供的範本，填寫收款對象、日期、Ref No.、款項內容及金額，即時預覽並列印 A4 PDF；FPS QR 自動帶入指定金額及 Ref No.。</p>
+        <p>此為初版功能記錄；完整帳簿由 v4.21.0 起提供，REMINDER 及直接 PDF 請使用上方 v4.22.0。</p>
+        <ul>
+          <li>🔐 <b>硬性只限 <code>DC</code>、<code>DDC_ADMIN</code>、<code>STAFF</code></b>：其他角色（包括 DDC_TRAINING、ADC、領袖及 SYSADMIN）即使誤授 Perms 都不能開啟。</li>
+          <li>📥 支援同款 CSV 帶入舊記錄、千位金額、不同日期格式及建議下一個 Ref No.；CSV 只在瀏覽器分頁處理，不會上傳或儲存。</li>
+          <li>🖨 列印只輸出 DEBIT NOTE 紙本，隱藏主控台外殼及表單；正式發出前請用銀行 App 試掃 QR 核對。</li>
+          <li>⚠️ 部署：更新 <code>Code.gs</code> → 執行 <code>setupSheets()</code> 補新卡片及權限行（不清空舊資料）→ 重新部署；健康檢查應回傳 <code>4.20.0</code>。</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.19.1 — 後端嚴格只追加（YMIS／區總部月曆功能沿用）</h3>
         <p>已有區後台請<strong>沿用原本 Google Sheet 與同一個 Apps Script 專案</strong>，先備份，唔好開新表或執行訓練班模版 <code>setupCourseSheet()</code>。</p>
         <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.19.1</a></p>

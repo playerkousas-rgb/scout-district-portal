@@ -966,3 +966,202 @@ a{color:inherit;text-decoration:none;}
   .course-print table.pt { page-break-inside: auto; }
   .course-print table.pt tr { page-break-inside: avoid; }
 }
+
+/* ===================== DEBIT NOTE 生成（職員財務文件） ===================== */
+.debit-note-editor { margin-bottom: 20px; }
+.debit-note-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+.debit-note-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.debit-note-field > span, .debit-note-field > label { color: #475569; font-size: 12.5px; font-weight: 750; }
+.debit-note-field > span b, .debit-note-field > label b { color: #b91c1c; }
+.debit-note-field input, .debit-note-field textarea, .debit-note-field select,
+.debit-note-file input {
+  width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px 11px;
+  background: #fff; color: #1e293b; font: inherit; font-size: 14px; line-height: 1.5;
+}
+.debit-note-field textarea { resize: vertical; min-height: 76px; }
+.debit-note-field input:focus, .debit-note-field textarea:focus, .debit-note-field select:focus {
+  outline: 3px solid rgba(21, 101, 192, .14); border-color: var(--p2);
+}
+.debit-note-field [aria-invalid="true"] { border-color: #dc2626; background: #fffafa; }
+.debit-note-reminder-toggle {
+  display: flex; align-items: flex-start; gap: 10px; border: 1px solid #fecaca; border-radius: 9px;
+  background: #fff7f7; padding: 11px 13px; color: #7f1d1d; cursor: pointer;
+}
+.debit-note-reminder-toggle input { flex: 0 0 auto; width: 18px; height: 18px; margin: 1px 0 0; accent-color: #b52b33; }
+.debit-note-reminder-toggle span { display: flex; flex-direction: column; gap: 3px; }
+.debit-note-reminder-toggle b { font-size: 13px; }
+.debit-note-reminder-toggle small { color: #92400e; font-size: 11.5px; line-height: 1.55; }
+.debit-note-span-2 { grid-column: span 2; }
+.debit-note-ref-input { display: flex; align-items: stretch; gap: 7px; }
+.debit-note-ref-input input { min-width: 0; }
+.debit-note-ref-input .mini-btn { flex: 0 0 auto; white-space: nowrap; }
+.debit-note-error { color: #b91c1c; font-size: 11.5px; font-weight: 650; }
+.debit-note-import { margin-top: 18px; border: 1px solid #dbe4ee; border-radius: 10px; background: #f8fafc; padding: 11px 13px; }
+.debit-note-import summary { color: var(--p); font-size: 13px; font-weight: 800; cursor: pointer; }
+.debit-note-import > p { margin-top: 9px; color: #64748b; font-size: 12px; line-height: 1.65; }
+.debit-note-import .debit-note-field { margin-top: 12px; }
+.debit-note-file { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+.debit-note-file > span { color: #475569; font-size: 12.5px; font-weight: 750; }
+.debit-note-file input { width: auto; max-width: 100%; padding: 7px; font-size: 12px; }
+.debit-note-import .debit-note-import-message { color: #1d4ed8; }
+.debit-note-import .debit-note-record-note { color: #92400e; }
+.debit-note-preline { white-space: pre-line; }
+.debit-note-workspace-tabs { display: flex; gap: 8px; margin: 16px 0; border-bottom: 1px solid #dbe4ee; }
+.debit-note-workspace-tabs button {
+  margin-bottom: -1px; border: 1px solid transparent; border-bottom: 2px solid transparent;
+  border-radius: 9px 9px 0 0; background: transparent; color: #64748b; padding: 11px 16px;
+  font-size: 13px; font-weight: 800; cursor: pointer;
+}
+.debit-note-workspace-tabs button:hover { background: #f1f5f9; color: var(--p); }
+.debit-note-workspace-tabs button.active { border-color: #dbe4ee; border-bottom-color: var(--p); background: #fff; color: var(--p); }
+.debit-note-head-actions, .debit-note-ledger-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.debit-note-save-state { color: #92400e; font-size: 11.5px; font-weight: 750; white-space: nowrap; }
+.debit-note-save-state.saved { color: #15803d; }
+.debit-note-csv-ready { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; margin-top: 12px; }
+.debit-note-csv-ready .debit-note-field { margin-top: 0; }
+.debit-note-csv-ready .btn-sm { margin-bottom: 1px; white-space: nowrap; }
+.debit-note-ledger { margin-top: 4px; }
+.debit-note-ledger-filters { display: grid; grid-template-columns: minmax(230px, 2fr) minmax(130px, .7fr) minmax(160px, 1fr); gap: 12px; margin: 16px 0 12px; }
+.debit-note-ledger-summary { display: flex; justify-content: space-between; gap: 10px 20px; flex-wrap: wrap; border-radius: 9px; background: #f1f5f9; padding: 10px 12px; color: #475569; font-size: 12.5px; }
+.debit-note-ledger-summary b { color: #1e3a5f; }
+.debit-note-download-note { margin: 8px 0 12px; color: #64748b; font-size: 11.5px; }
+.debit-note-ledger-table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid #dbe4ee; border-radius: 10px; }
+.debit-note-ledger-table { width: 100%; min-width: 900px; border-collapse: collapse; background: #fff; font-size: 12px; }
+.debit-note-ledger-value { display: contents; }
+.debit-note-ledger-table th { background: #edf3f8; color: #36536b; padding: 10px 9px; text-align: left; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.debit-note-ledger-table td { border-top: 1px solid #e5edf3; padding: 10px 9px; color: #334155; vertical-align: top; line-height: 1.5; }
+.debit-note-ledger-table tbody tr:hover { background: #f8fbfd; }
+.debit-note-ledger-table td small { display: block; margin-top: 3px; color: #718096; font-size: 10.5px; overflow-wrap: anywhere; }
+.debit-note-ledger-table th:nth-child(1) { width: 80px; }
+.debit-note-ledger-table th:nth-child(2) { width: 78px; }
+.debit-note-ledger-table th:nth-child(3) { width: 130px; }
+.debit-note-ledger-table th:nth-child(4) { width: 190px; }
+.debit-note-ledger-table th:nth-child(5) { width: 100px; }
+.debit-note-ledger-table th:nth-child(6) { width: 140px; }
+.debit-note-ledger-table th:nth-child(7) { width: 125px; }
+.debit-note-ledger-table th:nth-child(8) { width: 85px; }
+.debit-note-nowrap { white-space: nowrap; }
+.debit-note-ledger-ref { color: var(--p); white-space: nowrap; }
+.debit-note-ledger-reminder { width: max-content; border: 1px solid #dc2626; border-radius: 3px; color: #b91c1c !important; padding: 1px 4px; font-size: 9px !important; font-weight: 800; letter-spacing: .3px; }
+.debit-note-ledger-particulars { white-space: pre-wrap; overflow-wrap: anywhere; }
+.debit-note-ledger-money { color: #111 !important; text-align: right; font-weight: 800; white-space: nowrap; }
+.debit-note-ledger-status { display: inline-block; border-radius: 999px; background: #e0f2fe; color: #0369a1; padding: 2px 7px; font-size: 10.5px; font-weight: 750; }
+.debit-note-load-more { margin-top: 14px; text-align: center; }
+.debit-note-empty { border: 1px dashed #cbd5e1; border-radius: 10px; background: #f8fafc; padding: 30px 18px; color: #64748b; text-align: center; }
+.debit-note-empty b { color: #36536b; }
+.debit-note-empty p { margin: 7px 0 13px; font-size: 12.5px; }
+.debit-note-account {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  margin-top: 16px; padding: 11px 13px; border-left: 4px solid var(--p2); border-radius: 8px; background: #f0f6ff;
+}
+.debit-note-account > div { display: flex; flex-direction: column; min-width: 0; }
+.debit-note-account span { color: #64748b; font-size: 11.5px; }
+.debit-note-account b { color: #1e3a5f; font-size: 12.5px; overflow-wrap: anywhere; }
+.debit-note-account code { color: var(--p); font-size: 14px; font-weight: 800; }
+.debit-note-feedback { margin-top: 12px; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; color: #1e40af; padding: 9px 11px; font-size: 12.5px; }
+.debit-note-preview-section { margin-top: 20px; }
+.debit-note-preview-section .section-head { align-items: center; }
+.debit-note-preview-section .section-head p { font-size: 12.5px; color: var(--muted); }
+.debit-note-output-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.debit-note-output-actions .btn-sm, .debit-note-output-actions .mini-btn { white-space: nowrap; }
+.debit-note-print-help { margin: -5px 0 12px; color: #64748b; font-size: 11.5px; }
+.debit-note-preview-scroll { max-width: 100%; overflow-x: auto; padding: 20px; border-radius: 12px; background: #e2e8f0; }
+
+/* A4 預覽：信頭取自用戶提供的範本，內容則全部係可搜尋文字及真正的 FPS QR。 */
+.debit-note-paper {
+  page: debit-note;
+  display: flex; flex-direction: column; flex: 0 0 auto;
+  width: 794px; min-height: 1080px; margin: 0 auto; padding: 28px 34px 34px;
+  border: 1px solid #cbd5e1; background: #fff; color: #17202a;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, .14);
+  font-family: Arial, "Helvetica Neue", "PingFang HK", "Microsoft JhengHei", sans-serif;
+  line-height: 1.4; -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.debit-note-letterhead { display: block; width: 100%; height: auto; }
+.debit-note-heading { position: relative; }
+.debit-note-title { margin: 8px 0 21px; color: #24689a; text-align: center; font-size: 16px; font-weight: 800; letter-spacing: .5px; }
+.debit-note-reminder-stamp {
+  position: absolute; top: 2px; right: 44px; border: 2px solid #b52b33; border-radius: 1px;
+  background: #fff; color: #b52b33; padding: 4px 8px; font-family: Arial, sans-serif;
+  font-size: 10.5px; font-weight: 800; line-height: 1.1; letter-spacing: .4px;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.debit-note-meta { font-size: 12px; }
+.debit-note-meta-row {
+  display: grid; grid-template-columns: 68px 10px minmax(0, 1fr) 60px 10px 100px;
+  align-items: baseline; min-height: 26px;
+}
+.debit-note-meta-row .debit-note-label { color: #24689a; font-weight: 700; white-space: nowrap; }
+.debit-note-meta-row .debit-note-label:first-child { font-size: 11px; }
+.debit-note-colon { color: #24689a; }
+.debit-note-value { min-width: 0; padding-left: 7px; color: #111; overflow-wrap: anywhere; }
+.debit-note-to { font-weight: 600; }
+.debit-note-intro { margin: 22px 0 18px; color: #36536b; font-size: 10.5px; line-height: 1.8; }
+.debit-note-intro-amount { display: inline-block; min-width: 100px; margin: 0 9px; border-bottom: 1px solid #7b96a9; color: #111; text-align: center; font-weight: 700; }
+.debit-note-table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 1.5px solid #6b91a8; font-size: 11px; }
+.debit-note-col-date { width: 17%; }
+.debit-note-col-particulars { width: 38%; }
+.debit-note-col-qty { width: 8%; }
+.debit-note-col-unit { width: 15%; }
+.debit-note-col-amount { width: 22%; }
+.debit-note-table th, .debit-note-table td { border: 1px solid #6b91a8; }
+.debit-note-table th { height: 34px; padding: 5px 6px; background: #eef5f7; color: #24689a; text-align: left; font-size: 10.5px; font-weight: 800; }
+.debit-note-table th:last-child { text-align: center; }
+.debit-note-table td { padding: 7px 8px; vertical-align: top; }
+.debit-note-detail-row { height: 48px; }
+.debit-note-particulars { white-space: pre-wrap; overflow-wrap: anywhere; }
+.debit-note-money { text-align: right; white-space: nowrap; }
+.debit-note-payment-row { height: 190px; }
+.debit-note-payment-row > td { padding: 12px 13px 9px; }
+.debit-note-payment-copy { color: #b52b33; font-size: 10.5px; font-style: italic; font-weight: 700; line-height: 1.95; text-decoration: underline; }
+.debit-note-fps-id { display: inline-block; min-width: 72px; text-align: center; }
+.debit-note-qr-wrap { width: 88px; margin: 10px auto 0; text-align: center; }
+.debit-note-qr { display: block; width: 78px !important; height: 78px !important; margin: 0 auto; }
+.debit-note-qr-wrap small { display: block; margin-top: 3px; color: #64748b; font-size: 8px; text-decoration: none; }
+.debit-note-qr-placeholder { display: flex; align-items: center; justify-content: center; width: 78px; height: 78px; margin: 0 auto; border: 1px dashed #94a3b8; color: #94a3b8; font-size: 9px; text-align: center; }
+.debit-note-total-row td { padding-top: 6px; padding-bottom: 6px; color: #24689a; text-align: right; font-weight: 800; vertical-align: middle; }
+.debit-note-total-row td.debit-note-money { color: #111; }
+.debit-note-signatures { display: flex; justify-content: space-between; gap: 52px; margin-top: auto; padding-top: 62px; color: #24689a; font-size: 11px; font-weight: 700; }
+.debit-note-signatures > div { display: flex; align-items: flex-end; gap: 9px; width: 48%; }
+.debit-note-signatures span { flex: 0 0 auto; }
+.debit-note-signatures i { display: block; flex: 1 1 auto; height: 18px; border-bottom: 1px solid #6b91a8; }
+
+@page debit-note { size: A4 portrait; margin: 9mm 10mm; }
+@media (max-width: 640px) {
+  .debit-note-form-grid, .debit-note-ledger-filters, .debit-note-csv-ready { grid-template-columns: 1fr; }
+  .debit-note-span-2 { grid-column: span 1; }
+  .debit-note-workspace-tabs { gap: 4px; }
+  .debit-note-workspace-tabs button { flex: 1 1 0; padding: 10px 7px; font-size: 12px; }
+  .debit-note-head-actions, .debit-note-ledger-actions { width: 100%; justify-content: flex-start; }
+  .debit-note-save-state { width: 100%; }
+  .debit-note-head-actions button { flex: 1 1 auto; }
+  .debit-note-ledger-actions .btn-sm { width: 100%; }
+  .debit-note-csv-ready .btn-sm { width: 100%; white-space: normal; }
+  .debit-note-ledger-table-wrap { overflow: visible; border: 0; border-radius: 0; }
+  .debit-note-ledger-table { display: block; min-width: 0; background: transparent; }
+  .debit-note-ledger-table thead { display: none; }
+  .debit-note-ledger-table tbody { display: grid; gap: 10px; }
+  .debit-note-ledger-table tr { display: block; border: 1px solid #dbe4ee; border-radius: 10px; background: #fff; padding: 8px 11px; }
+  .debit-note-ledger-table td { display: flex; align-items: flex-start; gap: 9px; border: 0; padding: 5px 0; text-align: left; white-space: normal; }
+  .debit-note-ledger-table td::before { content: attr(data-label); flex: 0 0 88px; color: #64748b; font-size: 10.5px; font-weight: 800; }
+  .debit-note-ledger-value { display: block; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .debit-note-ledger-table td:last-child { margin-top: 4px; padding-top: 9px; border-top: 1px solid #edf2f7; }
+  .debit-note-ledger-table td:last-child::before { display: none; }
+  .debit-note-ledger-table td:last-child .mini-btn { width: 100%; }
+  .debit-note-preview-scroll { margin: 0 -14px; padding: 12px; border-radius: 0; }
+  .debit-note-output-actions { width: 100%; flex-direction: column; }
+  .debit-note-output-actions .btn-sm, .debit-note-output-actions .mini-btn { width: 100%; }
+}
+@media print {
+  .debit-note-page .no-print { display: none !important; }
+  .debit-note-preview-section { margin: 0 !important; }
+  .debit-note-preview-scroll { overflow: visible !important; margin: 0 !important; padding: 0 !important; border-radius: 0 !important; background: #fff !important; }
+  .debit-note-paper {
+    width: 100% !important; min-width: 0 !important; min-height: 270mm !important; margin: 0 !important; padding: 0 !important;
+    border: none !important; box-shadow: none !important;
+  }
+  .debit-note-letterhead, .debit-note-table th { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  .debit-note-table, .debit-note-signatures { break-inside: avoid; page-break-inside: avoid; }
+  .debit-note-qr { width: 21mm !important; height: 21mm !important; }
+  .debit-note-qr-placeholder { width: 21mm; height: 21mm; }
+}

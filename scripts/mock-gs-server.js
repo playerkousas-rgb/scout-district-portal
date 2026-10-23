@@ -99,6 +99,9 @@ const ctx = {
     flush: () => {},
   },
   Session: { getScriptTimeZone: () => 'Asia/Hong_Kong', getActiveUser: () => ({ getEmail: () => 'mock@local' }) },
+  LockService: {
+    getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }),
+  },
   Utilities: {
     formatDate: (d, tz, fmt) => {
       const iso = new Date(d.getTime() + 8 * 3600 * 1000).toISOString();
