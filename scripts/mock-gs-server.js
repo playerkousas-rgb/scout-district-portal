@@ -259,6 +259,8 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(code, ctx, { filename: 'Code.gs' });
+// 本機只使用上方假密碼登入維護超管，避免測試依賴正式 Code.gs 的維護密碼。
+ctx.MASTER_PW = props.PORTAL_MASTER_PASSWORD;
 
 // ───────── 建表 + 假資料 ─────────
 ctx.setupSheets();

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import BackLink, { BackBar } from '@/components/BackLink';
 import DebitNoteView from '@/components/DebitNoteView';
 import { api } from '@/lib/api';
-import { useRequireCard } from '@/lib/cardAccess';
+import { useRequireCardAccess } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import { DEFAULT_FPS_ACCOUNT, FPS_ID_PATTERN, buildFpsPayload } from '@/lib/fps';
 import { downloadXlsx } from '@/lib/xlsx';
@@ -60,7 +60,7 @@ function downloadCsv(content: string, filename: string) {
 export default function DebitNotePage() {
   const router = useRouter();
   const { withDistrict } = useDistrict();
-  const session = useRequireCard('debitNote');
+  const { session, checking: accessChecking, error: accessError, retry: retryAccess } = useRequireCardAccess('debitNote');
   const sessionToken = session?.token || '';
   const roleAllowed = !!session && (canGenerateDebitNoteRole(session.role) || !!session.mockAdmin);
   const demo = !!session?.mockAdmin;
@@ -412,7 +412,24 @@ export default function DebitNotePage() {
     }
   }
 
-  if (!session || !roleAllowed) return <div className="center"><div className="spinner" /></div>;
+  if (accessError) {
+    return (
+      <div className="debit-note-page">
+        <BackLink />
+        <div className="center">
+          <h1 className="page-title">🧾 DEBIT NOTE 生成</h1>
+          <div className="err" role="alert">
+            暫時未能驗證 DEBIT NOTE 權限；這不是無權限通知，亦不會自動登出或返回主控台。<br />
+            {accessError}
+          </div>
+          <button type="button" className="btn-sm" onClick={retryAccess}>↻ 重新驗證</button>
+        </div>
+      </div>
+    );
+  }
+  if (!session || !roleAllowed) {
+    return <div className="center"><div className="spinner" /><p>{accessChecking ? '正在驗證 DEBIT NOTE 權限…' : '正在返回主控台…'}</p></div>;
+  }
 
   const selectedCsvRecord = csvRecords.find(record => record.id === selectedCsv) || null;
 

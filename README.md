@@ -89,7 +89,7 @@
 
 ---
 
-## 🧾 DEBIT NOTE 生成（v4.23.0）
+## 🧾 DEBIT NOTE 生成（v4.23.1）
 
 主控台 **「🧾 DEBIT NOTE 生成」**可直接取代現有 Excel 輸入及帳簿流程：
 
@@ -99,10 +99,11 @@
 - **舊記錄翻查**：按關鍵字、年份及 `S/S` 篩選，顯示篩選金額合計；可重開、修改、重印或下載舊單 PDF；列表會標示有 REMINDER 的記錄。手機以逐筆卡片顯示，桌面用完整帳表。
 - **完整下載**：一鍵下載標準 Excel `.xlsx` 或 CSV；每次先向後端取最新全部記錄，不受畫面篩選影響。首八欄沿用 `Ref／姓名字／Date／amount／PAR／S/S／Remarks`，再加入 `REMINDER`（TRUE／FALSE）、Attention、FPS 及審計欄；完整匯出可再匯入並保留紅印狀態。
 - **現有帳簿遷移**：在 Excel 另存 CSV UTF-8，然後於卡片內整批匯入。重複 Ref No.（包括批次內重複）會略過而不覆蓋；任何格式錯誤會令整批不寫入，避免只遷移一半。歷史資料不會內建在公開程式碼，只在用戶明確匯入時保存。
-- **角色白名單＋超管最高權限**：`SYSADMIN` 與 `DC`、`DDC_ADMIN`、`STAFF` 均可使用；卡片、直接 URL 及 `listDebitNotes／saveDebitNote／importDebitNotes` 後端 API 都會核對 Users 目前有效帳戶／角色。超管不需要額外 Perms 才能操作；ADC、其他 DDC 及領袖仍不能繞過。
-- **部署**：更新 `gs/Code.gs` → 執行 `setupSheets()`（補 `DebitNotes`／`reminder` 欄及 `Perms.debitNote.SYSADMIN=edit`，不清空帳簿或重排舊資料）→ 重新部署 Apps Script；首次授權讀寫亦會自動補建帳簿分頁。健康檢查版本為 `4.23.0`。
+- **角色白名單＋超管最高權限**：`SYSADMIN` 與 `DC`、`DDC_ADMIN`、`STAFF` 均可使用；一般帳戶的卡片、直接 URL 及 `listDebitNotes／saveDebitNote／importDebitNotes` 後端 API 都會核對 Users 目前有效帳戶／角色。直接由 Script 登入、刻意不在 Users 表的維護超管同樣保留最高權限，毋須新增 Sheet 帳戶列或額外 Perms；ADC、其他 DDC 及領袖仍不能繞過。
+- **入頁驗證可分辨錯誤**：只有後台成功回傳卡片清單並明確沒有 `debitNote` 才會返回主控台；連線／API 異常會留頁顯示原因及「重新驗證」，不再當成無權限彈出。
+- **部署**：更新 `gs/Code.gs` 並建立新 Apps Script 部署版本；健康檢查版本為 `4.23.1`。v4.23.1 不改 Sheet 結構，毋須重設 Users、Perms 或帳簿；由更舊版本升級時，`setupSheets()` 仍只補缺，不清空帳簿或重排舊資料。
 - **示範版**：提供虛構舊單及相同操作流程，但只存瀏覽器 sessionStorage，QR 明確不可付款，不會寫入正式 Google Sheet。
-- **測試**：`node --experimental-strip-types scripts/test-debit-note.ts`（CSV／Excel／資料處理）、`node scripts/test-debit-note-gs.js`（本機 mock 角色門禁、持久化、QR、重複 Ref 及整批 rollback，不接觸正式 Sheet）。
+- **測試**：`node --experimental-strip-types scripts/test-debit-note.ts`（CSV／Excel／資料處理）、`node scripts/test-card-access.js`（明確拒絕與可重試錯誤分類）、`node scripts/test-debit-note-gs.js`（本機 mock 一般角色及無 Users 列的維護超管門禁、持久化、QR、重複 Ref 及整批 rollback，不接觸正式 Sheet）。
 
 ---
 
