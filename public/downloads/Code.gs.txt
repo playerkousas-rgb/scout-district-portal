@@ -247,6 +247,11 @@ function normalizeCreatableRole_(raw) {
 // 維護用最高存取（★ 改成只有你知道嘅值；勿沿用示範值）
 var MASTER_EMAIL = 'sheep';
 var MASTER_PW    = '0728';
+/** Script 維護超管刻意不存在於 Users 表；只接受已簽名 token 內的 MASTER 身份及 SYSADMIN 角色。 */
+function isMaintenanceSuper_(email, role) {
+  return String(email || '').trim().toLowerCase() === String(MASTER_EMAIL || '').trim().toLowerCase()
+    && String(role || '').trim().toUpperCase() === SYSADMIN_ROLE;
+}
 
 // 外掛清單（轉駁器）
 var REGISTRY_URL = 'https://YOUR-HUB.vercel.app/api/registry.json';
@@ -313,7 +318,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.23.0',
+      version: '4.23.1',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -986,7 +991,7 @@ function requirePerm_(token, perm) {
 function requireCardEdit_(token, cardId) {
   var t = checkToken_(token);
   if (!t.valid) return { error: '登入已過期' };
-  if (String(cardId).trim() === 'debitNote') {
+  if (String(cardId).trim() === 'debitNote' && !isMaintenanceSuper_(t.email, t.role)) {
     var debitUser = readSheet_(SHEET.USERS).filter(function (x) {
       return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
     })[0];
@@ -1002,7 +1007,7 @@ function requireCardEdit_(token, cardId) {
 
 // ===================== DEBIT NOTE 帳簿（v4.21.0） =====================
 // 專用工作表保存完整文件、FPS QR 快照及審計欄。三個入口都經 requireCardEdit_，
-// 該 helper 會再核對 Users 目前有效帳戶／角色，不能只靠 Perms 或舊 token 繞過。
+// 一般帳戶會再核對 Users 目前有效帳戶／角色；Script 維護超管以簽名身份放行，不能只靠 Perms 或舊 token 繞過。
 
 function debitNoteText_(value) {
   return String(value === undefined || value === null ? '' : value).trim();
@@ -5181,8 +5186,9 @@ function getCards_(token) {
   var isSuper = levelOfUser_(t.email, t.role) === LEVEL_SUPER;
   var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
   var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).filter(function (c) {
-    // DEBIT NOTE 是硬性角色白名單；SYSADMIN 可用，其他未授權角色不能靠 Perms 繞過。
-    if (c.cardId === 'debitNote' && (!u || String(u.active).toUpperCase() === 'FALSE' || !canGenerateDebitNoteRole_(u.role))) return false;
+    // 一般帳戶必須是 Users 內有效的白名單角色；Script 維護超管無 Users 列，仍保留最高權限。
+    if (c.cardId === 'debitNote' && !isMaintenanceSuper_(t.email, t.role)
+      && (!u || String(u.active).toUpperCase() === 'FALSE' || !canGenerateDebitNoteRole_(u.role))) return false;
     // 隱藏卡片（enabled=FALSE）：只有層級 0 超管見到（用嚟私下加功能／升級），其他人一律睇唔到
     if (!c.enabled && !isSuper) return false;
     if (isSuper) { c.access = 'edit'; return true; }

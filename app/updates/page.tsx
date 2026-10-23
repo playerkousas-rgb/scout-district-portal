@@ -5,6 +5,17 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.23.1 — 🛠 DEBIT NOTE 修正 Script 維護超管及入頁驗證</h3>
+        <p>直接由 Apps Script 登入、刻意不存在於 <code>Users</code> 表的維護超管，現在與其他最高權限帳戶一樣可穩定使用 DEBIT NOTE。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.23.1</a></p>
+        <ul>
+          <li>✅ 卡片及 <code>listDebitNotes／saveDebitNote／importDebitNotes</code> 一致放行 Script 維護超管，毋須亦不應為此帳戶新增 <code>Users</code> 列。</li>
+          <li>🔒 一般帳戶仍須通過 <code>Users</code> 目前有效狀態及角色白名單；ADC、其他 DDC、領袖及自訂角色維持拒絕。</li>
+          <li>↻ 入頁第二次卡片驗證只會在後台明確回傳「無此卡」時返回主控台；連線／API 異常會留頁顯示原因及「重新驗證」，不再無提示彈出。</li>
+          <li>⚠️ 部署：更新 <code>Code.gs</code> 並建立新 Apps Script 部署版本；健康檢查應回傳 <code>4.23.1</code>。本次不改 Sheet 結構，毋須重設 <code>Users</code>、<code>Perms</code> 或帳簿。</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.23.0 — 🛡 DEBIT NOTE 恢復超管最高權限</h3>
         <p><code>SYSADMIN</code> 現在與 DC、DDC_ADMIN 及區職員一樣可使用 DEBIT NOTE；超管不再需要額外 Perms 才能操作。</p>
         <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.23.0</a></p>

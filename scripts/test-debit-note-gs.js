@@ -49,10 +49,13 @@ async function waitUntilReady() {
   }
   throw new Error(`mock server 啟動逾時：${output}`);
 }
-async function login(email) {
-  const result = await post({ action: 'login', email, password: '1234' });
+async function loginWithPassword(email, password) {
+  const result = await post({ action: 'login', email, password });
   assert.equal(result.ok, true, `${email}: ${result.error || '登入失敗'}`);
   return result.data;
+}
+async function login(email) {
+  return loginWithPassword(email, '1234');
 }
 
 (async () => {
@@ -74,6 +77,21 @@ async function login(email) {
     if (expected) assert.equal(card.access, 'edit');
     console.log(`  ✓ ${role.padEnd(12)} ${expected ? '可使用 DEBIT NOTE' : '不能進入 DEBIT NOTE'}`);
   }
+
+  // Script 維護超管刻意不在 Users 表；卡片及資料 API 都不能因此誤擋最高權限。
+  const maintenance = await loginWithPassword('sheep', 'LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE');
+  assert.equal(maintenance.role, 'SYSADMIN');
+  assert.equal(maintenance.level, 0);
+  const users = await get('getUsers', { token: maintenance.token });
+  assert.equal(users.ok, true, users.error);
+  assert.ok(!users.data.some(user => String(user.email).toLowerCase() === maintenance.email.toLowerCase()), '測試必須覆蓋 Users 無列的維護超管');
+  const maintenanceCards = await get('getCards', { token: maintenance.token });
+  assert.equal(maintenanceCards.ok, true, maintenanceCards.error);
+  const maintenanceCard = maintenanceCards.data.find(item => item.cardId === 'debitNote');
+  assert.ok(maintenanceCard, 'Users 無列的 Script 維護超管必須看到 DEBIT NOTE');
+  assert.equal(maintenanceCard.access, 'edit');
+  assert.equal((await get('listDebitNotes', { token: maintenance.token })).ok, true, '維護超管可讀帳簿');
+  console.log('  ✓ Script 維護超管無 Users 列仍可見卡片及讀取帳簿');
 
   // 刻意模擬管理員誤授：後台剔走非白名單；SYSADMIN／DDC_ADMIN 統一為可管理。
   const dc = await login('dc@skwscout.org.hk');
@@ -118,11 +136,24 @@ async function login(email) {
   assert.equal((await post({ action: 'saveDebitNote', token: dc.token, note })).ok, false, '重複 Ref 不可另開新單');
   console.log('  ✓ 新增後端記錄、金額標準化、Ref 唯一性及 FPS payload 全通過');
 
+  const maintenanceSaved = await post({ action: 'saveDebitNote', token: maintenance.token, note: {
+    ...note, ref: '26-899', date: '2026-10-18', amount: '25', particulars: '維護超管保存測試',
+  } });
+  assert.equal(maintenanceSaved.ok, true, maintenanceSaved.error);
+  assert.equal(maintenanceSaved.data.record.createdBy, maintenance.email);
+  const maintenanceImported = await post({ action: 'importDebitNotes', token: maintenance.token, rows: [
+    { ...note, ref: '26-898', date: '2026-10-17', amount: '30', particulars: '維護超管匯入測試' },
+  ] });
+  assert.equal(maintenanceImported.ok, true, maintenanceImported.error);
+  assert.equal(maintenanceImported.data.imported, 1);
+  assert.equal((await get('listDebitNotes', { token: maintenance.token })).data.length, 3);
+  console.log('  ✓ Script 維護超管可實際 save／import，審計建立者正確');
+
   const staff = await login('info@skwscout.org.hk');
   const ddc = await login('ddc.admin@skwscout.org.hk');
   const staffList = await get('listDebitNotes', { token: staff.token });
   assert.equal(staffList.ok, true);
-  assert.equal(staffList.data.length, 1);
+  assert.equal(staffList.data.length, 3);
   const updated = await post({ action: 'saveDebitNote', token: ddc.token, note: { ...note, id: saved.data.record.id, amount: '5000.50', status: 'Paid', reminder: false } });
   assert.equal(updated.ok, true, updated.error);
   assert.equal(updated.data.record.createdBy, dc.email, '更新不可改建立者');
@@ -144,7 +175,7 @@ async function login(email) {
   assert.equal(imported.data.duplicates, 2);
   assert.equal(imported.data.aborted, false);
   const afterImport = await get('listDebitNotes', { token: dc.token });
-  assert.equal(afterImport.data.length, 3);
+  assert.equal(afterImport.data.length, 5);
   assert.equal(afterImport.data[0].ref, '26-902', '列表應按日期新至舊');
   assert.equal(afterImport.data.find(row => row.ref === '26-901').reminder, true);
   assert.equal(afterImport.data.find(row => row.ref === '26-902').reminder, false);
@@ -158,13 +189,13 @@ async function login(email) {
   assert.equal(invalidBatch.data.aborted, true);
   assert.equal(invalidBatch.data.imported, 0);
   assert.equal(invalidBatch.data.errors[0].row, 99);
-  assert.equal((await get('listDebitNotes', { token: dc.token })).data.length, 3, '有錯時整批不可寫一半');
+  assert.equal((await get('listDebitNotes', { token: dc.token })).data.length, 5, '有錯時整批不可寫一半');
   assert.equal((await post({ action: 'saveDebitNote', token: dc.token, note: { ...note, ref: '中文編號' } })).ok, false);
   console.log('  ✓ 無效批次整批 rollback；後端自行驗證金額及 Ref，唔信 client');
 
   const health = await get('getHealthCheck');
-  assert.equal(health.data.version, '4.23.0');
-  console.log('  ✓ setupSheets 補卡及 DebitNotes 帳簿成功，健康檢查版本 4.23.0');
+  assert.equal(health.data.version, '4.23.1');
+  console.log('  ✓ setupSheets 補卡及 DebitNotes 帳簿成功，健康檢查版本 4.23.1');
   console.log('\n全部後台門禁及帳簿整合測試通過 ✓');
 })().catch(error => {
   console.error(error);
