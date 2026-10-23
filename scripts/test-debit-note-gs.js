@@ -63,7 +63,7 @@ async function login(email) {
     ['info@skwscout.org.hk', 'STAFF', true],
     ['ddc.training@skwscout.org.hk', 'DDC_TRAINING', false],
     ['adc.scout@skwscout.org.hk', 'ADC_SCOUT', false],
-    ['sysadmin@skwscout.org.hk', 'SYSADMIN', false],
+    ['sysadmin@skwscout.org.hk', 'SYSADMIN', true],
   ];
   for (const [email, role, expected] of cases) {
     const session = await login(email);
@@ -75,23 +75,23 @@ async function login(email) {
     console.log(`  ✓ ${role.padEnd(12)} ${expected ? '可使用 DEBIT NOTE' : '不能進入 DEBIT NOTE'}`);
   }
 
-  // 刻意模擬管理員誤授：後台要剔走非白名單，並將 DDC_ADMIN 統一為可管理。
+  // 刻意模擬管理員誤授：後台剔走非白名單；SYSADMIN／DDC_ADMIN 統一為可管理。
   const dc = await login('dc@skwscout.org.hk');
   const bundle = await get('getPerms', { token: dc.token });
   assert.equal(bundle.ok, true);
   bundle.data.matrix.debitNote.ADC_SCOUT = 'edit';
-  bundle.data.matrix.debitNote.SYSADMIN = 'edit';
+  bundle.data.matrix.debitNote.SYSADMIN = 'view';
   bundle.data.matrix.debitNote.DDC_ADMIN = 'view';
   const savedPerms = await post({ action: 'savePerms', token: dc.token, matrix: bundle.data.matrix });
   assert.equal(savedPerms.ok, true);
   const after = await get('getPerms', { token: dc.token });
   assert.ok(!after.data.matrix.debitNote.ADC_SCOUT);
-  assert.ok(!after.data.matrix.debitNote.SYSADMIN);
+  assert.equal(after.data.matrix.debitNote.SYSADMIN, 'edit');
   assert.equal(after.data.matrix.debitNote.DDC_ADMIN, 'edit');
   const adc = await login('adc.scout@skwscout.org.hk');
   const adcCards = await get('getCards', { token: adc.token });
   assert.ok(!adcCards.data.some(item => item.cardId === 'debitNote'));
-  console.log('  ✓ 誤授非白名單角色會被剔除，ADC 仍不可繞過');
+  console.log('  ✓ 誤授 ADC 會被剔除；SYSADMIN 保持最高 edit 權限');
 
   // API 同樣硬擋非白名單角色；不是只做卡片及頁面門禁。
   for (const action of ['saveDebitNote', 'importDebitNotes']) {
@@ -100,8 +100,8 @@ async function login(email) {
   }
   assert.equal((await get('listDebitNotes', { token: adc.token })).ok, false);
   const sysadmin = await login('sysadmin@skwscout.org.hk');
-  assert.equal((await get('listDebitNotes', { token: sysadmin.token })).ok, false);
-  console.log('  ✓ list／save／import API 均拒絕 ADC 及超管');
+  assert.equal((await get('listDebitNotes', { token: sysadmin.token })).ok, true);
+  console.log('  ✓ list／save／import API 均拒絕 ADC；SYSADMIN 可讀帳簿');
 
   const note = {
     ref: '26-900', to: '整合測試收款人', attention: '測試先生', date: '2026-10-19',
@@ -130,7 +130,7 @@ async function login(email) {
   assert.equal(updated.data.record.status, 'Paid');
   assert.equal(updated.data.record.reminder, false);
   assert.equal(updated.data.record.fpsQrPayload, frontendFpsPayload('102866183', '5000.50', '26-900'));
-  console.log('  ✓ 三種角色共享帳簿；舊單更新保留建立者並更新 QR／審計欄');
+  console.log('  ✓ 四種角色共享帳簿；舊單更新保留建立者並更新 QR／審計欄');
 
   const importRows = [
     { ...note, ref: '26-901', amount: '100', date: '2026-10-20' },
@@ -138,7 +138,7 @@ async function login(email) {
     { ...note, ref: '26-902', amount: '200', date: '2026-10-21', reminder: false },
     { ...note, ref: '26-902', amount: '201', date: '2026-10-21' },
   ];
-  const imported = await post({ action: 'importDebitNotes', token: staff.token, rows: importRows });
+  const imported = await post({ action: 'importDebitNotes', token: sysadmin.token, rows: importRows });
   assert.equal(imported.ok, true, imported.error);
   assert.equal(imported.data.imported, 2);
   assert.equal(imported.data.duplicates, 2);
@@ -163,8 +163,8 @@ async function login(email) {
   console.log('  ✓ 無效批次整批 rollback；後端自行驗證金額及 Ref，唔信 client');
 
   const health = await get('getHealthCheck');
-  assert.equal(health.data.version, '4.22.0');
-  console.log('  ✓ setupSheets 補卡及 DebitNotes 帳簿成功，健康檢查版本 4.22.0');
+  assert.equal(health.data.version, '4.23.0');
+  console.log('  ✓ setupSheets 補卡及 DebitNotes 帳簿成功，健康檢查版本 4.23.0');
   console.log('\n全部後台門禁及帳簿整合測試通過 ✓');
 })().catch(error => {
   console.error(error);

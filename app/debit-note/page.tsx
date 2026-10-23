@@ -421,7 +421,7 @@ export default function DebitNotePage() {
       <BackLink />
       <div className="no-print">
         <h1 className="page-title">🧾 DEBIT NOTE 生成</h1>
-        <p className="page-sub">直接取代 Excel 輸入：生成正式單據及 FPS QR、可選 REMINDER 印、單頁 A4 PDF／列印、後端帳簿及完整 Excel／CSV。只限 DC、區職員及 DDC_ADMIN。</p>
+        <p className="page-sub">直接取代 Excel 輸入：生成正式單據及 FPS QR、可選 REMINDER 印、單頁 A4 PDF／列印、後端帳簿及完整 Excel／CSV。只限超管、DC、區職員及 DDC_ADMIN。</p>
       </div>
 
       <div className="debit-note-workspace-tabs no-print" role="tablist" aria-label="DEBIT NOTE 工作區">

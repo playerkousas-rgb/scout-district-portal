@@ -183,9 +183,9 @@ var DC_ROLE = 'DC';
 var SYSADMIN_ROLE = 'SYSADMIN';
 function isAdminRole_(role) { return role === DC_ROLE || role === SYSADMIN_ROLE; }
 
-// DEBIT NOTE 屬區會財務文件：硬性只限 DC、行政 DDC 及區職員。
-// 即使超管或管理員誤改 Perms，都不會擴大此卡的可用角色範圍。
-var DEBIT_NOTE_ROLES = ['DC', 'DDC_ADMIN', 'STAFF'];
+// DEBIT NOTE 屬區會財務文件：超管擁有最高權限，另開放 DC、行政 DDC 及區職員。
+// 其他 DDC、ADC、領袖或自訂角色不能靠誤改 Perms 擴大此卡權限。
+var DEBIT_NOTE_ROLES = ['DC', 'SYSADMIN', 'DDC_ADMIN', 'STAFF'];
 function canGenerateDebitNoteRole_(role) {
   return DEBIT_NOTE_ROLES.indexOf(String(role || '').trim().toUpperCase()) >= 0;
 }
@@ -313,7 +313,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.22.0',
+      version: '4.23.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -991,7 +991,7 @@ function requireCardEdit_(token, cardId) {
       return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
     })[0];
     if (!debitUser || String(debitUser.active).toUpperCase() === 'FALSE' || !canGenerateDebitNoteRole_(debitUser.role)) {
-      return { error: 'DEBIT NOTE 只限 DC、DDC_ADMIN 及區職員使用' };
+      return { error: 'DEBIT NOTE 只限超管、DC、DDC_ADMIN 及區職員使用' };
     }
   }
   if (levelOfUser_(t.email, t.role) === LEVEL_SUPER) return { ok: true, email: t.email, role: t.role };
@@ -5181,7 +5181,7 @@ function getCards_(token) {
   var isSuper = levelOfUser_(t.email, t.role) === LEVEL_SUPER;
   var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
   var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).filter(function (c) {
-    // DEBIT NOTE 是硬性角色白名單；SYSADMIN 及自訂角色也不能靠超管繞過。
+    // DEBIT NOTE 是硬性角色白名單；SYSADMIN 可用，其他未授權角色不能靠 Perms 繞過。
     if (c.cardId === 'debitNote' && (!u || String(u.active).toUpperCase() === 'FALSE' || !canGenerateDebitNoteRole_(u.role))) return false;
     // 隱藏卡片（enabled=FALSE）：只有層級 0 超管見到（用嚟私下加功能／升級），其他人一律睇唔到
     if (!c.enabled && !isSuper) return false;
@@ -5906,7 +5906,7 @@ function blueprint_() {
     P.push(row('training', trainingEdit()));
     P.push(row('circulars', circularsEdit()));
     P.push(row('fps', ALL_EDIT));
-    P.push(row('debitNote', { DC: 'edit', DDC_ADMIN: 'edit', STAFF: 'edit' }));
+    P.push(row('debitNote', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'edit', STAFF: 'edit' }));
     P.push(row('rooms', ALL_VIEW));
     P.push(row('orgchart', ALL_VIEW));
     P.push(row('ymis', ALL_VIEW));
@@ -6016,7 +6016,7 @@ function blueprint_() {
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
       ['rooms', '地域房間使用情況', '🏢', 'builtin', '/rooms', '17／18／19 樓逐間房睇用途時段 · 今日總覽', 15, 'TRUE', 'FALSE', 'core', 'done'],
       ['orgchart', '地域及總會架構', '🏛', 'builtin', '/orgchart', '港島地域總監架構 · 總會領導層，自動跟官網更新', 16, 'TRUE', 'FALSE', 'core', 'done'],
-      ['debitNote', 'DEBIT NOTE 生成', '🧾', 'builtin', '/debit-note', '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（DC／DDC_ADMIN／職員）', 17, 'TRUE', 'FALSE', 'core', 'done'],
+      ['debitNote', 'DEBIT NOTE 生成', '🧾', 'builtin', '/debit-note', '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（超管／DC／DDC_ADMIN／職員）', 17, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
 
     { name: SHEET.UNITS, headerColor: '#bbf7d0', rows: [
@@ -6261,7 +6261,14 @@ function patchCardRows_(ss) {
   };
   var descOnly = {
     incident: { oldDesc: '即時應變 · 總會指引 · 意外報告', desc: '天氣決策 · 即時應變 · 總會指引 · 意外報告' },
-    debitNote: { oldDesc: '區會範本 · CSV 帶入 · FPS QR · 列印 PDF（DC／DDC_ADMIN／職員）', desc: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（DC／DDC_ADMIN／職員）' },
+    debitNote: {
+      oldDesc: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（DC／DDC_ADMIN／職員）',
+      oldDescs: [
+        '區會範本 · CSV 帶入 · FPS QR · 列印 PDF（DC／DDC_ADMIN／職員）',
+        '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（DC／DDC_ADMIN／職員）',
+      ],
+      desc: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（超管／DC／DDC_ADMIN／職員）',
+    },
   };
   // v4.4.0 刪會議行事曆；v4.5.0 刪週年會議文件；v4.9.0 刪消息發佈卡片（搬咗去主控台頂）
   var removeIds = { meeting: true, annual: true, news: true };
@@ -6270,7 +6277,8 @@ function patchCardRows_(ss) {
     if (removeIds[id]) { sh.deleteRow(i + 1); continue; }
     var p = patches[id];
     var d = descOnly[id];
-    if (d && cDesc >= 0 && String(v[i][cDesc] || '').trim() === d.oldDesc) sh.getRange(i + 1, cDesc + 1).setValue(d.desc);
+    var oldCardDescs = d ? (d.oldDescs || [d.oldDesc]) : [];
+    if (d && cDesc >= 0 && oldCardDescs.indexOf(String(v[i][cDesc] || '').trim()) >= 0) sh.getRange(i + 1, cDesc + 1).setValue(d.desc);
     if (!p) continue;
     if (p.title && cTitle >= 0) {
       var olds = p.oldTitles || (p.oldTitle ? [p.oldTitle] : []);
@@ -6365,9 +6373,8 @@ function ensurePermsRows_(ss) {
 }
 
 /**
- * v4.9.0 權限修訂：獎勵提名只限 DDC 或以上。
- * 只改「仍然同舊預設（全角色 view + DC/SYSADMIN/DDC_ADMIN edit）一樣」嘅行；
- * 用戶已自行自訂嘅矩陣絕對唔掂。
+ * v4.9.0 權限修訂：獎勵提名只限 DDC 或以上；v4.23.0 補 DEBIT NOTE 超管權限。
+ * awards 只改仍同舊預設一樣嘅行；debitNote 只補 SYSADMIN 一格，其他自訂矩陣唔掂。
  */
 function patchPermsRows_(ss) {
   var sh = ss.getSheetByName(SHEET.PERMS);
@@ -6396,6 +6403,14 @@ function patchPermsRows_(ss) {
   }
   for (var i = 1; i < v.length; i++) {
     var cid = String(v[i][0] || '').trim();
+    // v4.23.0：DEBIT NOTE 恢復超管最高權限；只補 SYSADMIN 一格，其他角色維持原設定。
+    if (cid === 'debitNote') {
+      var superCol = header.indexOf('SYSADMIN');
+      if (superCol > 0 && String(v[i][superCol] || '').trim().toLowerCase() !== 'edit') {
+        sh.getRange(i + 1, superCol + 1).setValue('edit');
+      }
+      continue;
+    }
     if (cid !== 'awards') continue;
     if (!isLegacyAwardsRow(v[i])) break;
     var br = blueprintRow('awards');

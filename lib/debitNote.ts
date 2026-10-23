@@ -1,8 +1,8 @@
 import { checkAmount, checkReference } from './fps.ts';
 import type { XlsxSheet, XlsxStyle } from './xlsx.ts';
 
-/** DEBIT NOTE 屬財務文件：只有區總監、行政副區總監及區職員可以使用。 */
-export const DEBIT_NOTE_ROLES = ['DC', 'DDC_ADMIN', 'STAFF'] as const;
+/** DEBIT NOTE：超管擁有最高權限；其餘只開放區總監、行政副區總監及區職員。 */
+export const DEBIT_NOTE_ROLES = ['DC', 'SYSADMIN', 'DDC_ADMIN', 'STAFF'] as const;
 
 export function canGenerateDebitNoteRole(role: string | null | undefined): boolean {
   const normalized = String(role || '').trim().toUpperCase();
