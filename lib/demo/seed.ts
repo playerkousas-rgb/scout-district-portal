@@ -72,6 +72,7 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'fps', title: 'FPS QR 製作', icon: '💳', type: 'builtin', url: '/fps', description: '轉數快 QR 碼：綁區會戶口，填銀碼即生成', order: 14, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'rooms', title: '區總部及地域房間使用情況', icon: '🏢', type: 'builtin', url: '/rooms', description: '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆', order: 15, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'orgchart', title: '地域及總會架構', icon: '🏛', type: 'builtin', url: '/orgchart', description: '港島地域總監架構 · 總會領導層，自動跟官網更新', order: 16, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'debitNote', title: 'DEBIT NOTE 生成', icon: '🧾', type: 'builtin', url: '/debit-note', description: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（DC／DDC_ADMIN／職員）', order: 17, enabled: true, embed: false, source: 'core', category: 'done' },
 ];
 
 export const DEMO_ROLES: Record<string, any>[] = [
@@ -102,7 +103,8 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
     m[c.cardId] = {};
     Object.keys(roleLevel).forEach(role => {
       const lv = roleLevel[role];
-      if (c.cardId === 'awards') m[c.cardId][role] = lv <= 2 ? 'edit' : '';
+      if (c.cardId === 'debitNote') m[c.cardId][role] = ['DC', 'DDC_ADMIN', 'STAFF'].includes(role) ? 'edit' : '';
+      else if (c.cardId === 'awards') m[c.cardId][role] = lv <= 2 ? 'edit' : '';
       else if (c.cardId === 'venueReg') m[c.cardId][role] = lv <= 2 || role === 'STAFF' ? 'edit' : '';
       else if (c.cardId === 'rooms') m[c.cardId][role] = 'view';
       else if (c.cardId === 'ymis') m[c.cardId][role] = 'view';
@@ -460,6 +462,23 @@ export function demoDistrictHqEvents(fromMs: number, days: number): { uid: strin
   return events.filter(e => e.start < fromMs + days * DAY && e.end > fromMs);
 }
 
+// ───────────────────────── DEBIT NOTE 示範帳簿 ─────────────────────────
+
+export function demoDebitNotes(): Record<string, any>[] {
+  const year = new Date().getFullYear();
+  const yy = String(year).slice(-2);
+  const base = {
+    districtCode: 'DEMO',
+    fpsAccountName: '筲箕灣區童軍會（示範戶口）',
+    fpsAccountNumber: '123456-789（示範）',
+    attention: '', reminder: false, createdBy: 'demo-dc@demo', updatedBy: 'demo-dc@demo',
+  };
+  return [
+    { ...base, id: 'dn-demo-001', ref: `${yy}-001`, to: '陳大文', attention: '陳先生', date: dateOnly(45), amount: '1280.00', particulars: '區會活動物資費用（示範）', status: 'Pending payment', remarks: '虛構示範記錄，不可用作付款', fpsQrPayload: `DEMO-FPS-QR|${yy}-001|1280.00`, createdAt: iso(45), updatedAt: iso(45) },
+    { ...base, id: 'dn-demo-002', ref: `${yy}-002`, to: '李小明', date: dateOnly(20), amount: '560.50', particulars: '領袖訓練材料費（示範）', status: 'Paid', remarks: '只供測試舊記錄搜尋及匯出', fpsQrPayload: `DEMO-FPS-QR|${yy}-002|560.50`, createdAt: iso(20), updatedAt: iso(20) },
+  ];
+}
+
 // ───────────────────────── 完整示範資料庫 ─────────────────────────
 
 export interface DemoDb {
@@ -486,13 +505,14 @@ export interface DemoDb {
   incidentReports: Record<string, any>[];
   courseLinks: Record<string, any>[];
   circulars: Record<string, any>[];
+  debitNotes: Record<string, any>[];
   installedPlugins: string[];
   seq: number;
 }
 
 export function freshDemoDb(): DemoDb {
   return {
-    schemaVersion: 2,
+    schemaVersion: 4,
     config: {
       districtName: '筲箕灣區（示範）',
       theme: '',
@@ -531,6 +551,7 @@ export function freshDemoDb(): DemoDb {
     incidentReports: demoIncidentReports(),
     courseLinks: demoCourseLinks(),
     circulars: demoCirculars(),
+    debitNotes: demoDebitNotes(),
     installedPlugins: [],
     seq: 1000,
   };

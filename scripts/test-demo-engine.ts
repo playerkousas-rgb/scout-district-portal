@@ -32,12 +32,13 @@ check('login：任何電郵密碼都入到同一個 ADC 示範身份（權限全
 });
 
 // ── 2. 卡片 ──
-check('getCards：權限全開 — 15 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
+check('getCards：權限全開 — 16 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
   const r = demoCall('getCards', { token: T.adc }, 'GET');
   assert.ok(r.ok);
   const ids = r.data.map((c: any) => c.cardId);
-  assert.strictEqual(ids.length, 15);
+  assert.strictEqual(ids.length, 16);
   assert.ok(ids.indexOf('circulars') >= 0, '區通告卡要喺示範版出現');
+  assert.ok(ids.indexOf('debitNote') >= 0, 'DEBIT NOTE 要喺示範版提供虛構預覽');
   assert.ok(r.data.every((c: any) => c.access === 'edit'));
   assert.strictEqual(ids.indexOf('awards'), -1, '成人獎勵提名唔喺示範範圍');
   assert.strictEqual(ids.indexOf('news'), -1, 'news 卡已移除（消息喺主控台頂）');
@@ -53,6 +54,11 @@ check('示範權限矩陣：rooms 全員可看，審批卡唔畀 ADC；mockAdmin
   assert.strictEqual(matrix.venueReg.ADC_SCOUT, '');
   assert.strictEqual(matrix.venueReg.STAFF, 'edit');
   assert.strictEqual(matrix.venueReg.DDC_ADMIN, 'edit');
+  assert.strictEqual(matrix.debitNote.DC, 'edit');
+  assert.strictEqual(matrix.debitNote.DDC_ADMIN, 'edit');
+  assert.strictEqual(matrix.debitNote.STAFF, 'edit');
+  assert.strictEqual(matrix.debitNote.DDC_TRAINING, '');
+  assert.strictEqual(matrix.debitNote.ADC_SCOUT, '');
   assert.ok(demoCall('getCards', { token: T.adc }, 'GET').data.some((c: any) => c.cardId === 'venueReg'), '示範 mockAdmin 屬特權身份');
 });
 
@@ -294,6 +300,50 @@ check('新制直入：pullCourseSheetRaw 回 12 tabs；getCourseSetup 冇 setup 
   assert.strictEqual(g.data.setup, null);
   const bad = demoCall('getCourseSetup', { token: T.bad, courseId: 'cl-01' }, 'POST');
   assert.strictEqual(bad.ok, false);
+});
+
+// ── DEBIT NOTE 後端帳簿對應的本地示範引擎 ──
+check('DEBIT NOTE：示範帳簿有虛構舊單，新增／更新後可重讀且擋重複 Ref', () => {
+  const initial = demoCall('listDebitNotes', { token: T.adc }, 'GET');
+  assert.ok(initial.ok);
+  assert.strictEqual(initial.data.length, 2);
+  const draft = {
+    ref: 'DEMO-901', to: '示範收款人', attention: '', date: '2026-10-19', amount: '4,950.00',
+    particulars: '示範保存流程', status: 'Pending payment', remarks: '不可付款', reminder: true,
+  };
+  const saved = demoCall('saveDebitNote', { token: T.adc, note: draft }, 'POST');
+  assert.ok(saved.ok, saved.error);
+  assert.strictEqual(saved.data.record.amount, '4950.00');
+  assert.strictEqual(saved.data.record.reminder, true);
+  assert.ok(saved.data.record.fpsQrPayload.startsWith('DEMO-FPS-QR|DEMO-901|'));
+  assert.strictEqual(demoCall('saveDebitNote', { token: T.adc, note: draft }, 'POST').ok, false);
+  const updated = demoCall('saveDebitNote', { token: T.adc, note: { ...draft, id: saved.data.record.id, status: 'Paid', reminder: false } }, 'POST');
+  assert.ok(updated.ok);
+  assert.strictEqual(updated.data.record.status, 'Paid');
+  assert.strictEqual(updated.data.record.reminder, false);
+  assert.strictEqual(updated.data.record.createdAt, saved.data.record.createdAt);
+  assert.strictEqual(demoCall('listDebitNotes', { token: T.adc }, 'GET').data.length, 3);
+  assert.strictEqual(demoCall('listDebitNotes', { token: T.bad }, 'GET').ok, false);
+});
+
+check('DEBIT NOTE：示範整批匯入略過重複；有錯批次整批不寫', () => {
+  const base = { to: '批次測試', attention: '', date: '2026-10-20', particulars: '批次匯入', status: '', remarks: '' };
+  const imported = demoCall('importDebitNotes', { token: T.adc, rows: [
+    { ...base, ref: 'DEMO-901', amount: '10' },
+    { ...base, ref: 'DEMO-902', amount: '20' },
+    { ...base, ref: 'DEMO-902', amount: '21' },
+  ] }, 'POST');
+  assert.ok(imported.ok);
+  assert.strictEqual(imported.data.imported, 1);
+  assert.strictEqual(imported.data.duplicates, 2);
+  const before = demoCall('listDebitNotes', { token: T.adc }, 'GET').data.length;
+  const invalid = demoCall('importDebitNotes', { token: T.adc, rows: [
+    { ...base, ref: 'DEMO-903', amount: '30' },
+    { ...base, ref: 'DEMO-904', amount: '0' },
+  ] }, 'POST');
+  assert.ok(invalid.ok);
+  assert.strictEqual(invalid.data.aborted, true);
+  assert.strictEqual(demoCall('listDebitNotes', { token: T.adc }, 'GET').data.length, before);
 });
 
 // ── 10. 重設 ──

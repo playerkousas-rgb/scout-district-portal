@@ -11,10 +11,14 @@
 
 import {
   freshDemoDb, demoUserFor, demoRoomEvents, demoDistrictHqEvents, demoBudget, demoCourseProfile,
-  demoCourseSetup, demoCourseSheetRaw, demoDefaultMatrix,
+  demoCourseSetup, demoCourseSheetRaw, demoDefaultMatrix, demoDebitNotes,
   DEMO_CARDS, DEMO_ORG_GROUPS, DEMO_STAFF_ROWS, DEMO_HKSA_COUNCIL, DEMO_HKSA_DEPTS,
   DEMO_TOKEN, type DemoDb, type DemoUser,
 } from './seed.ts';
+import {
+  normalizeDebitNoteAmount, normalizeDebitNoteDate, normalizeDebitNoteReminder, validateDebitNote,
+  type DebitNoteDraft, type DebitNoteRecord,
+} from '../debitNote.ts';
 
 type AnyObj = Record<string, any>;
 type ApiResultLike = { ok: boolean; data?: any; error?: string };
@@ -39,6 +43,22 @@ function loadDb(): DemoDb {
             db.matrix.ymis = { ...demoDefaultMatrix().ymis };
           }
           db.schemaVersion = 2;
+          persistDb();
+        }
+        // v3：補 DEBIT NOTE 卡；既有示範分頁毋須手動重設都見到新功能。
+        if ((db.schemaVersion || 0) < 3) {
+          const card = DEMO_CARDS.find(c => c.cardId === 'debitNote');
+          if (card && !db.cards.some(c => c.cardId === 'debitNote')) {
+            db.cards.push({ ...card });
+            db.matrix.debitNote = { ...demoDefaultMatrix().debitNote };
+          }
+          db.schemaVersion = 3;
+          persistDb();
+        }
+        // v4：DEBIT NOTE 由純 CSV 工具升級成可保存、翻查及匯出的示範帳簿。
+        if ((db.schemaVersion || 0) < 4) {
+          db.debitNotes = demoDebitNotes();
+          db.schemaVersion = 4;
           persistDb();
         }
         return db;
@@ -132,6 +152,50 @@ function visibleCards(u: DemoUser): AnyObj[] {
     .sort((a, b) => a.order - b.order);
 }
 
+// ───────────────────────── DEBIT NOTE 示範帳簿 ─────────────────────────
+
+function requireDemoDebitNote(token: string): DemoUser | ApiResultLike {
+  const u = userForToken(token);
+  if (!u) return fail('未登入或登入已過期（示範版）。');
+  if (u.mockAdmin) return u;
+  if (!['DC', 'DDC_ADMIN', 'STAFF'].includes(u.role)) return fail('DEBIT NOTE 只限 DC、DDC_ADMIN 及區職員使用。');
+  const access = (loadDb().matrix.debitNote || {})[u.role] || '';
+  return access === 'edit' ? u : fail('你沒有此功能嘅權限。');
+}
+
+function checkDemoDebitNote(raw: AnyObj): { data?: DebitNoteDraft; error?: string } {
+  const candidate: DebitNoteDraft = {
+    to: String(raw?.to || '').trim(), attention: String(raw?.attention || '').trim(),
+    date: String(raw?.date || '').trim(), ref: String(raw?.ref || '').trim(),
+    amount: String(raw?.amount || '').trim(), particulars: String(raw?.particulars || '').trim(),
+    status: String(raw?.status || '').trim(), remarks: String(raw?.remarks || '').trim(),
+    reminder: normalizeDebitNoteReminder(raw?.reminder),
+  };
+  const validation = validateDebitNote(candidate);
+  const firstError = Object.values(validation)[0];
+  if (firstError) return { error: firstError };
+  if (candidate.to.length > 140 || candidate.attention.length > 100) return { error: 'TO／Attention 太長。' };
+  if (candidate.particulars.length > 500 || candidate.remarks.length > 500 || candidate.status.length > 80) {
+    return { error: '款項內容／狀態／備註太長。' };
+  }
+  candidate.date = normalizeDebitNoteDate(candidate.date);
+  candidate.amount = normalizeDebitNoteAmount(candidate.amount);
+  return { data: candidate };
+}
+
+function demoDebitNoteRecord(draft: DebitNoteDraft, id: string, u: DemoUser, previous?: AnyObj): DebitNoteRecord {
+  const d = loadDb();
+  const now = nowIso();
+  return {
+    ...draft, id, districtCode: 'DEMO',
+    fpsAccountName: String(d.config.fpsAccountName || '筲箕灣區童軍會（示範戶口）'),
+    fpsAccountNumber: String(d.config.fpsAccountNumber || '123456-789（示範）'),
+    fpsQrPayload: `DEMO-FPS-QR|${draft.ref}|${draft.amount}`,
+    createdAt: String(previous?.createdAt || now), createdBy: String(previous?.createdBy || u.email),
+    updatedAt: now, updatedBy: u.email,
+  };
+}
+
 /**
  * 🎭 示範版：成人獎勵提名（awards）不設示範 — 全部動作擋。
  * （正常情況下 /awards 已被卡片門禁 redirect 返主控台，呢個訊息只係後備。）
@@ -176,6 +240,53 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
     case 'getCards': {
       if (!u) return fail('未登入或登入已過期（示範版）。');
       return ok(visibleCards(u));
+    }
+    case 'listDebitNotes': {
+      const r = requireDemoDebitNote(token); if (isErr(r)) return r;
+      return ok((d.debitNotes || []).map(x => ({ ...x })).sort((a, b) => {
+        const byDate = String(b.date || '').localeCompare(String(a.date || ''));
+        return byDate || String(b.ref || '').localeCompare(String(a.ref || ''), 'en', { numeric: true });
+      }));
+    }
+    case 'saveDebitNote': {
+      const r = requireDemoDebitNote(token); if (isErr(r)) return r;
+      const raw = (payload.note || {}) as AnyObj;
+      const checked = checkDemoDebitNote(raw); if (checked.error || !checked.data) return fail(checked.error || '記錄無效。');
+      const id = String(raw.id || '').trim();
+      const existingIndex = id ? d.debitNotes.findIndex(x => x.id === id) : -1;
+      if (id && existingIndex < 0) return fail('找不到這張 DEBIT NOTE。');
+      const duplicate = d.debitNotes.find(x => String(x.ref).toLowerCase() === checked.data!.ref.toLowerCase() && x.id !== id);
+      if (duplicate) return fail(`Ref No.「${checked.data.ref}」已存在。`);
+      const record = demoDebitNoteRecord(checked.data, id || genId('dn'), r as DemoUser, existingIndex >= 0 ? d.debitNotes[existingIndex] : undefined);
+      if (existingIndex >= 0) d.debitNotes[existingIndex] = record;
+      else d.debitNotes.push(record);
+      persistDb();
+      return ok({ saved: true, record: { ...record } });
+    }
+    case 'importDebitNotes': {
+      const r = requireDemoDebitNote(token); if (isErr(r)) return r;
+      const rows = payload.rows;
+      if (!Array.isArray(rows) || !rows.length) return fail('沒有可匯入的 DEBIT NOTE。');
+      if (rows.length > 500) return fail('每次最多匯入 500 筆。');
+      const valid: Array<{ data: DebitNoteDraft; sourceRow: number }> = [];
+      const errors: Array<{ row: number; ref: string; error: string }> = [];
+      rows.forEach((raw, index) => {
+        const checked = checkDemoDebitNote(raw);
+        const sourceRow = Number(raw?.sourceRow) || index + 2;
+        if (checked.error || !checked.data) errors.push({ row: sourceRow, ref: String(raw?.ref || ''), error: checked.error || '記錄無效。' });
+        else valid.push({ data: checked.data, sourceRow });
+      });
+      if (errors.length) return ok({ imported: 0, duplicates: 0, duplicateRefs: [], errors, aborted: true });
+      const seen = new Set(d.debitNotes.map(x => String(x.ref || '').toLowerCase()));
+      const duplicateRefs: string[] = [];
+      valid.forEach(item => {
+        const key = item.data.ref.toLowerCase();
+        if (seen.has(key)) { duplicateRefs.push(item.data.ref); return; }
+        seen.add(key);
+        d.debitNotes.push(demoDebitNoteRecord(item.data, genId('dn'), r as DemoUser));
+      });
+      persistDb();
+      return ok({ imported: valid.length - duplicateRefs.length, duplicates: duplicateRefs.length, duplicateRefs: duplicateRefs.slice(0, 30), errors: [], aborted: false });
     }
     case 'getYmisCredentials': {
       if (method !== 'POST' || !u || !visibleCards(u).some(c => c.cardId === 'ymis')) return fail('沒有 YMIS 帳戶查閱權限（示範版）。');
