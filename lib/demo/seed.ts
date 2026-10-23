@@ -72,7 +72,7 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'fps', title: 'FPS QR 製作', icon: '💳', type: 'builtin', url: '/fps', description: '轉數快 QR 碼：綁區會戶口，填銀碼即生成', order: 14, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'rooms', title: '區總部及地域房間使用情況', icon: '🏢', type: 'builtin', url: '/rooms', description: '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆', order: 15, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'orgchart', title: '地域及總會架構', icon: '🏛', type: 'builtin', url: '/orgchart', description: '港島地域總監架構 · 總會領導層，自動跟官網更新', order: 16, enabled: true, embed: false, source: 'core', category: 'done' },
-  { cardId: 'debitNote', title: 'DEBIT NOTE 生成', icon: '🧾', type: 'builtin', url: '/debit-note', description: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（DC／DDC_ADMIN／職員）', order: 17, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'debitNote', title: 'DEBIT NOTE 生成', icon: '🧾', type: 'builtin', url: '/debit-note', description: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（超管／DC／DDC_ADMIN／職員）', order: 17, enabled: true, embed: false, source: 'core', category: 'done' },
 ];
 
 export const DEMO_ROLES: Record<string, any>[] = [
@@ -103,7 +103,7 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
     m[c.cardId] = {};
     Object.keys(roleLevel).forEach(role => {
       const lv = roleLevel[role];
-      if (c.cardId === 'debitNote') m[c.cardId][role] = ['DC', 'DDC_ADMIN', 'STAFF'].includes(role) ? 'edit' : '';
+      if (c.cardId === 'debitNote') m[c.cardId][role] = ['DC', 'SYSADMIN', 'DDC_ADMIN', 'STAFF'].includes(role) ? 'edit' : '';
       else if (c.cardId === 'awards') m[c.cardId][role] = lv <= 2 ? 'edit' : '';
       else if (c.cardId === 'venueReg') m[c.cardId][role] = lv <= 2 || role === 'STAFF' ? 'edit' : '';
       else if (c.cardId === 'rooms') m[c.cardId][role] = 'view';
@@ -113,6 +113,8 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
       else m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
     });
   });
+  // 超管不屬一般可轉授角色，但 DEBIT NOTE 仍保留最高權限。
+  if (m.debitNote) m.debitNote.SYSADMIN = 'edit';
   return m;
 }
 

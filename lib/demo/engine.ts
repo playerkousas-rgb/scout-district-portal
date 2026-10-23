@@ -158,7 +158,7 @@ function requireDemoDebitNote(token: string): DemoUser | ApiResultLike {
   const u = userForToken(token);
   if (!u) return fail('未登入或登入已過期（示範版）。');
   if (u.mockAdmin) return u;
-  if (!['DC', 'DDC_ADMIN', 'STAFF'].includes(u.role)) return fail('DEBIT NOTE 只限 DC、DDC_ADMIN 及區職員使用。');
+  if (!['DC', 'SYSADMIN', 'DDC_ADMIN', 'STAFF'].includes(u.role)) return fail('DEBIT NOTE 只限超管、DC、DDC_ADMIN 及區職員使用。');
   const access = (loadDb().matrix.debitNote || {})[u.role] || '';
   return access === 'edit' ? u : fail('你沒有此功能嘅權限。');
 }

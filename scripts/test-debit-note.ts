@@ -30,9 +30,9 @@ function check(label: string, fn: () => void) {
   fn(); pass++; console.log(`  ✓ ${label}`);
 }
 
-check('角色白名單只包括 DC、DDC_ADMIN、STAFF', () => {
-  for (const role of ['DC', 'dc', ' DDC_ADMIN ', 'STAFF']) assert.equal(canGenerateDebitNoteRole(role), true);
-  for (const role of ['SYSADMIN', 'DDC_TRAINING', 'ADC_SCOUT', 'LEADER', '', null, undefined]) {
+check('角色白名單包括最高權限 SYSADMIN、DC、DDC_ADMIN、STAFF', () => {
+  for (const role of ['DC', 'dc', 'SYSADMIN', ' sysadmin ', ' DDC_ADMIN ', 'STAFF']) assert.equal(canGenerateDebitNoteRole(role), true);
+  for (const role of ['DDC_TRAINING', 'ADC_SCOUT', 'LEADER', '', null, undefined]) {
     assert.equal(canGenerateDebitNoteRole(role), false);
   }
 });

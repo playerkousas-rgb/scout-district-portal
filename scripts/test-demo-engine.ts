@@ -55,6 +55,7 @@ check('示範權限矩陣：rooms 全員可看，審批卡唔畀 ADC；mockAdmin
   assert.strictEqual(matrix.venueReg.STAFF, 'edit');
   assert.strictEqual(matrix.venueReg.DDC_ADMIN, 'edit');
   assert.strictEqual(matrix.debitNote.DC, 'edit');
+  assert.strictEqual(matrix.debitNote.SYSADMIN, 'edit');
   assert.strictEqual(matrix.debitNote.DDC_ADMIN, 'edit');
   assert.strictEqual(matrix.debitNote.STAFF, 'edit');
   assert.strictEqual(matrix.debitNote.DDC_TRAINING, '');

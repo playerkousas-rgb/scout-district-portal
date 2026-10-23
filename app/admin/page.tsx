@@ -228,7 +228,7 @@ export default function AdminPage() {
                     {bundle.roles.map(r => {
                       const v = cellVal(c.cardId, r.role);
                       const fixed = (c.cardId === 'ymis' && !canViewYmisRole(r.role)) || (c.cardId === 'debitNote' && !canGenerateDebitNoteRole(r.role));
-                      const fixedTitle = c.cardId === 'debitNote' ? 'DEBIT NOTE 只限 DC、DDC_ADMIN 及區職員' : 'YMIS 帳戶只限總監級及職員';
+                      const fixedTitle = c.cardId === 'debitNote' ? 'DEBIT NOTE 只限超管、DC、DDC_ADMIN 及區職員' : 'YMIS 帳戶只限總監級及職員';
                       return <td key={r.role} className={`pcell ${CELL[v].cls} ${fixed ? 'locked' : ''}`} title={fixed ? fixedTitle : undefined} onClick={() => toggle(c.cardId, r.role)}>{CELL[v].txt}</td>;
                     })}
                     <td style={{ whiteSpace: 'nowrap' }}>

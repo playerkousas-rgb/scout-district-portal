@@ -5,9 +5,18 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.23.0 — 🛡 DEBIT NOTE 恢復超管最高權限</h3>
+        <p><code>SYSADMIN</code> 現在與 DC、DDC_ADMIN 及區職員一樣可使用 DEBIT NOTE；超管不再需要額外 Perms 才能操作。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.23.0</a></p>
+        <ul>
+          <li>✅ 超管可見卡片、直接進入 <code>/debit-note</code>，並可使用帳簿 list／save／import API；前端權限管理及後端白名單已同步。</li>
+          <li>🔒 其他 DDC、ADC、領袖及自訂角色限制維持不變，不能靠誤授 Perms 繞過。</li>
+          <li>⚠️ 部署：更新 <code>Code.gs</code> → 執行 <code>setupSheets()</code>，只為現有 <code>Perms.debitNote</code> 行補 <code>SYSADMIN=edit</code>，不重寫其他角色權限或帳簿記錄 → 重新部署；健康檢查應回傳 <code>4.23.0</code>。</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.22.0 — 🟥 DEBIT NOTE 可選 REMINDER 印＋整頁 A4 PDF</h3>
         <p>按正式單據樣式在標題右方加紅字紅框 REMINDER；整張文件可直接下載 PDF，或用瀏覽器以 A4 列印。</p>
-        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.22.0</a></p>
         <ul>
           <li>☑️ 新增「加 REMINDER 印」剔格：有剔先顯示，舊單及舊 CSV 預設無印；狀態會隨後端記錄、重開舊單、完整 CSV／Excel 匯出保存，亦可取消並寫回 FALSE。</li>
           <li>⬇ 「下載整頁 PDF」直接輸出單頁 A4（210 × 297 mm），包括正式信頭、REMINDER、文件明細、FPS QR、TOTAL 及簽署欄；檔名跟 Ref No.，不會包含表單或帳簿按鈕。</li>

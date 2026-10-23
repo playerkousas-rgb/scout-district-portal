@@ -169,7 +169,7 @@ export default function DelegatePage() {
                           <tr key={c.cardId} className={unlocked ? '' : 'dlg-locked'}>
                             <td className="sticky-col card-name"><span>{c.icon}</span> {c.title}{!c.enabled && <small className="badge-type" style={{ background: '#e2e8f0' }}>已隱藏</small>}</td>
                             <td className={`pcell ${CELL[mine].cls}`} title={mine ? '你現有嘅權限' : '你冇此卡片權限，不能授出'}>{CELL[mine].txt}</td>
-                            <td className={`pcell ${CELL[v].cls}`} onClick={() => cycle(c.cardId)} title={targetBlocked ? 'DEBIT NOTE 只限 DC、DDC_ADMIN 及區職員' : unlocked ? '點擊切換' : '鎖住'}>{unlocked ? CELL[v].txt : '🔒'}</td>
+                            <td className={`pcell ${CELL[v].cls}`} onClick={() => cycle(c.cardId)} title={targetBlocked ? 'DEBIT NOTE 只限超管、DC、DDC_ADMIN 及區職員' : unlocked ? '點擊切換' : '鎖住'}>{unlocked ? CELL[v].txt : '🔒'}</td>
                           </tr>
                         );
                       })}
