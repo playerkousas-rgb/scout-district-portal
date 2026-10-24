@@ -69,7 +69,7 @@ export default function YmisPage() {
     <>
       <BackLink />
       <h1 className="page-title">🪪 YMIS 會員核實</h1>
-      <p className="page-sub">只限 DC／DDC／ADC 總監級及區職員；區系統只協助找回區方核實帳戶，YMIS 仍要在官方網站自行登入。</p>
+      <p className="page-sub">按「權限／角色管理」獲授權的角色可查閱區方核實帳戶；區系統只協助找回帳密，YMIS 仍要在官方網站自行登入。</p>
       {session.mockAdmin && <div className="fps-notice" role="status" style={{ marginBottom: 16 }}>🎭 示範版只展示無法登入的虛構帳密，並不會讀取正式後台。</div>}
 
       <div className="ymis-intro">

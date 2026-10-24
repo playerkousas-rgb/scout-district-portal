@@ -13,7 +13,6 @@ import { api } from '@/lib/api';
 import { loadSession } from '@/lib/session';
 import { useDistrict } from '@/lib/useDistrict';
 import { canDelegate, levelLabel } from '@/lib/levels';
-import { canGenerateDebitNoteRole } from '@/lib/debitNote';
 import BackLink, { BackBar } from '@/components/BackLink';
 import type { AccessLevel, DelegationBundle, UserSession } from '@/lib/types';
 
@@ -61,7 +60,6 @@ export default function DelegatePage() {
   /** 點格子：— → 👁 → ✏️ → —，但唔可以超過我自己嘅權限 */
   function cycle(cardId: string) {
     if (!bundle) return;
-    if (cardId === 'debitNote' && !canGenerateDebitNoteRole(target)) return;
     const mine = bundle.myAccess[cardId] || '';
     if (!mine) return;
     const cur = draft[cardId] || '';
@@ -73,7 +71,7 @@ export default function DelegatePage() {
     if (!bundle) return;
     const d: Record<string, AccessLevel> = {};
     bundle.cards.forEach(c => {
-      d[c.cardId] = c.cardId === 'debitNote' && !canGenerateDebitNoteRole(target) ? '' : (bundle.myAccess[c.cardId] || '');
+      d[c.cardId] = bundle.myAccess[c.cardId] || '';
     });
     setDraft(d);
   }
@@ -163,13 +161,12 @@ export default function DelegatePage() {
                       {bundle.cards.map(c => {
                         const mine = bundle.myAccess[c.cardId] || '';
                         const v = draft[c.cardId] || '';
-                        const targetBlocked = c.cardId === 'debitNote' && !canGenerateDebitNoteRole(target);
-                        const unlocked = !!mine && !targetBlocked;
+                        const unlocked = !!mine;
                         return (
                           <tr key={c.cardId} className={unlocked ? '' : 'dlg-locked'}>
                             <td className="sticky-col card-name"><span>{c.icon}</span> {c.title}{!c.enabled && <small className="badge-type" style={{ background: '#e2e8f0' }}>已隱藏</small>}</td>
                             <td className={`pcell ${CELL[mine].cls}`} title={mine ? '你現有嘅權限' : '你冇此卡片權限，不能授出'}>{CELL[mine].txt}</td>
-                            <td className={`pcell ${CELL[v].cls}`} onClick={() => cycle(c.cardId)} title={targetBlocked ? 'DEBIT NOTE 只限超管、DC、DDC_ADMIN 及區職員' : unlocked ? '點擊切換' : '鎖住'}>{unlocked ? CELL[v].txt : '🔒'}</td>
+                            <td className={`pcell ${CELL[v].cls}`} onClick={() => cycle(c.cardId)} title={unlocked ? '點擊切換' : '鎖住'}>{unlocked ? CELL[v].txt : '🔒'}</td>
                           </tr>
                         );
                       })}

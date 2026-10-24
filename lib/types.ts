@@ -327,6 +327,93 @@ export interface Venue {
   active?: string;
   scienerLockId?: string; // 呢個場地嘅 Sciener/TTLock Lock ID（數字）
 }
+export interface VenueLockInfo {
+  lockId: number | string;
+  name: string;
+  mac: string;
+  hasGateway: boolean;
+  electricQuantity?: number;
+}
+export interface VenueLockConfigStatus {
+  version: string;
+  clientId: string;
+  clientIdSet: boolean;
+  clientSecretSet: boolean;
+  username: string;
+  usernameMasked: string;
+  usernameSet: boolean;
+  passwordSet: boolean;
+  lockId: string;
+  lockIdSet: boolean;
+  apiBase: string;
+  resolvedApiBase: string;
+  pwdMode: string;
+  ttlockDisabled: boolean;
+  ttlockReady: boolean;
+  teamupApiKeySet: boolean;
+  teamupCalendarKey: string;
+  teamupPendingSub: string;
+  teamupApprovedSub: string;
+  teamupRejectedSub: string;
+  teamupReady: boolean;
+  notifyStaffEmail: string;
+  venueCount: number;
+  venuesWithLockCount: number;
+  sheetHasPasscodeCol: boolean;
+  sheetHasPwdRefCol: boolean;
+  saved?: boolean;
+  boundVenues?: number;
+}
+export interface VenueLockConfigInput {
+  clientId?: string;
+  clientSecret?: string;
+  username?: string;
+  password?: string;
+  lockId?: string;
+  apiBase?: string;
+  pwdMode?: string;
+  ttlockDisabled?: boolean | string;
+  teamupApiKey?: string;
+  teamupCalendarKey?: string;
+  teamupPendingSub?: string;
+  teamupApprovedSub?: string;
+  teamupRejectedSub?: string;
+  notifyStaffEmail?: string;
+  bindLockToVenues?: boolean;
+}
+export interface VenueApproveResult {
+  saved: boolean;
+  id?: string;
+  status?: string;
+  password: string;
+  passcode?: string;
+  pwdRef?: string;
+  lockWritten?: boolean;
+  simulated?: boolean;
+  apiBase?: string;
+  lockId?: string;
+  validFrom?: string;
+  validTo?: string;
+  teamupEventId?: string;
+  teamupSynced?: boolean;
+  emailSent?: boolean;
+  emailTo?: string;
+  reviewedAt?: string;
+  reviewer?: string;
+  warn: string;
+}
+export interface BackendHealthInfo {
+  ok?: boolean;
+  status?: string;
+  version?: string;
+  district?: string;
+  districtCode?: string;
+  teamupConfigured?: boolean;
+  ttlockConfigured?: boolean;
+  lockIdSet?: boolean;
+  ttlockDisabled?: boolean;
+  timestamp?: string;
+}
 export interface VenueBooking {
   id: string;
   refCode?: string;
@@ -344,9 +431,9 @@ export interface VenueBooking {
   status?: string;
   reviewer?: string;
   reviewedAt?: string;
-  passcode?: string; // 批准後自動生成並電郵俾申請人嘅入場密碼（稍後）
-  pwdRef?: string; // 電子鎖密碼記錄 ID
-  teamupEventId?: string; // 填表時 GS 喺 Teamup「申請中」建嘅事件 ID
+  passcode?: string; // 批准後自動生成並電郵俾申請人嘅入場密碼
+  pwdRef?: string; // 電子鎖密碼記錄 ID（keyboardPwdId）
+  teamupEventId?: string; // 填表／批核時喺 Teamup 建立嘅事件 ID
   agreeRules?: string; // 已同意借用守則（v4.0）
 }
 export interface StockItem {

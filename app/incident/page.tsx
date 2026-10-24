@@ -11,7 +11,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
-import { useRequireCard } from '@/lib/cardAccess';
+import { useRequireCardAccess } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { IncidentReport, IncidentTimelineRow, UserSession } from '@/lib/types';
 import {
@@ -66,7 +66,7 @@ function fmtDT(iso?: string) {
 
 export default function IncidentPage() {
   const { districtCode, district } = useDistrict();
-  const session = useRequireCard('incident');
+  const { session, access } = useRequireCardAccess('incident', { redirectOnError: true });
   const searchParams = useSearchParams();
   const initialTab = searchParams.get('tab') as Tab | null;
   const [tab, setTab] = useState<Tab>(initialTab && TABS.some(x => x.id === initialTab) ? initialTab : 'now');
@@ -88,7 +88,7 @@ export default function IncidentPage() {
       {tab === 'weather' && <WeatherDecisionPanel />}
       {tab === 'now' && <NowTab />}
       {tab === 'docs' && <DocsTab />}
-      {tab === 'report' && <ReportTab session={session} districtCode={districtCode || ''} districtName={district?.name || ''} />}
+      {tab === 'report' && <ReportTab session={session} canEdit={access === 'edit' || !!session.isAdmin} districtCode={districtCode || ''} districtName={district?.name || ''} />}
       <BackBar />
     </>
   );
@@ -217,7 +217,7 @@ function DocsTab() {
 }
 
 /* ───────────────────────── 分頁 3：意外報告 ───────────────────────── */
-function ReportTab({ session, districtCode, districtName }: { session: UserSession; districtCode: string; districtName: string }) {
+function ReportTab({ session, canEdit, districtCode, districtName }: { session: UserSession; canEdit: boolean; districtCode: string; districtName: string }) {
   const [mode, setMode] = useState<'list' | 'form'>('list');
   const [reports, setReports] = useState<IncidentReport[]>([]);
   const [loading, setLoading] = useState(true);
@@ -225,7 +225,7 @@ function ReportTab({ session, districtCode, districtName }: { session: UserSessi
   const [msg, setMsg] = useState('');
   const [openId, setOpenId] = useState('');
   const [busy, setBusy] = useState(false);
-  const isOps = OPS_ROLES.includes(session.role) || session.isAdmin;
+  const isOps = canEdit;
 
   // 草稿：只存本機
   const [r, setR] = useState<IncidentReport>(EMPTY_REPORT);

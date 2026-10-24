@@ -93,33 +93,37 @@ async function login(email) {
   assert.equal((await get('listDebitNotes', { token: maintenance.token })).ok, true, '維護超管可讀帳簿');
   console.log('  ✓ Script 維護超管無 Users 列仍可見卡片及讀取帳簿');
 
-  // 刻意模擬管理員誤授：後台剔走非白名單；SYSADMIN／DDC_ADMIN 統一為可管理。
+  // 預設未授權角色（ADC_SCOUT = ''）：list／save／import API 均拒絕。
   const dc = await login('dc@skwscout.org.hk');
-  const bundle = await get('getPerms', { token: dc.token });
-  assert.equal(bundle.ok, true);
-  bundle.data.matrix.debitNote.ADC_SCOUT = 'edit';
-  bundle.data.matrix.debitNote.SYSADMIN = 'view';
-  bundle.data.matrix.debitNote.DDC_ADMIN = 'view';
-  const savedPerms = await post({ action: 'savePerms', token: dc.token, matrix: bundle.data.matrix });
-  assert.equal(savedPerms.ok, true);
-  const after = await get('getPerms', { token: dc.token });
-  assert.ok(!after.data.matrix.debitNote.ADC_SCOUT);
-  assert.equal(after.data.matrix.debitNote.SYSADMIN, 'edit');
-  assert.equal(after.data.matrix.debitNote.DDC_ADMIN, 'edit');
   const adc = await login('adc.scout@skwscout.org.hk');
-  const adcCards = await get('getCards', { token: adc.token });
-  assert.ok(!adcCards.data.some(item => item.cardId === 'debitNote'));
-  console.log('  ✓ 誤授 ADC 會被剔除；SYSADMIN 保持最高 edit 權限');
-
-  // API 同樣硬擋非白名單角色；不是只做卡片及頁面門禁。
   for (const action of ['saveDebitNote', 'importDebitNotes']) {
     const denied = await post({ action, token: adc.token, note: {}, rows: [] });
-    assert.equal(denied.ok, false, `ADC ${action} 必須被擋`);
+    assert.equal(denied.ok, false, `未授權 ADC ${action} 必須被擋`);
   }
   assert.equal((await get('listDebitNotes', { token: adc.token })).ok, false);
   const sysadmin = await login('sysadmin@skwscout.org.hk');
   assert.equal((await get('listDebitNotes', { token: sysadmin.token })).ok, true);
-  console.log('  ✓ list／save／import API 均拒絕 ADC；SYSADMIN 可讀帳簿');
+  console.log('  ✓ 預設未授權 ADC 被擋；SYSADMIN 可讀帳簿');
+
+  // 管理員可自由設定任何卡片／角色為 — / 👁 (view) / ✏️ (edit)，後台原樣保存並按 Perms 執行。
+  const bundle = await get('getPerms', { token: dc.token });
+  assert.equal(bundle.ok, true);
+  bundle.data.matrix.debitNote.ADC_SCOUT = 'view';
+  bundle.data.matrix.ymis.ADC_SCOUT = 'edit';
+  const savedPerms = await post({ action: 'savePerms', token: dc.token, matrix: bundle.data.matrix });
+  assert.equal(savedPerms.ok, true);
+  const after = await get('getPerms', { token: dc.token });
+  assert.equal(after.data.matrix.debitNote.ADC_SCOUT, 'view');
+  assert.equal(after.data.matrix.ymis.ADC_SCOUT, 'edit');
+  const adcCards = await get('getCards', { token: adc.token });
+  assert.equal(adcCards.data.find(item => item.cardId === 'debitNote')?.access, 'view');
+  assert.equal((await get('listDebitNotes', { token: adc.token })).ok, true, '👁 view 應可查閱帳簿');
+  assert.equal((await post({ action: 'saveDebitNote', token: adc.token, note: {} })).ok, false, '👁 view 不可寫入帳簿');
+  // 還原預設
+  bundle.data.matrix.debitNote.ADC_SCOUT = '';
+  bundle.data.matrix.ymis.ADC_SCOUT = 'view';
+  await post({ action: 'savePerms', token: dc.token, matrix: bundle.data.matrix });
+  console.log('  ✓ 管理員可自由切換 — / 👁 / ✏️ 並即時生效（不再硬鎖角色）');
 
   const note = {
     ref: '26-900', to: '整合測試收款人', attention: '測試先生', date: '2026-10-19',
@@ -194,8 +198,8 @@ async function login(email) {
   console.log('  ✓ 無效批次整批 rollback；後端自行驗證金額及 Ref，唔信 client');
 
   const health = await get('getHealthCheck');
-  assert.equal(health.data.version, '4.23.1');
-  console.log('  ✓ setupSheets 補卡及 DebitNotes 帳簿成功，健康檢查版本 4.23.1');
+  assert.equal(health.data.version, '4.24.0');
+  console.log('  ✓ setupSheets 補卡及 DebitNotes 帳簿成功，健康檢查版本 4.24.0');
   console.log('\n全部後台門禁及帳簿整合測試通過 ✓');
 })().catch(error => {
   console.error(error);

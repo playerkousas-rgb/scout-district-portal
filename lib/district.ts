@@ -11,7 +11,7 @@
  */
 
 export const PLATFORM_NAME = '童軍區管理平台';
-export const PLATFORM_COPYRIGHT = '© 2026 SKWSCOUT SYSTEM';
+export const PLATFORM_COPYRIGHT = '© 2026 SKWSCOUT';
 export const DISTRICT_STORAGE_KEY = 'portal_selected_district';
 export const DEFAULT_DISABLED_MESSAGE = '此區服務現正暫停。請留意區方通知，或稍後再試。';
 

@@ -5,10 +5,10 @@ import { useRouter } from 'next/navigation';
 import { api } from './api';
 import { loadSession } from './session';
 import { useDistrict } from './useDistrict';
-import type { UserSession } from './types';
+import type { AccessLevel, UserSession } from './types';
 
 export type CardAccessCheck =
-  | { status: 'allowed' }
+  | { status: 'allowed'; access: AccessLevel }
   | { status: 'denied' }
   | { status: 'error'; error: string };
 
@@ -27,7 +27,10 @@ export async function checkCardAccess(
   try {
     const r = await getCards(token);
     if (r.ok && Array.isArray(r.data)) {
-      return r.data.some(c => c.cardId === cardId) ? { status: 'allowed' } : { status: 'denied' };
+      const found = r.data.find(c => c.cardId === cardId);
+      if (!found) return { status: 'denied' };
+      const access: AccessLevel = found.access === 'edit' ? 'edit' : 'view';
+      return { status: 'allowed', access };
     }
     return { status: 'error', error: r.error || '後台未能確認卡片權限，請稍後再試。' };
   } catch (error) {
@@ -47,6 +50,7 @@ export async function canAccessCard(token: string, cardId: string): Promise<bool
 
 interface CardAccessState {
   session: UserSession | null;
+  access: AccessLevel;
   checking: boolean;
   error: string;
   retry: () => void;
@@ -56,6 +60,7 @@ function useCardAccess(cardId: string, redirectOnError: boolean): CardAccessStat
   const router = useRouter();
   const { withDistrict } = useDistrict();
   const [session, setSession] = useState<UserSession | null>(null);
+  const [access, setAccess] = useState<AccessLevel>('');
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -64,6 +69,7 @@ function useCardAccess(cardId: string, redirectOnError: boolean): CardAccessStat
   useEffect(() => {
     let cancelled = false;
     setSession(null);
+    setAccess('');
     setChecking(true);
     setError('');
     const s = loadSession();
@@ -86,13 +92,14 @@ function useCardAccess(cardId: string, redirectOnError: boolean): CardAccessStat
         return;
       }
       // 同一個 token 唔再換新 object（避免多餘 re-render）
+      setAccess(result.access);
       setSession(prev => (prev && prev.token === s.token ? prev : s));
       setChecking(false);
     });
     return () => { cancelled = true; };
   }, [router, withDistrict, cardId, attempt, redirectOnError]);
 
-  return { session, checking, error, retry };
+  return { session, access, checking, error, retry };
 }
 
 /**
@@ -107,6 +114,6 @@ export function useRequireCard(cardId: string): UserSession | null {
  * DEBIT NOTE 等需要避免「 transient error 當無權限」的頁面：
  * 未登入／明確無卡仍會回主控台；API／連線錯誤則留頁顯示 error，並可 retry。
  */
-export function useRequireCardAccess(cardId: string): CardAccessState {
-  return useCardAccess(cardId, false);
+export function useRequireCardAccess(cardId: string, opts?: { redirectOnError?: boolean }): CardAccessState {
+  return useCardAccess(cardId, !!opts?.redirectOnError);
 }

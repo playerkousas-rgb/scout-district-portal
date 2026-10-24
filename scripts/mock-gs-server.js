@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const http = require('http');
+const crypto = require('crypto');
 
 const code = fs.readFileSync(path.join(__dirname, '..', 'gs', 'Code.gs'), 'utf8');
 const PORT = Number(process.env.PORT || 8788);
@@ -108,14 +109,16 @@ const ctx = {
       if (fmt === 'yyyy-MM-dd') return iso.slice(0, 10);
       if (fmt === 'yyyyMMdd') return iso.slice(0, 10).replace(/-/g, '');
       if (fmt === 'yyyy-MM-dd HH:mm') return iso.slice(0, 16).replace('T', ' ');
+      if (fmt === "yyyy-MM-dd'T'HH:mm") return iso.slice(0, 16);
+      if (fmt === "yyyy-MM-dd'T'HH:mm:ss") return iso.slice(0, 19);
       return iso;
     },
     getUuid: () => 'uuid-' + Math.random().toString(36).slice(2),
     base64EncodeWebSafe: (s) => Buffer.from(String(s), 'utf8').toString('base64url'),
     base64DecodeWebSafe: (s) => Buffer.from(String(s), 'base64url'),
     newBlob: (b) => ({ getDataAsString: () => Buffer.from(b).toString('utf8') }),
-    computeDigest: (_a, s) => Array.from(String(s)).map(c => c.charCodeAt(0) % 128),
-    DigestAlgorithm: { SHA_256: 'sha256' }, Charset: { UTF_8: 'utf8' },
+    computeDigest: (algo, s) => Array.from(crypto.createHash(algo || 'sha256').update(String(s), 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
+    DigestAlgorithm: { SHA_256: 'sha256', MD5: 'md5' }, Charset: { UTF_8: 'utf8' },
     sleep: () => {},
   },
   ContentService: {

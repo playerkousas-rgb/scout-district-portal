@@ -12,7 +12,7 @@
 ## 🏛 借場系統 — 起動步驟（最常要做，照住做就得）
 
 架構：**申請人（member-portal）填表 → 寫入 Google Sheet（pending）＋ Teamup「申請中」事件 →
-區職員喺 `/venue-regs` 批准（Teamup 轉色）。** TTLock 一鍵密碼稍後再接。
+區職員喺 `/venue-regs` 點「⚡ 一鍵批准」（TTLock／Sciener 寫入限時密碼 ＋ Teamup 轉色 ＋ 電郵申請人 ＋ 密碼與 `pwdRef` 回傳至 Sheet 及審批頁）。**
 
 對接合約見 [`docs/member-gs-handshake.md`](docs/member-gs-handshake.md)。
 
@@ -32,20 +32,22 @@
 5. **更換預設 Users／Staff 初始密碼**，不再使用的帳戶應停用；尤其啟用 YMIS 卡之前必須完成。`MASTER_EMAIL`（帳號名稱）可按區方需要另改，密碼不可寫入 Code.gs。
 6. **全新區**：部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：**任何人**）→ 攞 `/exec` 網址。**已有區**：管理部署 → 編輯**原有** Web App → 新版本；沿用舊 `/exec`。
 
-### 第 2 步：填 Config 金鑰（喺「Config」工作表）
+### 第 2 步：填 Config 金鑰（可直接喺 `/venue-regs`「電子鎖與日曆設定」儲存，或填「Config」工作表）
 
 > **簡潔版設定表：** 請先看 [`docs/config-simple.md`](docs/config-simple.md)。電郵只需填 `NOTIFY_STAFF_EMAIL`；`notifyFrom` 只是顯示名稱，`approverEmail` 現行不用填。
 | 區塊 | 欄位 | 備註 |
 |---|---|---|
 | Teamup | `TEAMUP_API_KEY` | 兼容舊欄名 `teamupApiKey` |
 | Teamup | `TEAMUP_CALENDAR_KEY` | 分享金鑰，形如 `ks...`（唔係 `c/` 開頭） |
+| Teamup | `TEAMUP_PENDING_SUBCAL_ID` | 「申請中」藍色子日曆 ID |
 | Teamup | `TEAMUP_APPROVED_SUBCAL_ID` | 「確認借用區總部」子日曆 ID |
 | Teamup | `TEAMUP_REJECTED_SUBCAL_ID` | 選填（拒絕子日曆） |
-| TTLock | `ttlockClientId` / `ttlockClientSecret` | 通通鎖開發者應用 |
-| TTLock | `ttlockUsername` / `ttlockPassword` | TTLock App 登入帳密 |
-| TTLock | `ttlockLockId` | 大門鎖 Lock ID |
-| TTLock | `ttlockApiBase` | 預設 `https://api.ttlock.com`（eu/cn 先改） |
-| TTLock | `ttlockDisabled` | **未就緒先填 `TRUE`**（改用隨機密碼，其餘流程照跑） |
+| 電子鎖 | `SCIENER_CLIENT_ID` / `SCIENER_CLIENT_SECRET` | TTLock／Sciener 開放平台 App ID & Secret（兼容 `ttlockClientId` / `ttlockClientSecret`） |
+| 電子鎖 | `SCIENER_USERNAME` / `SCIENER_PASSWORD` | TTLock／Sciener 手機 App 管鎖帳號及密碼（兼容 `ttlockUsername` / `ttlockPassword`） |
+| 電子鎖 | `SCIENER_LOCK_ID` | 大門鎖數字 Lock ID（可喺 `/venue-regs` 點「測試讀取門鎖」後一鍵綁定） |
+| 電子鎖 | `SCIENER_API_BASE` | 留空自動跨區偵測 `euapi.ttlock.com` / `api.ttlock.com` / `api.sciener.com` |
+| 電子鎖 | `PWD_MODE` | 預設 `phone4`（電話頭 4 位，撞碼試尾 4 → +1）；可選 `phone4tail` / `random` |
+| 電子鎖 | `ttlockDisabled` | 設 `TRUE` 時跳過實體寫鎖，改用模擬密碼測試流程 |
 | 電郵 | `notifyFrom` | 寄件人名稱（預設用區名） |
 
 > 唔記得 Key 喺邊度攞 → 睇 [`docs/keys-checklist.md`](docs/keys-checklist.md) 逐條倒返出嚟＋驗證。
@@ -57,7 +59,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.19.1"` 即代表新版後台已上線。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.24.0"` 即代表新版後台已上線。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：

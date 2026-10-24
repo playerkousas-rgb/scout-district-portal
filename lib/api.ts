@@ -7,7 +7,8 @@ import { DISTRICT_STORAGE_KEY } from './district.ts';
 import type {
   ApiResult, UserSession, CardDef, DistrictConfig, PermsBundle, AccessLevel,
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
-  CourseLink, Venue, VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
+  CourseLink, Venue, VenueLockInfo, VenueLockConfigStatus, VenueLockConfigInput, VenueApproveResult, BackendHealthInfo,
+  VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
   Circular, CircularsBoard, CircularStatus, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
   CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec, HubCoursesResult,
@@ -107,8 +108,8 @@ export const api = {
   verify: (token: string): Promise<ApiResult<UserSession>> =>
     callGet('verify', { token }),
 
-  // 健康檢查（接入測試用）
-  health: (): Promise<ApiResult<{ ok: boolean }>> => callGet('getHealthCheck'),
+  // 健康檢查（接入測試與後端版本／電子鎖就緒檢查）
+  health: (): Promise<ApiResult<BackendHealthInfo>> => callGet('getHealthCheck'),
 
   // 權限管理
   getPerms: async (token: string): Promise<ApiResult<PermsBundle>> => {
@@ -249,22 +250,30 @@ export const api = {
   setCircularStatus: (token: string, id: string, status: CircularStatus): Promise<ApiResult<{ saved: boolean; id: string; status: CircularStatus }>> =>
     callPost('setCircularStatus', { token, id, status }),
 
-  // 借場（申請由 member-portal 公開端提交；呢度只做批核）
+  // 借場（申請由 member-portal 公開端提交；呢度做一條龍審批＋製電子鎖匙＋回傳）
   listVenues: (): Promise<ApiResult<Venue[]>> => callGet('listVenues'),
   getLockList: (token: string): Promise<ApiResult<{
     apiBase: string;
     configuredLockId: string;
-    locks: { lockId: number | string; name: string; mac: string; hasGateway: boolean }[];
+    locks: VenueLockInfo[];
   }>> => callGet('getLockList', { token }),
+  getVenueLockConfig: (token: string): Promise<ApiResult<VenueLockConfigStatus>> =>
+    callPost('getVenueLockConfig', { token }),
+  saveVenueLockConfig: (token: string, config: VenueLockConfigInput): Promise<ApiResult<VenueLockConfigStatus>> =>
+    callPost('saveVenueLockConfig', { token, config }),
   getVenueBookings: (token: string): Promise<ApiResult<VenueBooking[]>> => callGet('getVenueBookings', { token }),
   setVenueBookingStatus: (token: string, id: string, status: string): Promise<ApiResult<{ saved: boolean }>> =>
     callPost('setVenueBookingStatus', { token, id, status }),
   // 聯調批核：狀態 approved + Teamup 轉色（唔掂鎖、唔寄密碼）
   confirmVenueBooking: (token: string, id: string): Promise<ApiResult<{ saved: boolean; teamupEventId?: string; warn: string }>> =>
     callPost('confirmVenueBooking', { token, id }),
-  // 完整批核：TTLock 限時密碼 + Teamup 轉色 + 電郵申請人（稍後先用）
-  approveVenueBooking: (token: string, id: string): Promise<ApiResult<{ saved: boolean; password: string; warn: string }>> =>
-    callPost('approveVenueBooking', { token, id }),
+  // 完整批核：TTLock 限時密碼 + Teamup 轉色 + 電郵申請人 + 回傳狀態／pwdRef
+  approveVenueBooking: (
+    token: string,
+    id: string,
+    opts?: { reissue?: boolean; allowFallback?: boolean },
+  ): Promise<ApiResult<VenueApproveResult>> =>
+    callPost('approveVenueBooking', { token, id, ...(opts || {}) }),
   rejectVenueBooking: (token: string, id: string): Promise<ApiResult<{ saved: boolean }>> =>
     callPost('rejectVenueBooking', { token, id }),
   updateVenueBooking: (token: string, id: string, patch: Record<string, string>): Promise<ApiResult<{ saved: boolean }>> =>

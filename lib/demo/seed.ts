@@ -61,7 +61,7 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'awards', title: '獎勵提名', icon: '🎖', type: 'builtin', url: '/awards', description: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', order: 3, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'circulars', title: '區通告', icon: '📜', type: 'builtin', url: '/circulars', description: '開班資料自動帶入 · 傳統通告列印 PDF 上載區網', order: 4, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'budget', title: '區年度預算', icon: '📑', type: 'builtin', url: '/budget', description: '直讀區方預算 Sheet · 按月／支部 · 資助合計', order: 5, enabled: true, embed: false, source: 'core', category: 'done' },
-  { cardId: 'ymis', title: 'YMIS 會員核實', icon: '🪪', type: 'builtin', url: '/ymis', description: '總監級／職員：前往 YMIS 並查看區方核實帳戶', order: 6, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'ymis', title: 'YMIS 會員核實', icon: '🪪', type: 'builtin', url: '/ymis', description: '前往 YMIS 並查看區方核實帳戶', order: 6, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'committee', title: '委任系統', icon: '🗂', type: 'builtin', url: '/committee', description: '委任 · 續任 · R02', order: 7, enabled: true, embed: false, source: 'core', category: 'todo' },
   { cardId: 'unit', title: '旅團管理系統', icon: '🧭', type: 'builtin', url: '/unit', description: '旅名冊 · 人數統計', order: 8, enabled: true, embed: false, source: 'core', category: 'todo' },
   { cardId: 'venueReg', title: '場地借用審批', icon: '🏛', type: 'builtin', url: '/venue-regs', description: '借場申請批核 · 場地清單', order: 9, enabled: true, embed: false, source: 'core', category: 'done' },
@@ -72,7 +72,7 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'fps', title: 'FPS QR 製作', icon: '💳', type: 'builtin', url: '/fps', description: '轉數快 QR 碼：綁區會戶口，填銀碼即生成', order: 14, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'rooms', title: '區總部及地域房間使用情況', icon: '🏢', type: 'builtin', url: '/rooms', description: '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆', order: 15, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'orgchart', title: '地域及總會架構', icon: '🏛', type: 'builtin', url: '/orgchart', description: '港島地域總監架構 · 總會領導層，自動跟官網更新', order: 16, enabled: true, embed: false, source: 'core', category: 'done' },
-  { cardId: 'debitNote', title: 'DEBIT NOTE 生成', icon: '🧾', type: 'builtin', url: '/debit-note', description: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（超管／DC／DDC_ADMIN／職員）', order: 17, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'debitNote', title: 'DEBIT NOTE 生成', icon: '🧾', type: 'builtin', url: '/debit-note', description: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出', order: 17, enabled: true, embed: false, source: 'core', category: 'done' },
 ];
 
 export const DEMO_ROLES: Record<string, any>[] = [

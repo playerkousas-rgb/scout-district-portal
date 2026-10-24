@@ -29,8 +29,8 @@ export async function GET(request: NextRequest) {
   const districtCode = searchParams.get('districtCode');
   const action = searchParams.get('action') || 'getHealthCheck';
 
-  // 共用帳密只可經 POST；不可將 token/帳密請求放在可記錄的 GET URL。
-  if (action === 'getYmisCredentials') {
+  // 共用帳密與電子鎖金鑰設定只可經 POST；不可將 token/金鑰放在可記錄的 GET URL。
+  if (action === 'getYmisCredentials' || action === 'getVenueLockConfig' || action === 'saveVenueLockConfig') {
     return NextResponse.json({ ok: false, error: 'Method not allowed' }, {
       status: 405, headers: { 'Cache-Control': 'private, no-store, max-age=0' },
     });
@@ -137,8 +137,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Apps Script returned non-JSON: ' + text.slice(0, 200) }, { status: 502 });
     }
     const response = NextResponse.json(parsedJson);
-    // YMIS 帳密只畀獲授權職員按掣查閱，絕不可喺 CDN／瀏覽器快取。
-    if (action === 'getYmisCredentials') response.headers.set('Cache-Control', 'private, no-store, max-age=0');
+    // 敏感帳密與電子鎖設定絕不可喺 CDN／瀏覽器快取。
+    if (action === 'getYmisCredentials' || action === 'getVenueLockConfig' || action === 'saveVenueLockConfig') {
+      response.headers.set('Cache-Control', 'private, no-store, max-age=0');
+    }
     return response;
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: 'Proxy POST error: ' + (err.message || String(err)) }, { status: 502 });
