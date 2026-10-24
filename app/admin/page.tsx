@@ -2,8 +2,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { canViewYmisRole } from '@/lib/accountRoles';
-import { canGenerateDebitNoteRole } from '@/lib/debitNote';
 import { loadSession } from '@/lib/session';
 import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession, PermsBundle, AccessLevel, RoleDef } from '@/lib/types';
@@ -48,32 +46,22 @@ export default function AdminPage() {
   }, [router, withDistrict]);
 
   function cellVal(c: string, r: string): AccessLevel {
-    if (c === 'ymis' && !canViewYmisRole(r)) return '';
-    if (c === 'debitNote' && !canGenerateDebitNoteRole(r)) return '';
-    const value = (matrix[c] && matrix[c][r]) || '';
-    if (c === 'ymis' && value) return 'view';
-    if (c === 'debitNote' && value) return 'edit';
-    return value;
+    return (matrix[c] && matrix[c][r]) || '';
   }
   function toggle(c: string, r: string) {
-    if (c === 'ymis' && !canViewYmisRole(r)) return;
-    if (c === 'debitNote' && !canGenerateDebitNoteRole(r)) return;
     setMsg('');
     setMatrix(prev => {
       const cur = (prev[c] && prev[c][r]) || '';
-      const next = c === 'ymis' ? (cur ? '' : 'view') : c === 'debitNote' ? (cur ? '' : 'edit') : NEXT[cur];
+      const next = NEXT[cur] || '';
       return { ...prev, [c]: { ...(prev[c] || {}), [r]: next } };
     });
   }
   function setRow(c: string, v: AccessLevel) {
     if (!bundle) return;
+    setMsg('');
     setMatrix(prev => {
       const row: Record<string, AccessLevel> = {};
-      bundle.roles.forEach(r => {
-        if (c === 'ymis') row[r.role] = canViewYmisRole(r.role) && v ? 'view' : '';
-        else if (c === 'debitNote') row[r.role] = canGenerateDebitNoteRole(r.role) && v ? 'edit' : '';
-        else row[r.role] = v;
-      });
+      bundle.roles.forEach(r => { row[r.role] = v; });
       return { ...prev, [c]: row };
     });
   }
@@ -202,8 +190,7 @@ export default function AdminPage() {
           </div>
 
           {/* 權限矩陣 */}
-          <p className="fps-help" style={{ marginBottom: 4 }}>🪪 YMIS 會員核實卡係特別查閱權限：只可授予 DC／DDC／ADC／區職員，其他角色即使誤設為可看亦不能顯示共用帳密。</p>
-          <p className="fps-help" style={{ marginBottom: 10 }}>🧾 DEBIT NOTE 係財務文件：只可授予 DC、DDC_ADMIN 及區職員，其他角色（包括 SYSADMIN）會由後台硬性擋住。</p>
+          <p className="fps-help" style={{ marginBottom: 10 }}>💡 點擊任何格子自由切換：<b>—</b> 不可見 → <b>👁</b> 可看（唯讀） → <b>✏️</b> 可管理（新增／修改／批核），改完記得按「💾 儲存權限」。</p>
           <div className="toolbar">
             <button className="btn-sm" onClick={save} disabled={saving}>{saving ? '儲存中…' : '💾 儲存權限'}</button>
             {msg && <span className="ok-msg">{msg}</span>}
@@ -227,13 +214,11 @@ export default function AdminPage() {
                     </td>
                     {bundle.roles.map(r => {
                       const v = cellVal(c.cardId, r.role);
-                      const fixed = (c.cardId === 'ymis' && !canViewYmisRole(r.role)) || (c.cardId === 'debitNote' && !canGenerateDebitNoteRole(r.role));
-                      const fixedTitle = c.cardId === 'debitNote' ? 'DEBIT NOTE 只限超管、DC、DDC_ADMIN 及區職員' : 'YMIS 帳戶只限總監級及職員';
-                      return <td key={r.role} className={`pcell ${CELL[v].cls} ${fixed ? 'locked' : ''}`} title={fixed ? fixedTitle : undefined} onClick={() => toggle(c.cardId, r.role)}>{CELL[v].txt}</td>;
+                      return <td key={r.role} className={`pcell ${CELL[v].cls}`} onClick={() => toggle(c.cardId, r.role)}>{CELL[v].txt}</td>;
                     })}
                     <td style={{ whiteSpace: 'nowrap' }}>
                       <button className="mini-btn" onClick={() => setRow(c.cardId, 'view')}>👁</button>{' '}
-                      <button className="mini-btn" onClick={() => setRow(c.cardId, 'edit')} disabled={c.cardId === 'ymis'} title={c.cardId === 'ymis' ? 'YMIS 只有查閱權限' : undefined}>✏️</button>{' '}
+                      <button className="mini-btn" onClick={() => setRow(c.cardId, 'edit')}>✏️</button>{' '}
                       <button className="mini-btn danger" onClick={() => setRow(c.cardId, '')}>✕</button>
                     </td>
                     <td>

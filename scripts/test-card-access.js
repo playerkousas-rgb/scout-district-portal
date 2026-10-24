@@ -30,8 +30,10 @@ const card = { cardId: 'debitNote', title: 'DEBIT NOTE 生成' };
 
 (async () => {
   const allowed = await checkCardAccess('token', 'debitNote', async () => ({ ok: true, data: [card] }));
-  assert.deepEqual(allowed, { status: 'allowed' });
-  console.log('  ✓ 成功回應且有卡 = allowed');
+  assert.deepEqual(allowed, { status: 'allowed', access: 'view' });
+  const allowedEdit = await checkCardAccess('token', 'debitNote', async () => ({ ok: true, data: [{ ...card, access: 'edit' }] }));
+  assert.deepEqual(allowedEdit, { status: 'allowed', access: 'edit' });
+  console.log('  ✓ 成功回應且有卡 = allowed（並正確回傳 view／edit）');
 
   const denied = await checkCardAccess('token', 'debitNote', async () => ({ ok: true, data: [] }));
   assert.deepEqual(denied, { status: 'denied' });

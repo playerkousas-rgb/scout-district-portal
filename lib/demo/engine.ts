@@ -154,13 +154,13 @@ function visibleCards(u: DemoUser): AnyObj[] {
 
 // ───────────────────────── DEBIT NOTE 示範帳簿 ─────────────────────────
 
-function requireDemoDebitNote(token: string): DemoUser | ApiResultLike {
+function requireDemoDebitNote(token: string, allowView = false): DemoUser | ApiResultLike {
   const u = userForToken(token);
   if (!u) return fail('未登入或登入已過期（示範版）。');
-  if (u.mockAdmin) return u;
-  if (!['DC', 'SYSADMIN', 'DDC_ADMIN', 'STAFF'].includes(u.role)) return fail('DEBIT NOTE 只限超管、DC、DDC_ADMIN 及區職員使用。');
+  if (u.mockAdmin || u.isSuper) return u;
   const access = (loadDb().matrix.debitNote || {})[u.role] || '';
-  return access === 'edit' ? u : fail('你沒有此功能嘅權限。');
+  if (access === 'edit' || (allowView && access === 'view')) return u;
+  return fail('你沒有此功能嘅權限。');
 }
 
 function checkDemoDebitNote(raw: AnyObj): { data?: DebitNoteDraft; error?: string } {
@@ -223,7 +223,9 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const p = sessionPayload(u); delete p.token;
       return ok(p);
     }
-    case 'health': return ok({ ok: true, version: '4.9.0-demo' });
+    case 'health':
+    case 'getHealthCheck':
+      return ok({ ok: true, status: 'ok', version: '4.24.0-demo', teamupConfigured: true, ttlockConfigured: true, lockIdSet: true, ttlockDisabled: false });
     case 'getConfig': return ok(d.config);
     case 'getPublicInfo': return ok({ districtName: d.config.districtName, districtCode: 'SKW', troopList: d.units.map(x => x.troop), locked: d.system.locked });
     case 'getSystem': return ok(d.system);
@@ -242,7 +244,7 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       return ok(visibleCards(u));
     }
     case 'listDebitNotes': {
-      const r = requireDemoDebitNote(token); if (isErr(r)) return r;
+      const r = requireDemoDebitNote(token, true); if (isErr(r)) return r;
       return ok((d.debitNotes || []).map(x => ({ ...x })).sort((a, b) => {
         const byDate = String(b.date || '').localeCompare(String(a.date || ''));
         return byDate || String(b.ref || '').localeCompare(String(a.ref || ''), 'en', { numeric: true });
@@ -606,8 +608,30 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       if (!row) return fail('找不到申請');
       row.status = 'approved'; row.reviewer = (r as DemoUser).displayName; row.reviewedAt = nowIso();
       const pwd = String(Math.floor(100000 + Math.random() * 900000));
+      const pwdRef = `DEMO-${Math.floor(10000 + Math.random() * 90000)}`;
       row.passcode = pwd;
-      persistDb(); return ok({ saved: true, password: pwd, warn: '示範版：唔會真係寄電郵俾申請人。' });
+      row.pwdRef = pwdRef;
+      if (!row.teamupEventId) row.teamupEventId = `tup-demo-${row.id}`;
+      persistDb();
+      return ok({
+        saved: true,
+        id: row.id,
+        status: 'approved',
+        password: pwd,
+        passcode: pwd,
+        pwdRef,
+        lockWritten: true,
+        simulated: true,
+        apiBase: 'demo://lock-service',
+        lockId: String(d.config.scienerLockId || '900001'),
+        teamupEventId: row.teamupEventId,
+        teamupSynced: true,
+        emailSent: false,
+        emailTo: row.email || '',
+        reviewedAt: row.reviewedAt,
+        reviewer: row.reviewer,
+        warn: '示範版：已模擬寫入電子鎖匙並回傳狀態，唔會真係寄電郵俾申請人。',
+      });
     }
     case 'rejectVenueBooking': {
       const r = requireUser(token, 2); if (isErr(r)) return r;
@@ -621,7 +645,8 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const row = d.venueBookings.find(x => x.id === payload.id);
       if (!row) return fail('找不到申請');
       row.status = 'confirmed'; row.reviewer = (r as DemoUser).displayName; row.reviewedAt = nowIso();
-      persistDb(); return ok({ saved: true });
+      if (!row.teamupEventId) row.teamupEventId = `tup-demo-${row.id}`;
+      persistDb(); return ok({ saved: true, teamupEventId: row.teamupEventId, warn: '' });
     }
     case 'updateVenueBooking': {
       const r = requireUser(token, 2); if (isErr(r)) return r;
@@ -647,9 +672,9 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
     case 'saveVenue': {
       const r = requireUser(token, 2); if (isErr(r)) return r;
       const v = (payload.venue || {}) as AnyObj;
-      let row = v.venueId ? d.venues.find(x => x.venueId === v.venueId) : undefined;
+      const row = v.venueId ? d.venues.find(x => x.venueId === v.venueId) : undefined;
       if (row) Object.assign(row, v);
-      else d.venues.push({ venueId: genId('v'), name: v.name || '新場地', location: v.location || '', capacity: v.capacity || '', note: v.note || '', active: 'TRUE' });
+      else d.venues.push({ venueId: genId('v'), name: v.name || '新場地', location: v.location || '', capacity: v.capacity || '', note: v.note || '', scienerLockId: v.scienerLockId || '', active: 'TRUE' });
       persistDb(); return ok({ saved: true });
     }
     case 'deleteVenue': {
@@ -659,7 +684,73 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
     }
     case 'getLockList': {
       const r = requireUser(token, 2); if (isErr(r)) return r;
-      return ok({ apiBase: 'demo://lock-service', configuredLockId: '', locks: [{ id: 900001, name: '（示範）1704 室大門', battery: 87 }, { id: 900002, name: '（示範）物資房', battery: 64 }] });
+      return ok({
+        apiBase: 'demo://lock-service',
+        configuredLockId: String(d.config.scienerLockId || '900001'),
+        locks: [
+          { lockId: 900001, name: '（示範）1704 室大門', mac: 'AA:BB:CC:17:04:01', hasGateway: true, electricQuantity: 87 },
+          { lockId: 900002, name: '（示範）物資房', mac: 'AA:BB:CC:17:04:02', hasGateway: false, electricQuantity: 64 },
+        ],
+      });
+    }
+    case 'getVenueLockConfig': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const activeVenues = d.venues.filter(v => v.active !== 'FALSE');
+      const venuesWithLock = activeVenues.filter(v => !!String(v.scienerLockId || '').trim());
+      const lockId = String(d.config.scienerLockId || '900001');
+      return ok({
+        version: '4.24.0-demo',
+        clientId: String(d.config.scienerClientId || 'demo-app-id'),
+        clientIdSet: true,
+        clientSecretSet: true,
+        username: String(d.config.scienerUsername || '85290000000'),
+        usernameMasked: '852***00',
+        usernameSet: true,
+        passwordSet: true,
+        lockId,
+        lockIdSet: !!(lockId || venuesWithLock.length),
+        apiBase: String(d.config.scienerApiBase || ''),
+        resolvedApiBase: String(d.config.scienerApiBase || 'demo://lock-service'),
+        pwdMode: String(d.config.pwdMode || 'phone4'),
+        ttlockDisabled: !!d.config.ttlockDisabled,
+        ttlockReady: true,
+        teamupApiKeySet: true,
+        teamupCalendarKey: String(d.config.teamupCalendarKey || 'ksdemo123'),
+        teamupPendingSub: String(d.config.teamupPendingSub || '1001'),
+        teamupApprovedSub: String(d.config.teamupApprovedSub || '1002'),
+        teamupRejectedSub: String(d.config.teamupRejectedSub || '1003'),
+        teamupReady: true,
+        notifyStaffEmail: String(d.config.notifyStaffEmail || ''),
+        venueCount: activeVenues.length,
+        venuesWithLockCount: venuesWithLock.length,
+        sheetHasPasscodeCol: true,
+        sheetHasPwdRefCol: true,
+      });
+    }
+    case 'saveVenueLockConfig': {
+      const r = requireUser(token, 2); if (isErr(r)) return r;
+      const cfg = (payload.config || payload || {}) as AnyObj;
+      if (cfg.clientId !== undefined) d.config.scienerClientId = String(cfg.clientId).trim();
+      if (cfg.username !== undefined) d.config.scienerUsername = String(cfg.username).trim();
+      if (cfg.lockId !== undefined) d.config.scienerLockId = String(cfg.lockId).trim();
+      if (cfg.apiBase !== undefined) d.config.scienerApiBase = String(cfg.apiBase).trim();
+      if (cfg.pwdMode !== undefined) d.config.pwdMode = String(cfg.pwdMode).trim() || 'phone4';
+      if (cfg.ttlockDisabled !== undefined) d.config.ttlockDisabled = cfg.ttlockDisabled === true || String(cfg.ttlockDisabled).toUpperCase() === 'TRUE';
+      if (cfg.teamupCalendarKey !== undefined) d.config.teamupCalendarKey = String(cfg.teamupCalendarKey).trim();
+      if (cfg.teamupPendingSub !== undefined) d.config.teamupPendingSub = String(cfg.teamupPendingSub).trim();
+      if (cfg.teamupApprovedSub !== undefined) d.config.teamupApprovedSub = String(cfg.teamupApprovedSub).trim();
+      if (cfg.teamupRejectedSub !== undefined) d.config.teamupRejectedSub = String(cfg.teamupRejectedSub).trim();
+      if (cfg.notifyStaffEmail !== undefined) d.config.notifyStaffEmail = String(cfg.notifyStaffEmail).trim();
+      let boundVenues = 0;
+      const targetLock = String(cfg.lockId !== undefined ? cfg.lockId : d.config.scienerLockId || '').trim();
+      if (cfg.bindLockToVenues && targetLock) {
+        d.venues.forEach(v => {
+          if (v.active !== 'FALSE') { v.scienerLockId = targetLock; boundVenues++; }
+        });
+      }
+      persistDb();
+      const status = demoCall('getVenueLockConfig', { token }, 'POST');
+      return ok({ ...(status as any).data, saved: true, boundVenues });
     }
 
     // ── 借物資 ──

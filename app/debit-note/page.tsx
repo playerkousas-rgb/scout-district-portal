@@ -1,18 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import BackLink, { BackBar } from '@/components/BackLink';
 import DebitNoteView from '@/components/DebitNoteView';
 import { api } from '@/lib/api';
 import { useRequireCardAccess } from '@/lib/cardAccess';
-import { useDistrict } from '@/lib/useDistrict';
 import { DEFAULT_FPS_ACCOUNT, FPS_ID_PATTERN, buildFpsPayload } from '@/lib/fps';
 import { downloadXlsx } from '@/lib/xlsx';
 import { downloadDebitNotePdf } from '@/lib/debitNotePdf';
 import {
   buildDebitNoteSheets,
-  canGenerateDebitNoteRole,
   debitNoteExportFilename,
   debitNoteRecordToDraft,
   debitNoteRecordsToCsv,
@@ -58,11 +55,10 @@ function downloadCsv(content: string, filename: string) {
 }
 
 export default function DebitNotePage() {
-  const router = useRouter();
-  const { withDistrict } = useDistrict();
-  const { session, checking: accessChecking, error: accessError, retry: retryAccess } = useRequireCardAccess('debitNote');
+  const { session, access, checking: accessChecking, error: accessError, retry: retryAccess } = useRequireCardAccess('debitNote');
   const sessionToken = session?.token || '';
-  const roleAllowed = !!session && (canGenerateDebitNoteRole(session.role) || !!session.mockAdmin);
+  const roleAllowed = !!session;
+  const canEdit = !!session && (access === 'edit' || !!session.mockAdmin);
   const demo = !!session?.mockAdmin;
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -89,8 +85,8 @@ export default function DebitNotePage() {
   const [recordLimit, setRecordLimit] = useState(25);
 
   useEffect(() => {
-    if (session && !roleAllowed) router.replace(withDistrict('/'));
-  }, [session, roleAllowed, router, withDistrict]);
+    if (session && !canEdit && !currentRecord) setView('records');
+  }, [session, canEdit, currentRecord]);
 
   useEffect(() => {
     if (!sessionToken || !roleAllowed) return;
@@ -198,6 +194,10 @@ export default function DebitNotePage() {
   }
 
   async function saveRecord(action: 'save' | 'print' | 'pdf' = 'save'): Promise<DebitNoteRecord | null> {
+    if (!canEdit) {
+      setFeedback('目前為「👁 可看（唯讀）」權限，不能新增或修改後端帳簿；如需開單請由管理員授予 ✏️ 可管理權限。');
+      return null;
+    }
     setShowErrors(true);
     if (!ready) {
       setFeedback(accountError || '請先填妥收款對象、日期、Ref No.、金額及款項內容，並等待戶口設定載入。');
@@ -329,6 +329,10 @@ export default function DebitNotePage() {
   }
 
   async function importCsvToBackend() {
+    if (!canEdit) {
+      setImportMessage('目前為「👁 可看（唯讀）」權限，不能匯入記錄到後端帳簿。');
+      return;
+    }
     if (!csvRecords.length || busy) return;
     if (!window.confirm(`將 ${csvRecords.length} 筆 CSV 記錄匯入後端？相同 Ref No. 的現有記錄不會被覆蓋。`)) return;
     setBusy('import'); setImportMessage('正在寫入後端帳簿…');
@@ -438,12 +442,17 @@ export default function DebitNotePage() {
       <BackLink />
       <div className="no-print">
         <h1 className="page-title">🧾 DEBIT NOTE 生成</h1>
-        <p className="page-sub">直接取代 Excel 輸入：生成正式單據及 FPS QR、可選 REMINDER 印、單頁 A4 PDF／列印、後端帳簿及完整 Excel／CSV。只限超管、DC、區職員及 DDC_ADMIN。</p>
+        <p className="page-sub">直接取代 Excel 輸入：生成正式單據及 FPS QR、可選 REMINDER 印、單頁 A4 PDF／列印、後端帳簿及完整 Excel／CSV。</p>
+        {!canEdit && (
+          <div className="fps-notice" role="status" style={{ marginBottom: 14 }}>
+            👁 目前為「可看（唯讀）」權限：可翻查舊記錄、預覽單據、列印／下載已保存單據 PDF 及匯出 Excel／CSV；如需開新單或修改帳簿，請於「權限／角色管理」改為 ✏️ 可管理。
+          </div>
+        )}
       </div>
 
       <div className="debit-note-workspace-tabs no-print" role="tablist" aria-label="DEBIT NOTE 工作區">
         <button type="button" role="tab" aria-selected={view === 'create'} className={view === 'create' ? 'active' : ''} onClick={() => setView('create')}>
-          🧾 生成／修改{currentRecord ? `：${currentRecord.ref}` : ''}
+          🧾 {canEdit ? '生成／修改' : '單據預覽'}{currentRecord ? `：${currentRecord.ref}` : ''}
         </button>
         <button type="button" role="tab" aria-selected={view === 'records'} className={view === 'records' ? 'active' : ''} onClick={() => setView('records')}>
           🗂 舊記錄（{records.length}）
@@ -456,17 +465,21 @@ export default function DebitNotePage() {
           <section className="info-card debit-note-editor no-print">
             <div className="section-head">
               <div>
-                <h3>1️⃣ {currentRecord ? `修改 ${currentRecord.ref}` : '填寫新 DEBIT NOTE'}</h3>
-                <p>{currentRecord && !dirty ? '這張單已保存；修改任何欄位後請再儲存。' : '列印會先自動儲存。亦可先按「儲存記錄」，核對無誤後再列印。'}</p>
+                <h3>1️⃣ {currentRecord ? `${canEdit ? '修改' : '查看'} ${currentRecord.ref}` : '填寫新 DEBIT NOTE'}</h3>
+                <p>{!canEdit ? '唯讀模式：可從「舊記錄」選取單據預覽及列印／下載 PDF。' : currentRecord && !dirty ? '這張單已保存；修改任何欄位後請再儲存。' : '列印會先自動儲存。亦可先按「儲存記錄」，核對無誤後再列印。'}</p>
               </div>
               <div className="debit-note-head-actions">
                 <span className={`debit-note-save-state ${currentRecord && !dirty ? 'saved' : ''}`}>
                   {currentRecord ? (dirty ? '● 有未儲存改動' : '✓ 已保存後端') : '○ 未儲存新單'}
                 </span>
-                <button type="button" className="mini-btn" onClick={resetForm} disabled={!!busy}>＋ 新張</button>
-                <button type="button" className="btn-sm" onClick={() => void saveRecord()} disabled={!!busy}>
-                  {busy === 'save' ? '儲存中…' : '💾 儲存記錄'}
-                </button>
+                {canEdit && (
+                  <>
+                    <button type="button" className="mini-btn" onClick={resetForm} disabled={!!busy}>＋ 新張</button>
+                    <button type="button" className="btn-sm" onClick={() => void saveRecord()} disabled={!!busy}>
+                      {busy === 'save' ? '儲存中…' : '💾 儲存記錄'}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 

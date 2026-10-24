@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.16.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.24.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -318,13 +318,16 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.23.1',
+      version: '4.24.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
       teamupReady: teamupReady_(),
       teamupPendingSet: !!(teamupCfg_().pendingSub),
       teamupApprovedSet: !!(teamupCfg_().approvedSub),
+      ttlockConfigured: ttlockReady_(),
+      lockIdSet: !!(lockCfg_().lockId),
+      ttlockDisabled: ttlockDisabled_(),
     }));
   }
 
@@ -422,9 +425,12 @@ function doPost(e) {
       case 'setStockRequestStatus': return json(setStockRequestStatus_(b.token, b.id, b.status));
       case 'setStockBatchStatus':   return json(setStockBatchStatus_(b.token, b.batchRef, b.status));
       case 'confirmVenueBooking':   return json(confirmVenueBooking_(b.token, b.id));
-      case 'approveVenueBooking':   return json(approveVenueBooking_(b.token, b.id));
+      case 'approveVenueBooking':   return json(approveVenueBooking_(b.token, b.id, b));
       case 'rejectVenueBooking':    return json(rejectVenueBooking_(b.token, b.id));
       case 'updateVenueBooking':    return json(updateVenueBooking_(b.token, b.id, b.patch || b));
+      case 'getLockList':           return json(getLockList_(b.token));
+      case 'getVenueLockConfig':    return json(getVenueLockConfig_(b.token));
+      case 'saveVenueLockConfig':   return json(saveVenueLockConfig_(b.token, b.config || b));
       case 'setCourseRegStatus':    return json(setCourseRegStatus_(b.token, b.courseId, b.id, b.status));
       case 'setRegFeePaid':         return json(setRegFeePaid_(b.token, b.courseId, b.id, b.paid));
 
@@ -600,6 +606,26 @@ function setCellByHeader_(sh, rowIdx, header, value) {
   var ci = colIdxByHeader_(sh, header);
   if (ci > 0) sh.getRange(rowIdx, ci).setValue(value);
 }
+/** 確保工作表第 1 列有指定欄名（冇就只喺最右邊追加表頭，唔郁舊資料），回傳 1-based 欄號 */
+function ensureSheetColumn_(sh, header) {
+  if (!sh) return -1;
+  var ci = colIdxByHeader_(sh, header);
+  if (ci > 0) return ci;
+  var nextCol = Math.max(1, sh.getLastColumn() + 1);
+  var hdrCell = sh.getRange(1, nextCol);
+  hdrCell.setValue(header);
+  hdrCell.setFontWeight('bold');
+  return nextCol;
+}
+/** 以純文字格式寫入儲存格（自動補缺欄），保留前導 0（如 0123 密碼）及 +852 帳號 */
+function setTextCellByHeader_(sh, rowIdx, header, value) {
+  var ci = ensureSheetColumn_(sh, header);
+  if (ci > 0 && rowIdx > 0) {
+    var r = sh.getRange(rowIdx, ci);
+    r.setNumberFormat('@');
+    r.setValue(value === undefined || value === null ? '' : String(value));
+  }
+}
 function getCellByHeader_(sh, rowIdx, header) {
   var ci = colIdxByHeader_(sh, header);
   return ci > 0 ? sh.getRange(rowIdx, ci).getValue() : '';
@@ -634,7 +660,7 @@ function removeRowByFirstCol_(sh, value) {
 function getConfigValue_(key) {
   var cfg = {};
   readSheet_(SHEET.CONFIG).forEach(function (r) { if (r.key) cfg[String(r.key).trim()] = r.value; });
-  return cfg[key] || '';
+  return (cfg[key] !== undefined && cfg[key] !== null && cfg[key] !== '') ? String(cfg[key]) : '';
 }
 function setConfigValue_(key, value) {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.CONFIG);
@@ -644,6 +670,27 @@ function setConfigValue_(key, value) {
     if (String(v[i][0]).trim() === key) { sh.getRange(i + 1, 2).setValue(value); return; }
   }
   sh.appendRow([key, value, '']);
+}
+/** 純文字寫入 Config（防止 +852 電話帳號變公式、前導 0 密碼／Lock ID 被吞走） */
+function setConfigTextValue_(key, value, description) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.CONFIG);
+  if (!sh) return;
+  var textVal = value === undefined || value === null ? '' : String(value);
+  var v = sh.getDataRange().getValues();
+  for (var i = 1; i < v.length; i++) {
+    if (String(v[i][0]).trim() === key) {
+      var cell = sh.getRange(i + 1, 2);
+      cell.setNumberFormat('@');
+      cell.setValue(textVal);
+      return;
+    }
+  }
+  var nextRow = sh.getLastRow() + 1;
+  sh.getRange(nextRow, 1).setValue(key);
+  var newCell = sh.getRange(nextRow, 2);
+  newCell.setNumberFormat('@');
+  newCell.setValue(textVal);
+  sh.getRange(nextRow, 3).setValue(description || '');
 }
 function ensureConfigRow_(sh, key, defaultValue, description) {
   if (!sh) return false;
@@ -934,9 +981,18 @@ function permsByRole_(role) {
   return { canVenue: false, canStock: false, canCourse: false, canStaff: false };
 }
 
-/** 實時讀取某帳號嘅權限：Staff 表優先，冇就用 Users 角色推導 */
+/** 讀取 Perms 表頭有涵蓋嘅角色清單（用嚟判斷某角色是否已由 Perms 矩陣接管） */
+function permSheetRoles_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.PERMS);
+  if (!sh) return [];
+  var v = sh.getDataRange().getValues();
+  if (!v.length) return [];
+  return v[0].slice(1).map(function (x) { return String(x).trim(); }).filter(Boolean);
+}
+
+/** 實時讀取某帳號嘅權限：Staff 表優先，否則跟 Perms 矩陣（venueReg / stockReg / training），最後先用預設角色推導 */
 function staffPerms_(email, role) {
-  if (String(email).toLowerCase() === String(MASTER_EMAIL).toLowerCase()) {
+  if (String(email).toLowerCase() === String(MASTER_EMAIL).toLowerCase() || levelOfUser_(email, role) === LEVEL_SUPER) {
     return { canVenue: true, canStock: true, canCourse: true, canStaff: true };
   }
   var s = readSheet_(SHEET.STAFF).filter(function (x) {
@@ -950,10 +1006,30 @@ function staffPerms_(email, role) {
     };
   }
   var u = readSheet_(SHEET.USERS).filter(function (x) {
-    return String(x.email).trim().toLowerCase() === String(email).trim().toLowerCase()
-      && String(x.active).toUpperCase() !== 'FALSE';
+    return String(x.email).trim().toLowerCase() === String(email).trim().toLowerCase();
   })[0];
-  return permsByRole_(u ? u.role : role);
+  if (u && String(u.active).toUpperCase() === 'FALSE') {
+    return { canVenue: false, canStock: false, canCourse: false, canStaff: false };
+  }
+  var effRole = String((u && u.role) ? u.role : role || '').trim();
+  var base = permsByRole_(effRole);
+  var pRoles = permSheetRoles_();
+  if (pRoles.indexOf(effRole) >= 0) {
+    var perms = readPerms_();
+    var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
+    var hasEdit = function (cid, fallback) {
+      if (scopeOverride && scopeOverride.indexOf(cid) < 0) return false;
+      if (!perms[cid]) return fallback;
+      return perms[cid][effRole] === 'edit';
+    };
+    return {
+      canVenue: hasEdit('venueReg', base.canVenue),
+      canStock: hasEdit('stockReg', base.canStock),
+      canCourse: hasEdit('training', base.canCourse),
+      canStaff: base.canStaff,
+    };
+  }
+  return base;
 }
 
 /** 只需登入 */
@@ -976,7 +1052,7 @@ function requireAccountManager_(token) {
   if (!isAccountManager_(t.role)) return { error: '只有副區總監或以上可以管理帳戶' };
   return t;
 }
-/** 需要指定操作權限：perm = canVenue | canStock | canCourse | canStaff */
+/** 需要指定操作權限（✏️ 可管理）：perm = canVenue | canStock | canCourse | canStaff */
 function requirePerm_(token, perm) {
   var t = checkToken_(token);
   if (!t.valid) return { error: '登入已過期' };
@@ -984,25 +1060,49 @@ function requirePerm_(token, perm) {
   if (!p[perm]) return { error: '你沒有此功能嘅權限' };
   return { ok: true, email: t.email, role: t.role };
 }
+/** 需要指定查閱權限（👁 可看 或 ✏️ 可管理）：支援 Perms 設為 view 時唯讀瀏覽 */
+function requirePermRead_(token, perm, cardId) {
+  var t = checkToken_(token);
+  if (!t.valid) return { error: '登入已過期' };
+  var p = staffPerms_(t.email, t.role);
+  if (p[perm]) return { ok: true, email: t.email, role: t.role };
+  if (cardId) {
+    var access = cardAccessOf_(t, cardId);
+    if (access === 'view' || access === 'edit') return { ok: true, email: t.email, role: t.role };
+  }
+  return { error: '你沒有此功能嘅權限' };
+}
+/** 實時讀取某帳戶對某張卡片嘅 Perms 權限（'' | 'view' | 'edit'） */
+function cardAccessOf_(t, cardId) {
+  var cid = String(cardId || '').trim();
+  if (!cid) return '';
+  if (levelOfUser_(t.email, t.role) === LEVEL_SUPER) return 'edit';
+  var u = readSheet_(SHEET.USERS).filter(function (x) {
+    return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
+  })[0];
+  if (u && String(u.active).toUpperCase() === 'FALSE') return '';
+  if (u && u.cards && splitList_(u.cards).indexOf(cid) < 0) return '';
+  var effRole = String((u && u.role) ? u.role : t.role || '').trim();
+  return (readPerms_()[cid] || {})[effRole] || '';
+}
+/** 需要「某張卡片」嘅查閱權（👁 view 或 ✏️ edit） */
+function requireCardView_(token, cardId) {
+  var t = checkToken_(token);
+  if (!t.valid) return { error: '登入已過期' };
+  var access = cardAccessOf_(t, cardId);
+  if (access !== 'edit' && access !== 'view') return { error: '你沒有此功能嘅權限' };
+  return { ok: true, email: t.email, role: t.role, access: access };
+}
 /**
- * 需要「某張卡片」嘅編輯權（v4.6.0）：直接跟 Perms 矩陣，唔使再加 canXxx 欄。
+ * 需要「某張卡片」嘅編輯權（✏️ edit）：直接跟 Perms 矩陣，管理員可自由配置任何角色。
  * 層級 0 超管永遠可以（同 getCards_ 一致）。
  */
 function requireCardEdit_(token, cardId) {
   var t = checkToken_(token);
   if (!t.valid) return { error: '登入已過期' };
-  if (String(cardId).trim() === 'debitNote' && !isMaintenanceSuper_(t.email, t.role)) {
-    var debitUser = readSheet_(SHEET.USERS).filter(function (x) {
-      return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
-    })[0];
-    if (!debitUser || String(debitUser.active).toUpperCase() === 'FALSE' || !canGenerateDebitNoteRole_(debitUser.role)) {
-      return { error: 'DEBIT NOTE 只限超管、DC、DDC_ADMIN 及區職員使用' };
-    }
-  }
-  if (levelOfUser_(t.email, t.role) === LEVEL_SUPER) return { ok: true, email: t.email, role: t.role };
-  var access = (readPerms_()[String(cardId).trim()] || {})[t.role] || '';
+  var access = cardAccessOf_(t, cardId);
   if (access !== 'edit') return { error: '你沒有此功能嘅權限' };
-  return { ok: true, email: t.email, role: t.role };
+  return { ok: true, email: t.email, role: t.role, access: 'edit' };
 }
 
 // ===================== DEBIT NOTE 帳簿（v4.21.0） =====================
@@ -1165,7 +1265,7 @@ function debitNoteDistrictRows_() {
 }
 
 function listDebitNotes_(token) {
-  var auth = requireCardEdit_(token, 'debitNote'); if (auth.error) return err(auth.error);
+  var auth = requireCardView_(token, 'debitNote'); if (auth.error) return err(auth.error);
   debitNoteSheet_();
   var rows = debitNoteDistrictRows_().map(debitNotePublic_);
   rows.sort(function (a, b) {
@@ -1331,7 +1431,7 @@ function listVenues_() {
 }
 /** 職員版：連 scienerLockId 一齊（保留欄位，TTLock 版唔用） */
 function getVenues_(token) {
-  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  var t = requirePermRead_(token, 'canVenue', 'venueReg'); if (t.error) return err(t.error);
   return ok(readSheet_(SHEET.VENUES));
 }
 function saveVenue_(token, venue) {
@@ -1340,19 +1440,25 @@ function saveVenue_(token, venue) {
   var venueId = String(venue.venueId || '').trim() || genId_('v');
   if (!String(venue.name || '').trim()) return err('場地名稱必填');
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUES);
+  ensureSheetColumn_(sh, 'scienerLockId');
   var idx = rowIndexByCol_(sh, 'venueId', venueId);
   var row = {
     venueId: venueId, districtCode: districtCode_(),
     name: venue.name, location: venue.location || '', capacity: venue.capacity || '',
-    scienerLockId: venue.scienerLockId || '', note: venue.note || '',
-    active: venue.active === undefined || venue.active ? 'TRUE' : 'FALSE',
+    scienerLockId: String(venue.scienerLockId || '').trim(), note: venue.note || '',
+    active: venue.active === undefined || isTrue_(venue.active) ? 'TRUE' : 'FALSE',
   };
   if (idx > 0) {
     Object.keys(row).forEach(function (k) {
-      if (venue[k] !== undefined || k === 'venueId' || k === 'name' || k === 'districtCode') setCellByHeader_(sh, idx, k, row[k]);
+      if (venue[k] !== undefined || k === 'venueId' || k === 'name' || k === 'districtCode') {
+        if (k === 'scienerLockId') setTextCellByHeader_(sh, idx, k, row[k]);
+        else setCellByHeader_(sh, idx, k, row[k]);
+      }
     });
   } else {
     appendRowObj_(sh, row);
+    var newIdx = rowIndexByCol_(sh, 'venueId', venueId);
+    if (newIdx > 0 && row.scienerLockId) setTextCellByHeader_(sh, newIdx, 'scienerLockId', row.scienerLockId);
   }
   return ok({ saved: true, venueId: venueId });
 }
@@ -1444,9 +1550,16 @@ function submitVenueRequest_(b) {
     name: req.name, phone: req.phone, email: req.email || '',
     troop: req.troop || '', position: req.position || '',
     agreeRules: isTrue_(req.agreeRules) ? 'TRUE' : '',
-    status: 'pending', teamupEventId: teamupEventId || '', pwdRef: '',
+    status: 'pending', teamupEventId: teamupEventId || '', pwdRef: '', passcode: '',
     reviewer: '', reviewedAt: '',
   });
+  var newRowIdx = rowIndexByCol_(sh, 'id', rid);
+  if (newRowIdx > 0) {
+    setTextCellByHeader_(sh, newRowIdx, 'phone', req.phone);
+    setTextCellByHeader_(sh, newRowIdx, 'startDate', req.startDate);
+    setTextCellByHeader_(sh, newRowIdx, 'endDate', req.endDate);
+    if (teamupEventId) setTextCellByHeader_(sh, newRowIdx, 'teamupEventId', teamupEventId);
+  }
   appendRecord_('venue', rid, ref, '🏛 借場：' + (venue.name || req.venueId), req.name, req.phone, req.troop || '', 'pending',
     req.startDate + ' → ' + req.endDate);
   notifyStaff_('🏛 新借場申請', '場地：' + (venue.name || req.venueId) + '\n申請人：' + req.name + '（' + req.phone + '）\n' + req.startDate + ' → ' + req.endDate);
@@ -1455,9 +1568,36 @@ function submitVenueRequest_(b) {
 
 // ===================== 借場：查閱／批核 =====================
 
+function formatVenueDateField_(v) {
+  if (v === undefined || v === null || v === '') return '';
+  if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime())) {
+    return Utilities.formatDate(v, 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm");
+  }
+  return String(v);
+}
+
+function normalizeVenueBookingRow_(r) {
+  var out = {};
+  Object.keys(r || {}).forEach(function (k) { out[k] = r[k]; });
+  out.startDate = formatVenueDateField_(r.startDate);
+  out.endDate = formatVenueDateField_(r.endDate);
+  out.phone = r.phone === undefined || r.phone === null ? '' : String(r.phone);
+  out.pwdRef = r.pwdRef === undefined || r.pwdRef === null ? '' : String(r.pwdRef).trim();
+  out.teamupEventId = r.teamupEventId === undefined || r.teamupEventId === null ? '' : String(r.teamupEventId).trim();
+  var rawPwd = r.passcode;
+  if (rawPwd === undefined || rawPwd === null || rawPwd === '') {
+    out.passcode = '';
+  } else if (typeof rawPwd === 'number' && rawPwd >= 0 && rawPwd < 1000 && String(lockCfg_().pwdMode || 'phone4').toLowerCase().indexOf('phone4') === 0) {
+    out.passcode = ('0000' + String(Math.floor(rawPwd))).slice(-4);
+  } else {
+    out.passcode = String(rawPwd).trim();
+  }
+  return out;
+}
+
 function getVenueBookings_(token) {
-  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
-  return ok(readSheet_(SHEET.VENUE_REQ).reverse());
+  var t = requirePermRead_(token, 'canVenue', 'venueReg'); if (t.error) return err(t.error);
+  return ok(readSheet_(SHEET.VENUE_REQ).map(normalizeVenueBookingRow_).reverse());
 }
 
 var VENUE_STATUS = ['pending', 'approved', 'rejected', 'cancelled'];
@@ -1471,6 +1611,7 @@ function setVenueBookingStatus_(token, id, status) {
   var idx = rowIndexByCol_(sh, 'id', String(id).trim());
   if (idx < 0) return err('找不到該申請');
   var req = readSheet_(SHEET.VENUE_REQ).filter(function (r) { return String(r.id).trim() === String(id).trim(); })[0] || {};
+  req = normalizeVenueBookingRow_(req);
   setCellByHeader_(sh, idx, 'status', status);
   setCellByHeader_(sh, idx, 'reviewer', t.email);
   setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
@@ -1490,8 +1631,9 @@ function setVenueBookingStatus_(token, id, status) {
 function confirmVenueBooking_(token, id) {
   var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
-  var booking = readSheet_(SHEET.VENUE_REQ).filter(function (x) { return String(x.id) === String(id); })[0];
-  if (!booking) return err('找不到申請');
+  var rawBooking = readSheet_(SHEET.VENUE_REQ).filter(function (x) { return String(x.id) === String(id); })[0];
+  if (!rawBooking) return err('找不到申請');
+  var booking = normalizeVenueBookingRow_(rawBooking);
   if (String(booking.status).toLowerCase() === 'approved') return err('此申請已批核');
 
   var tup = applyTeamupApproved_(booking, '');
@@ -1500,69 +1642,274 @@ function confirmVenueBooking_(token, id) {
 
   var idx = rowIndexByCol_(sh, 'id', String(id).trim());
   if (idx > 0) {
+    ensureSheetColumn_(sh, 'passcode');
+    ensureSheetColumn_(sh, 'pwdRef');
     setCellByHeader_(sh, idx, 'status', 'approved');
     setCellByHeader_(sh, idx, 'reviewer', t.email);
     setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
-    if (eventId) setCellByHeader_(sh, idx, 'teamupEventId', eventId);
+    if (eventId) setTextCellByHeader_(sh, idx, 'teamupEventId', eventId);
   }
   updateRecordStatus_(id, 'approved');
   return ok({ saved: true, teamupEventId: eventId, warn: tupMsg || '' });
 }
 
 /**
- * 完整批核（一條龍）：TTLock 限時密碼 + Teamup 轉色 + 電郵。
- * - 已有 pending 事件（teamupEventId）→ 搬去「確認借用」子日曆
- * - 冇 → 喺「確認借用」子日曆新建事件
- * TTLock 未設定 / 停用 → 自動改用隨機密碼，其餘流程照跑。
+ * 完整批核（一條龍）：TTLock 限時密碼 + Teamup 轉色 + 電郵 + 完整結果回傳寫回 Sheet。
+ * - 支援首次批核，以及對「僅確認未設鎖／模擬碼」或傳入 reissue=true 嘅申請補發電子鎖匙
+ * - 預設嚴格檢查電子鎖寫入：寫鎖失敗時直接回傳具體原因，唔會假批核或寄出無效隨機密碼
+ * - 若職員明確傳 allowFallback=true（或 Config 設 ttlockDisabled=TRUE），先至改用備用／模擬密碼
  */
-function approveVenueBooking_(token, id) {
+function approveVenueBooking_(token, id, opts) {
   var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  opts = opts || {};
+  var isReissue = isTrue_(opts.reissue);
+  var allowFallback = isTrue_(opts.allowFallback);
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName(SHEET.VENUE_REQ);
-  var booking = readSheet_(SHEET.VENUE_REQ).filter(function (x) { return String(x.id) === String(id); })[0];
-  if (!booking) return err('找不到申請');
-  if (String(booking.status).toLowerCase() === 'approved') return err('此申請已批核');
+  if (!sh) return err('找不到 VenueBookings 工作表');
+  var rawBooking = readSheet_(SHEET.VENUE_REQ).filter(function (x) { return String(x.id) === String(id); })[0];
+  if (!rawBooking) return err('找不到申請');
+  var booking = normalizeVenueBookingRow_(rawBooking);
+  var existingPwd = String(booking.passcode || '').trim();
+  var existingRef = String(booking.pwdRef || '').trim();
+  var alreadyRealKey = existingPwd && existingRef && existingRef !== 'SIMULATED';
+  if (String(booking.status).toLowerCase() === 'approved' && alreadyRealKey && !isReissue) {
+    return err('此申請已批核並已發出電子鎖匙（如需重新製作鎖匙，請點「補發／重製鎖匙」）');
+  }
 
-  // 1) TTLock 限時密碼（提前/延後 15 分鐘；撞碼自動重試；失敗→隨機密碼照跑）
-  var passcode = String(booking.passcode || '').trim();
+  // 1) TTLock 限時密碼（提前/延後 15 分鐘；撞碼自動試頭4→尾4→+1）
+  var passcode = '';
+  var pwdRef = '';
+  var lockWritten = false;
+  var simulated = false;
+  var usedApiBase = '';
+  var usedLockId = '';
+  var validFrom = null;
+  var validTo = null;
   var warn = '';
-  if (!passcode) {
+
+  try {
+    var venueLock = '';
     try {
-      var venueLock = '';
-      try {
-        var vrow = readSheet_(SHEET.VENUES).filter(function (v) {
-          return String(v.venueId).trim() === String(booking.venueId || '').trim();
-        })[0];
-        venueLock = vrow ? String(vrow.scienerLockId || '').trim() : '';
-      } catch (x) { venueLock = ''; }
-      var pc = createTtlockPasscode_(booking.phone || '0000', booking.startDate, booking.endDate || booking.startDate, booking.name || '申請人', venueLock);
-      passcode = pc.passcode;
+      var vrow = readSheet_(SHEET.VENUES).filter(function (v) {
+        return String(v.venueId).trim() === String(booking.venueId || '').trim()
+          || String(v.name || '').trim() === String(booking.venueId || '').trim();
+      })[0];
+      venueLock = vrow ? String(vrow.scienerLockId || '').trim() : '';
+    } catch (x) { venueLock = ''; }
+    var pc = createTtlockPasscode_(
+      booking.phone || '0000',
+      booking.startDate,
+      booking.endDate || booking.startDate,
+      booking.name || '申請人',
+      venueLock
+    );
+    passcode = String(pc.passcode || '').trim();
+    pwdRef = String(pc.pwdRef || '').trim();
+    lockWritten = !!pc.lockWritten;
+    simulated = !!pc.simulated;
+    usedApiBase = String(pc.apiBase || '');
+    usedLockId = String(pc.lockId || '');
+    validFrom = pc.validFrom || null;
+    validTo = pc.validTo || null;
+    if (simulated) warn = '目前設定為跳過實體寫鎖（ttlockDisabled=TRUE），密碼屬模擬值';
+  } catch (e) {
+    var errDetail = String((e && e.message) || e);
+    console.error('TTLock 建碼失敗：' + errDetail);
+    if (!allowFallback) {
+      return err('電子鎖匙製作失敗：' + errDetail);
+    }
+    passcode = genPasscode_();
+    pwdRef = '';
+    lockWritten = false;
+    simulated = true;
+    warn = '電子鎖未寫入（' + errDetail + '），已按指示改用備用隨機密碼';
+  }
+
+  // 2) Teamup 轉色／更新密碼備註
+  var tup = applyTeamupApproved_(booking, '\n🔑 密碼：' + passcode);
+  var tupMsg = tup.warn || '';
+  var finalEventId = tup.eventId || booking.teamupEventId || '';
+  if (finalEventId) booking.teamupEventId = finalEventId;
+
+  // 3) 電郵密碼俾申請人
+  var emailTo = String(booking.email || '').trim();
+  var emailSent = false;
+  var mailMsg = '';
+  if (emailTo) {
+    try {
+      sendVenueApprovalEmail_(booking, passcode, validFrom, validTo);
+      emailSent = true;
     } catch (e) {
-      console.error('TTLock 建碼失敗，改用隨機密碼：' + e.message);
-      passcode = genPasscode_();
-      warn = 'TTLock 建碼失敗，已改用隨機密碼';
+      mailMsg = '電郵發送失敗：' + String((e && e.message) || e);
+    }
+  } else {
+    mailMsg = '申請人未填電郵，請用頁面 WhatsApp／手動通知密碼';
+  }
+
+  // 4) 回傳寫入 VenueBookings（自動補缺 passcode / pwdRef / teamupEventId 欄，純文字保留前導 0）
+  var reviewedAt = new Date().toISOString();
+  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
+  if (idx > 0) {
+    ensureSheetColumn_(sh, 'status');
+    ensureSheetColumn_(sh, 'reviewer');
+    ensureSheetColumn_(sh, 'reviewedAt');
+    setCellByHeader_(sh, idx, 'status', 'approved');
+    setTextCellByHeader_(sh, idx, 'passcode', passcode);
+    setTextCellByHeader_(sh, idx, 'pwdRef', pwdRef);
+    setCellByHeader_(sh, idx, 'reviewer', t.email);
+    setCellByHeader_(sh, idx, 'reviewedAt', reviewedAt);
+    if (finalEventId) setTextCellByHeader_(sh, idx, 'teamupEventId', finalEventId);
+  }
+  updateRecordStatus_(id, 'approved');
+
+  return ok({
+    saved: true,
+    id: String(booking.id),
+    status: 'approved',
+    password: passcode,
+    passcode: passcode,
+    pwdRef: pwdRef,
+    lockWritten: lockWritten,
+    simulated: simulated,
+    apiBase: usedApiBase,
+    lockId: usedLockId,
+    validFrom: validFrom ? validFrom.toISOString() : '',
+    validTo: validTo ? validTo.toISOString() : '',
+    teamupSynced: !tupMsg && !!finalEventId,
+    teamupEventId: finalEventId,
+    emailSent: emailSent,
+    emailTo: emailTo,
+    reviewer: t.email,
+    reviewedAt: reviewedAt,
+    warn: [warn, tupMsg, mailMsg].filter(Boolean).join('；'),
+  });
+}
+
+function maskAccount_(s) {
+  var v = String(s || '').trim();
+  if (!v) return '';
+  if (v.length <= 4) return v.slice(0, 1) + '***';
+  return v.slice(0, 3) + '***' + v.slice(-2);
+}
+
+/** 讀取借場＋電子鎖＋Teamup＋回傳欄位就緒狀態（只回遮罩／布林值，絕不回傳明文密碼或 Secret） */
+function getVenueLockConfig_(token) {
+  var t = requireAccountManager_(token); if (t.error) return err(t.error);
+  var c = lockCfg_();
+  var tc = teamupCfg_();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var vSh = ss.getSheetByName(SHEET.VENUE_REQ);
+  var headers = vSh ? sheetHeadersBySheet_(vSh) : [];
+  var activeVenues = readSheet_(SHEET.VENUES).filter(function (v) {
+    return String(v.active).toUpperCase() !== 'FALSE';
+  });
+  var venuesWithLock = activeVenues.filter(function (v) {
+    return !!String(v.scienerLockId || '').trim();
+  });
+  return ok({
+    version: '4.24.0',
+    clientId: c.clientId || '',
+    clientIdSet: !!c.clientId,
+    clientSecretSet: !!c.clientSecret,
+    username: c.username || '',
+    usernameMasked: maskAccount_(c.username),
+    usernameSet: !!c.username,
+    passwordSet: !!c.password,
+    lockId: c.lockId || '',
+    lockIdSet: !!(c.lockId || venuesWithLock.length),
+    apiBase: c.apiBase || '',
+    resolvedApiBase: ttlockBase_(),
+    pwdMode: c.pwdMode || 'phone4',
+    ttlockDisabled: ttlockDisabled_(),
+    ttlockReady: ttlockReady_() && !!(c.lockId || venuesWithLock.length),
+    teamupApiKeySet: !!tc.apiKey,
+    teamupCalendarKey: tc.calendarId || '',
+    teamupPendingSub: tc.pendingSub || '',
+    teamupApprovedSub: tc.approvedSub || '',
+    teamupRejectedSub: tc.rejectedSub || '',
+    teamupReady: !!(tc.apiKey && tc.calendarId && tc.approvedSub),
+    notifyStaffEmail: getConfigValue_('NOTIFY_STAFF_EMAIL') || '',
+    venueCount: activeVenues.length,
+    venuesWithLockCount: venuesWithLock.length,
+    sheetHasPasscodeCol: headers.indexOf('passcode') >= 0,
+    sheetHasPwdRefCol: headers.indexOf('pwdRef') >= 0,
+  });
+}
+
+/** 儲存電子鎖及 Teamup 設定到 Config（純文字寫入，留空密碼／Secret 則保留原值），並自動補齊回傳欄 */
+function saveVenueLockConfig_(token, cfg) {
+  var t = requireAccountManager_(token); if (t.error) return err(t.error);
+  cfg = cfg || {};
+  var plainFields = [
+    ['clientId', 'SCIENER_CLIENT_ID', 'Sciener / TTLock 開放平台 App ID'],
+    ['username', 'SCIENER_USERNAME', '管鎖帳號（TTLock / Sciener App 登入帳號）'],
+    ['lockId', 'SCIENER_LOCK_ID', '大門 Lock ID（數字）'],
+    ['apiBase', 'SCIENER_API_BASE', 'API 主機（留空自動偵測 euapi.ttlock.com / api.ttlock.com / api.sciener.com）'],
+    ['pwdMode', 'PWD_MODE', 'phone4=電話頭4位；phone4tail=尾4位；random=隨機6位'],
+    ['teamupCalendarKey', 'TEAMUP_CALENDAR_KEY', 'Teamup 分享金鑰 ks...'],
+    ['teamupPendingSub', 'TEAMUP_PENDING_SUBCAL_ID', '藍色（申請中）子日曆 ID'],
+    ['teamupApprovedSub', 'TEAMUP_APPROVED_SUBCAL_ID', '紅色（確認借用）子日曆 ID'],
+    ['teamupRejectedSub', 'TEAMUP_REJECTED_SUBCAL_ID', '拒絕子日曆 ID（選填）'],
+    ['notifyStaffEmail', 'NOTIFY_STAFF_EMAIL', '新申請通知收件人'],
+  ];
+  plainFields.forEach(function (item) {
+    var prop = item[0], key = item[1], desc = item[2];
+    if (cfg[prop] !== undefined && cfg[prop] !== null) {
+      setConfigTextValue_(key, String(cfg[prop]).trim(), desc);
+    }
+  });
+  if (cfg.ttlockDisabled !== undefined && cfg.ttlockDisabled !== null) {
+    setConfigTextValue_('ttlockDisabled', isTrue_(cfg.ttlockDisabled) ? 'TRUE' : '', 'TRUE = 跳過寫鎖，改用模擬密碼');
+  }
+
+  // 私密欄：留空 = 保持原有設定；傳 '__CLEAR__' = 清空
+  var secretFields = [
+    ['clientSecret', 'SCIENER_CLIENT_SECRET', 'Sciener / TTLock App Secret'],
+    ['password', 'SCIENER_PASSWORD', '管鎖密碼'],
+    ['teamupApiKey', 'TEAMUP_API_KEY', 'Teamup API Token'],
+  ];
+  secretFields.forEach(function (item) {
+    var prop = item[0], key = item[1], desc = item[2];
+    if (cfg[prop] === '__CLEAR__') {
+      setConfigTextValue_(key, '', desc);
+    } else if (cfg[prop] !== undefined && cfg[prop] !== null && String(cfg[prop]).trim() !== '') {
+      setConfigTextValue_(key, String(cfg[prop]).trim(), desc);
+    }
+  });
+
+  // 可選：一鍵將 Lock ID 同步綁定到現有啟用場地（如區總部）
+  var lockId = cfg.lockId !== undefined ? String(cfg.lockId || '').trim() : lockCfg_().lockId;
+  var boundVenues = 0;
+  if (isTrue_(cfg.bindLockToVenues) && lockId) {
+    var vSh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUES);
+    if (vSh && vSh.getLastRow() >= 2) {
+      ensureSheetColumn_(vSh, 'scienerLockId');
+      var rows = readSheet_(SHEET.VENUES);
+      rows.forEach(function (v) {
+        if (String(v.active).toUpperCase() === 'FALSE') return;
+        var rIdx = rowIndexByCol_(vSh, 'venueId', String(v.venueId).trim());
+        if (rIdx > 0) {
+          setTextCellByHeader_(vSh, rIdx, 'scienerLockId', lockId);
+          boundVenues++;
+        }
+      });
     }
   }
 
-  // 2) Teamup 轉色
-  var tup = applyTeamupApproved_(booking, '\n🔑 密碼：' + passcode);
-  var tupMsg = tup.warn || '';
-  if (tup.eventId && !booking.teamupEventId) booking.teamupEventId = tup.eventId;
-
-  // 3) 電郵密碼俾申請人
-  var mailMsg = '';
-  try { sendVenueApprovalEmail_(booking, passcode); } catch (e) { mailMsg = e.message; }
-
-  var idx = rowIndexByCol_(sh, 'id', String(id).trim());
-  if (idx > 0) {
-    setCellByHeader_(sh, idx, 'status', 'approved');
-    setCellByHeader_(sh, idx, 'passcode', passcode);
-    setCellByHeader_(sh, idx, 'reviewer', t.email);
-    setCellByHeader_(sh, idx, 'reviewedAt', new Date().toISOString());
-    if (booking.teamupEventId) setCellByHeader_(sh, idx, 'teamupEventId', booking.teamupEventId);
+  // 自動確保 VenueBookings 具備回傳欄位 passcode / pwdRef / teamupEventId
+  var reqSh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
+  if (reqSh) {
+    ensureSheetColumn_(reqSh, 'teamupEventId');
+    ensureSheetColumn_(reqSh, 'pwdRef');
+    ensureSheetColumn_(reqSh, 'passcode');
   }
-  updateRecordStatus_(id, 'approved');
-  return ok({ saved: true, password: passcode, warn: [warn, tupMsg, mailMsg].filter(Boolean).join('；') });
+
+  var status = getVenueLockConfig_(token);
+  if (!status.ok) return status;
+  status.data.saved = true;
+  status.data.boundVenues = boundVenues;
+  return status;
 }
 
 function rejectVenueBooking_(token, id) {
@@ -1587,8 +1934,12 @@ function updateVenueBooking_(token, id, patch) {
       patch.venueName = venue.name || patch.venueName;
     }
   }
+  var textCols = { startDate: true, endDate: true, phone: true };
   allow.forEach(function (k) {
-    if (patch[k] !== undefined && patch[k] !== null) setCellByHeader_(sh, idx, k, patch[k]);
+    if (patch[k] !== undefined && patch[k] !== null) {
+      if (textCols[k]) setTextCellByHeader_(sh, idx, k, patch[k]);
+      else setCellByHeader_(sh, idx, k, patch[k]);
+    }
   });
   return ok({ saved: true });
 }
@@ -1644,7 +1995,7 @@ function listItems_() {
     });
 }
 function getItems_(token) {
-  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
+  var t = requirePermRead_(token, 'canStock', 'stockReg'); if (t.error) return err(t.error);
   return ok(readSheet_(SHEET.ITEMS));
 }
 function saveItem_(token, item) {
@@ -1880,7 +2231,7 @@ function submitStockBatchRequest_(b) {
 // ===================== 借物資：查閱／批核（庫存只扣一次） =====================
 
 function getStockRequests_(token) {
-  var t = requirePerm_(token, 'canStock'); if (t.error) return err(t.error);
+  var t = requirePermRead_(token, 'canStock', 'stockReg'); if (t.error) return err(t.error);
   return ok(readSheet_(SHEET.STOCK_REQ).reverse());
 }
 
@@ -2053,8 +2404,10 @@ function getActivityNotices_(token) {
   return ok(listActivityNotices_({}));
 }
 function deleteActivityNotice_(token, id) {
-  // 行政類角色（同借場/借物資運維權限）可刪
-  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  var t = checkToken_(token); if (!t.valid) return err('登入已過期');
+  var hasCardRow = !!readPerms_().activity;
+  var allowed = hasCardRow ? (cardAccessOf_(t, 'activity') === 'edit') : staffPerms_(t.email, t.role).canVenue;
+  if (!allowed) return err('你沒有此功能嘅權限');
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.ACTIVITY_REQ), String(id).trim());
   return ok({ deleted: true });
 }
@@ -3438,7 +3791,10 @@ function listIncidentReports_(token) {
 
 /** 補充／修正（例如單位主管省閱資料、跟進工作）：行政類角色 */
 function updateIncidentReport_(token, id, patch) {
-  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  var t = checkToken_(token); if (!t.valid) return err('登入已過期');
+  var hasCardRow = !!readPerms_().incident;
+  var allowed = hasCardRow ? (cardAccessOf_(t, 'incident') === 'edit') : staffPerms_(t.email, t.role).canVenue;
+  if (!allowed) return err('你沒有此功能嘅權限');
   id = String(id || '').trim();
   if (!id) return err('id 必填');
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.INCIDENT_REQ);
@@ -3458,7 +3814,10 @@ function updateIncidentReport_(token, id, patch) {
 }
 
 function deleteIncidentReport_(token, id) {
-  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  var t = checkToken_(token); if (!t.valid) return err('登入已過期');
+  var hasCardRow = !!readPerms_().incident;
+  var allowed = hasCardRow ? (cardAccessOf_(t, 'incident') === 'edit') : staffPerms_(t.email, t.role).canVenue;
+  if (!allowed) return err('你沒有此功能嘅權限');
   removeRowByFirstCol_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.INCIDENT_REQ), String(id).trim());
   return ok({ deleted: true });
 }
@@ -3516,7 +3875,7 @@ function listCourseLinks_() {
 
 /** 管理：連 scriptExecUrl / scriptApiKey / driveFolderId */
 function getCourseLinks_(token) {
-  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  var t = requirePermRead_(token, 'canCourse', 'training'); if (t.error) return err(t.error);
   return ok(readSheet_(SHEET.COURSE_LINKS).map(function (r) {
     var o = courseLinkPublic_(r);
     o.scriptExecUrl = courseExecUrl_(r);
@@ -3839,7 +4198,7 @@ function pullCourseSheetRaw_(token, b) {
 
 /** 攞返上次儲存嘅開班設定（setupJson） */
 function getCourseSetup_(token, courseId) {
-  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  var t = requirePermRead_(token, 'canCourse', 'training'); if (t.error) return err(t.error);
   var link = courseLinkById_(courseId);
   if (!link) return err('找不到此訓練班（courseId）');
   var setup = null;
@@ -4559,7 +4918,7 @@ function sendCourseRegNotice_(token, b) {
 
 /** 開班指引（俾 CL 嘅嘢）：CourseFactory 網址＋開班碼＋訓練班郵件 alias 現狀 */
 function getCourseOpsInfo_(token) {
-  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  var t = requirePermRead_(token, 'canCourse', 'training'); if (t.error) return err(t.error);
   return ok({
     districtName: getConfigValue_('districtName') || '童軍區',
     factoryUrl: String(getConfigValue_('COURSE_FACTORY_URL') || '').trim(),
@@ -4578,7 +4937,7 @@ function getCourseOpsInfo_(token) {
  * 攞班名＋公開課程ID 嚟配對——CL 交嚟 GS 網址（fileId）後，用班名對返 publicCourseId。
  */
 function listHubCourses_(token) {
-  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  var t = requirePermRead_(token, 'canCourse', 'training'); if (t.error) return err(t.error);
   var hub = courseHubUrl_();
   if (!hub) return err('未設定 COURSE_HUB_URL（新制訓練班 CourseHub /exec）——請喺 Config 填返');
   var info = courseHubInfo_(hub);
@@ -4716,7 +5075,7 @@ function submitCourseReg_(b) {
 
 /** 讀某班名單（轉發去該班 Script listRegs） */
 function getCourseRegs_(token, courseId) {
-  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  var t = requirePermRead_(token, 'canCourse', 'training'); if (t.error) return err(t.error);
   var link = courseLinkById_(courseId);
   if (!link) return err('找不到此訓練班');
   var tgt = courseTarget_(link, { action: 'listRegs' });
@@ -4773,7 +5132,7 @@ function listCourses_() {
   }).filter(function (c) { return String(c.status).toLowerCase() !== 'closed'; });
 }
 function getCourses_(token) {
-  var t = requirePerm_(token, 'canCourse'); if (t.error) return err(t.error);
+  var t = requirePermRead_(token, 'canCourse', 'training'); if (t.error) return err(t.error);
   return ok(readSheet_(SHEET.COURSES));
 }
 function saveCourse_(token, course) {
@@ -4816,8 +5175,8 @@ function listCourseParams_() {
   return { badges: badges, sections: sections, districts: districts, regions: regions, memberTypes: memberTypes };
 }
 
-// ===================== 電子鎖（通通鎖 TTLock）/ 日曆 / 電郵 =====================
-// 門鎖用 TTLock（SKW 區現有硬件）。批准 → createTtlockPasscode_ 建限時密碼。
+// ===================== 電子鎖（通通鎖 TTLock / Sciener）/ 日曆 / 電郵 =====================
+// 門鎖用 TTLock / Sciener（SKW 區現有硬件）。批准 → createTtlockPasscode_ 建限時密碼並回傳 pwdRef。
 // Teamup 金鑰主用 TEAMUP_* 欄名，同時兼容舊 teamup* 欄名。
 
 function md5_(s) {
@@ -4843,25 +5202,200 @@ function lockCfg_() {
     pwdMode: cfgFirst_('PWD_MODE', 'pwdMode') || 'phone4',
   };
 }
-function ttlockBase_() {
-  var b = lockCfg_().apiBase || 'https://api.sciener.com';
-  b = String(b).replace(/\/+$/, '');
-  // 開放平台網站 ≠ API；自動改去正確主機
-  if (/^https?:\/\/(www\.)?open\.sciener\.com$/i.test(b)) return 'https://api.sciener.com';
-  if (/^https?:\/\/(www\.)?open\.ttlock\.com$/i.test(b)) return 'https://api.ttlock.com';
+function ttlockReady_() {
+  var c = lockCfg_();
+  return !!(c.clientId && c.clientSecret && c.username && c.password);
+}
+function normalizeTtlockBase_(raw) {
+  var b = String(raw || '').trim().replace(/\/+$/, '');
+  if (!b || /^auto$/i.test(b)) return '';
+  if (/^(global|ttlock)$/i.test(b)) return 'https://api.ttlock.com';
+  if (/^(eu|intl|international)$/i.test(b)) return 'https://euapi.ttlock.com';
+  if (/^cn$/i.test(b)) return 'https://cnapi.ttlock.com';
+  if (/^sciener$/i.test(b)) return 'https://api.sciener.com';
+  // 開放平台／管鎖網頁 ≠ API；自動轉去對應 API 主機
+  if (/^https?:\/\/(www\.|lock2\.)?open\.sciener\.com$/i.test(b) || /^https?:\/\/lock2\.sciener\.com$/i.test(b)) return 'https://api.sciener.com';
+  if (/^https?:\/\/(www\.)?open\.ttlock\.com$/i.test(b) || /^https?:\/\/lock2\.ttlock\.com$/i.test(b)) return 'https://api.ttlock.com';
+  if (/^https?:\/\/euopen\.ttlock\.com$/i.test(b)) return 'https://euapi.ttlock.com';
+  if (/^https?:\/\/cnopen\.ttlock\.com$/i.test(b)) return 'https://cnapi.ttlock.com';
+  b = b.replace(/\/(oauth2\/token|v3\/.*)$/i, '');
   return b;
 }
-function ttlockDisabled_() { return String(getConfigValue_('ttlockDisabled')).toUpperCase() === 'TRUE'; }
-function ttlockToken_() {
-  var c = lockCfg_();
-  if (!c.clientId || !c.clientSecret || !c.username || !c.password) {
-    throw new Error('未設定電子鎖 Config（SCIENER_CLIENT_ID/SECRET/USERNAME/PASSWORD 或 ttlock*）');
+function ttlockBase_() {
+  return normalizeTtlockBase_(lockCfg_().apiBase) || 'https://euapi.ttlock.com';
+}
+function ttlockBaseCandidates_() {
+  var configured = normalizeTtlockBase_(lockCfg_().apiBase);
+  var defaults = [
+    'https://euapi.ttlock.com',
+    'https://api.ttlock.com',
+    'https://api.sciener.com',
+    'https://cnapi.ttlock.com',
+  ];
+  var list = [];
+  if (configured) list.push(configured);
+  defaults.forEach(function (u) { if (list.indexOf(u) < 0) list.push(u); });
+  return list;
+}
+function ttlockUsernameCandidates_(raw) {
+  var u = String(raw || '').trim();
+  if (!u) return [];
+  var list = [u];
+  var digits = u.replace(/[\s-]/g, '');
+  if (/^[456789]\d{7}$/.test(digits)) {
+    if (list.indexOf('852' + digits) < 0) list.push('852' + digits);
+    if (list.indexOf('+852' + digits) < 0) list.push('+852' + digits);
+  } else if (/^852\d{8}$/.test(digits)) {
+    if (list.indexOf('+' + digits) < 0) list.push('+' + digits);
+  } else if (/^\+852\d{8}$/.test(digits)) {
+    if (list.indexOf(digits.slice(1)) < 0) list.push(digits.slice(1));
   }
-  var payload = { client_id: c.clientId, client_secret: c.clientSecret, username: c.username, password: md5_(c.password), grant_type: 'password' };
-  var res = UrlFetchApp.fetch(ttlockBase_() + '/oauth2/token', { method: 'post', payload: payload, muteHttpExceptions: true });
-  var data = JSON.parse(res.getContentText());
-  if (!data.access_token) throw new Error('Sciener/TTLock 登入失敗 ' + JSON.stringify(data));
-  return data.access_token;
+  return list;
+}
+function ttlockPasswordHashes_(raw) {
+  var p = String(raw || '');
+  var m = md5_(p);
+  var list = [m];
+  if (/^[a-f0-9]{32}$/i.test(p) && p.toLowerCase() !== m) list.push(p.toLowerCase());
+  return list;
+}
+function explainTtlockError_(data) {
+  if (!data || typeof data !== 'object') return String(data || '未知錯誤');
+  var code = Number(data.errcode);
+  var rawMsg = data.errmsg || data.description || data.error_description || data.error || '';
+  var hint = '';
+  if (code === 10001 || code === 10002 || data.error === 'invalid_client') {
+    hint = 'SCIENER_CLIENT_ID 或 SCIENER_CLIENT_SECRET 不正確（請核對開放平台 App ID／Secret，並確認應用已審核通過）';
+  } else if (code === 10003) {
+    hint = '找不到此管鎖帳號（請填 TTLock／Sciener 手機 App 登入帳號，唔係開放平台開發者帳號；香港電話請連 852 區號）';
+  } else if (code === 10004 || code === 10007 || data.error === 'invalid_grant') {
+    hint = '管鎖帳號密碼不正確（請核對 SCIENER_PASSWORD）';
+  } else if (code === -2012 || code === -3002 || code === -3003 || code === 30002 || code === -4037) {
+    hint = '門鎖未連接網關或 Gateway 離線，無法遠端寫入密碼（請確認區總部 WiFi 網關通電在線）';
+  } else if (code === -2018 || code === 20002 || code === -1009) {
+    hint = '找不到指定 Lock ID，或此帳號無該把鎖嘅管理權限（請重新「讀取鎖列表」核對 Lock ID）';
+  } else if (code === -3007 || code === -3008) {
+    hint = '門鎖拒絕此密碼格式或位數（如門鎖韌體要求 6 位密碼，可將 PWD_MODE 改為 random）';
+  } else if (code === -3006 || code === -2019) {
+    hint = '密碼有效起訖時間無效（結束時間必須遲於現在）';
+  } else if (code === -3009) {
+    hint = '門鎖內存密碼數量已滿，請先喺 App 清理過期密碼';
+  }
+  var detail = (data.errcode !== undefined ? 'errcode ' + data.errcode : '') + (rawMsg ? (data.errcode !== undefined ? ': ' : '') + rawMsg : '');
+  if (hint) return hint + (detail ? '（' + detail + '）' : '');
+  return detail || JSON.stringify(data);
+}
+function ttlockDisabled_() { return String(getConfigValue_('ttlockDisabled')).toUpperCase() === 'TRUE'; }
+
+/**
+ * 自動跨區（euapi / api.ttlock / api.sciener / cnapi）登入並定位門鎖所在伺服器。
+ * opts: { fetchLocks?: boolean, targetLockId?: string }
+ */
+function ttlockConnect_(opts) {
+  opts = opts || {};
+  var c = lockCfg_();
+  var missing = [];
+  if (!c.clientId) missing.push('SCIENER_CLIENT_ID');
+  if (!c.clientSecret) missing.push('SCIENER_CLIENT_SECRET');
+  if (!c.username) missing.push('SCIENER_USERNAME');
+  if (!c.password) missing.push('SCIENER_PASSWORD');
+  if (missing.length) {
+    throw new Error('未設定電子鎖金鑰：缺少 ' + missing.join('、') + '（可喺場地借用審批頁「電子鎖連線設定」直接填寫）');
+  }
+  var bases = ttlockBaseCandidates_();
+  var users = ttlockUsernameCandidates_(c.username);
+  var pwds = ttlockPasswordHashes_(c.password);
+  var targetLock = String(opts.targetLockId || '').trim();
+  var needLocks = !!opts.fetchLocks || !!targetLock;
+
+  var bestConn = null;
+  var lastErr = null;
+
+  for (var bi = 0; bi < bases.length; bi++) {
+    var base = bases[bi];
+    var authedOnBase = false;
+    for (var ui = 0; ui < users.length && !authedOnBase; ui++) {
+      for (var pi = 0; pi < pwds.length && !authedOnBase; pi++) {
+        var payload = {
+          client_id: c.clientId,
+          client_secret: c.clientSecret,
+          username: users[ui],
+          password: pwds[pi],
+          grant_type: 'password',
+        };
+        var res = UrlFetchApp.fetch(base + '/oauth2/token', { method: 'post', payload: payload, muteHttpExceptions: true });
+        var data = {};
+        try { data = JSON.parse(res.getContentText()); } catch (e) { data = { error: res.getContentText().slice(0, 120) }; }
+        if (data && data.access_token) {
+          authedOnBase = true;
+          if (!needLocks) {
+            return { accessToken: data.access_token, apiBase: base, clientId: c.clientId, locks: [] };
+          }
+          var lRes = UrlFetchApp.fetch(base + '/v3/lock/list', {
+            method: 'post',
+            payload: { clientId: c.clientId, accessToken: data.access_token, pageNo: '1', pageSize: '50', date: String(Date.now()) },
+            muteHttpExceptions: true,
+          });
+          var lData = {};
+          try { lData = JSON.parse(lRes.getContentText()); } catch (e) { lData = {}; }
+          var list = (lData && Array.isArray(lData.list)) ? lData.list : null;
+          // 授權管理員（Authorized Admin）帳號嘅鎖唔喺 /v3/lock/list，而喺 /v3/key/list！若讀到 0 把或搵唔到目標鎖就自動補撈 /v3/key/list
+          if (list && (list.length === 0 || (targetLock && !list.some(function (lk) { return String(lk.lockId) === targetLock; })))) {
+            try {
+              var kRes = UrlFetchApp.fetch(base + '/v3/key/list', {
+                method: 'post',
+                payload: { clientId: c.clientId, accessToken: data.access_token, pageNo: '1', pageSize: '50', date: String(Date.now()) },
+                muteHttpExceptions: true,
+              });
+              var kData = JSON.parse(kRes.getContentText());
+              if (kData && Array.isArray(kData.list) && kData.list.length > 0) {
+                var seenLocks = {};
+                list.forEach(function (lk) { seenLocks[String(lk.lockId)] = true; });
+                kData.list.forEach(function (ek) {
+                  if (ek.lockId && !seenLocks[String(ek.lockId)]) {
+                    seenLocks[String(ek.lockId)] = true;
+                    list.push({
+                      lockId: ek.lockId,
+                      lockAlias: ek.lockAlias || ek.keyName || ek.lockName || '',
+                      lockName: ek.lockName || '',
+                      lockMac: ek.lockMac || '',
+                      hasGateway: ek.hasGateway !== undefined ? ek.hasGateway : 1,
+                      electricQuantity: ek.electricQuantity,
+                    });
+                  }
+                });
+              }
+            } catch (ke) {}
+          }
+          if (list) {
+            var conn = { accessToken: data.access_token, apiBase: base, clientId: c.clientId, locks: list };
+            if (targetLock && list.some(function (lk) { return String(lk.lockId) === targetLock; })) {
+              return conn;
+            }
+            if (!bestConn || (bestConn.locks.length === 0 && list.length > 0)) {
+              bestConn = conn;
+            }
+            if (list.length > 0 && !targetLock) return conn;
+          } else {
+            lastErr = lData;
+          }
+        } else {
+          // 保留較具體嘅密碼錯誤（10004/10007）優先於跨區找不到帳號（10003）
+          if (!lastErr || Number(lastErr.errcode) === 10003) lastErr = data;
+          // 若 client_id / client_secret 錯，所有區都會一樣錯，無須重複試其他帳號變體
+          if (Number(data.errcode) === 10001 || Number(data.errcode) === 10002 || data.error === 'invalid_client') {
+            throw new Error('電子鎖連線失敗：' + explainTtlockError_(data));
+          }
+        }
+      }
+    }
+  }
+  if (bestConn) return bestConn;
+  throw new Error('電子鎖登入失敗：' + explainTtlockError_(lastErr));
+}
+
+function ttlockToken_() {
+  return ttlockConnect_({ fetchLocks: false }).accessToken;
 }
 
 /** 生成 6 位數字密碼（避開已存在嘅 passcode，防撞碼） */
@@ -4875,7 +5409,7 @@ function genPasscode_() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-/** phone4=電話頭4位（你而家用緊）；phone4tail=尾4位；random=隨機6位 */
+/** phone4=電話頭4位（預設）；phone4tail=尾4位；random=隨機6位 */
 function buildKeyboardPwd_(phone) {
   var mode = String(lockCfg_().pwdMode || 'phone4').toLowerCase();
   var digits = String(phone || '').replace(/\D/g, '');
@@ -4884,64 +5418,155 @@ function buildKeyboardPwd_(phone) {
   return genPasscode_();
 }
 
-/** 從 Sciener 撈鎖列表，方便抄 Lock ID 填入 Config */
+function phoneTail4_(phone) {
+  var digits = String(phone || '').replace(/\D/g, '');
+  return digits.length >= 4 ? digits.slice(-4) : '';
+}
+
+function phoneHead4_(phone) {
+  var digits = String(phone || '').replace(/\D/g, '');
+  return (digits + '0000').slice(0, 4);
+}
+
+/** 保持現有密碼規則：頭4 → 尾4 → 遞增 +1 後備（保留位數與前導 0）；random 模式用 6 位 */
+function passcodeCandidates_(phone) {
+  var mode = String(lockCfg_().pwdMode || 'phone4').toLowerCase();
+  var first = buildKeyboardPwd_(phone);
+  var list = [first];
+  if (mode === 'phone4' || mode === 'phone4head') {
+    var tail = phoneTail4_(phone);
+    if (tail && list.indexOf(tail) < 0) list.push(tail);
+  } else if (mode === 'phone4tail') {
+    var head = phoneHead4_(phone);
+    if (head && list.indexOf(head) < 0) list.push(head);
+  }
+  var len = first.length;
+  var mod = Math.pow(10, len);
+  var cur = parseInt(first, 10) || 0;
+  for (var i = 0; i < 6; i++) {
+    cur = (cur + 1) % mod;
+    var nextCode = String(cur).padStart(len, '0');
+    if (list.indexOf(nextCode) < 0) list.push(nextCode);
+  }
+  return list;
+}
+
+/** 以香港時區 (+08:00) 解析借用起訖時間為毫秒 timestamp */
+function parseVenueDateMs_(value, endOfDay) {
+  if (value === undefined || value === null || value === '') return NaN;
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    return value.getTime();
+  }
+  var iso = toTeamupDt_(String(value), !!endOfDay);
+  var d = new Date(iso);
+  return d.getTime();
+}
+
+function formatHkDateTime_(dt) {
+  if (!dt || isNaN(dt.getTime())) return '';
+  return Utilities.formatDate(dt, 'Asia/Hong_Kong', 'yyyy-MM-dd HH:mm');
+}
+
+/** 從 Sciener / TTLock 撈鎖列表（自動跨區搜尋），方便一鍵綁定 Lock ID */
 function getLockList_(token) {
   var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
   try {
-    var access = ttlockToken_();
     var c = lockCfg_();
-    var res = UrlFetchApp.fetch(ttlockBase_() + '/v3/lock/list', {
-      method: 'post',
-      payload: { clientId: c.clientId, accessToken: access, pageNo: '1', pageSize: '50', date: String(Date.now()) },
-      muteHttpExceptions: true,
-    });
-    var data = {};
-    try { data = JSON.parse(res.getContentText()); } catch (e) { data = {}; }
-    if (!data.list) return err('讀鎖列表失敗：' + res.getContentText());
+    var conn = ttlockConnect_({ fetchLocks: true, targetLockId: c.lockId });
     return ok({
-      apiBase: ttlockBase_(),
+      apiBase: conn.apiBase,
       configuredLockId: c.lockId,
-      locks: data.list.map(function (lock) {
+      locks: conn.locks.map(function (lock) {
         return {
           lockId: lock.lockId,
           name: lock.lockAlias || lock.lockName || '',
           mac: lock.lockMac || '',
           hasGateway: lock.hasGateway === 1 || lock.hasGateway === true,
+          electricQuantity: lock.electricQuantity,
         };
       }),
     });
   } catch (e) {
-    return err(String(e.message || e));
+    return err(String((e && e.message) || e));
   }
 }
 
-/** 建立限時密碼；ttlockDisabled=TRUE 時返回模擬密碼，其餘流程照跑 */
+/** 建立限時密碼；ttlockDisabled=TRUE 時返回模擬密碼，否則經網關寫入實體鎖並回傳 keyboardPwdId */
 function createTtlockPasscode_(phone, startDate, endDate, name, venueLockId) {
-  if (ttlockDisabled_()) return { passcode: buildKeyboardPwd_(phone), simulated: true };
-  var token = ttlockToken_();
+  var startMs = parseVenueDateMs_(startDate, false);
+  var endMs = parseVenueDateMs_(endDate || startDate, true);
+  if (isNaN(startMs) || isNaN(endMs)) {
+    throw new Error('借用日期時間格式不正確（' + String(startDate || '') + ' → ' + String(endDate || '') + '）');
+  }
+  if (endMs < startMs) {
+    throw new Error('結束時間不可早於開始時間');
+  }
+  var validFrom = new Date(startMs - 15 * 60 * 1000);
+  var validTo = new Date(endMs + 15 * 60 * 1000);
+
+  if (ttlockDisabled_()) {
+    return {
+      passcode: buildKeyboardPwd_(phone),
+      pwdRef: 'SIMULATED',
+      simulated: true,
+      lockWritten: false,
+      validFrom: validFrom,
+      validTo: validTo,
+      apiBase: '',
+      lockId: '',
+    };
+  }
+
+  if (validTo.getTime() <= Date.now()) {
+    throw new Error('借用時段已過期（' + formatHkDateTime_(validTo) + '），電子鎖不接受過去時段密碼；請先編輯延長時間或改用「確認（唔設鎖）」');
+  }
+
   var c = lockCfg_();
   var lockId = String(venueLockId || '').trim() || c.lockId;
-  var clientId = c.clientId;
-  if (!lockId) throw new Error('未設定 SCIENER_LOCK_ID / ttlockLockId（Config 工作表 key 欄），或喺場地填 Lock ID');
-  var base = ttlockBase_();
-  var start = new Date(startDate); start.setMinutes(start.getMinutes() - 15);
-  var end = new Date(endDate); end.setMinutes(end.getMinutes() + 15);
-  var passcode = buildKeyboardPwd_(phone);
-  var lastErr = null;
-  for (var attempt = 0; attempt < 8; attempt++) {
-    var payload = {
-      clientId: clientId, accessToken: token, lockId: String(lockId),
-      keyboardPwd: passcode, keyboardPwdName: String(name || '申請人').substring(0, 30),
-      startDate: String(start.getTime()), endDate: String(end.getTime()),
-      addType: '2', date: String(Date.now())
-    };
-    var res = UrlFetchApp.fetch(base + '/v3/keyboardPwd/add', { method: 'post', payload: payload, muteHttpExceptions: true });
-    var data; try { data = JSON.parse(res.getContentText()); } catch (e) { data = {}; }
-    if (data.keyboardPwdId || data.errcode === 0) return { passcode: passcode, validFrom: start, validTo: end };
-    lastErr = data;
-    passcode = String(parseInt(passcode, 10) + 1).padStart(String(passcode).length, '0'); // 撞碼 +1 重試
+  if (!lockId) {
+    var probe = ttlockConnect_({ fetchLocks: true });
+    var hintLock = probe.locks && probe.locks.length === 1 ? '（偵測到帳號內有門鎖 Lock ID：' + probe.locks[0].lockId + '，請於審批頁點「綁定為預設門鎖」）' : '（請先喺審批頁點「讀取鎖列表」並綁定門鎖）';
+    throw new Error('未設定門鎖 Lock ID ' + hintLock);
   }
-  throw new Error('TTLock 建碼多次失敗 ' + (lastErr.errmsg || JSON.stringify(lastErr)));
+
+  var conn = ttlockConnect_({ targetLockId: lockId });
+  var candidates = passcodeCandidates_(phone);
+  var lastErr = null;
+  var fatalCodes = [-2012, -3002, -3003, 30002, -4037, -2018, 20002, -1009, -3006, -2019, -3009, 10001, 10002, 10003, 10004];
+
+  for (var i = 0; i < candidates.length; i++) {
+    var code = candidates[i];
+    var payload = {
+      clientId: conn.clientId,
+      accessToken: conn.accessToken,
+      lockId: String(lockId),
+      keyboardPwd: code,
+      keyboardPwdName: String(name || '申請人').substring(0, 30),
+      keyboardPwdType: '3',
+      startDate: String(validFrom.getTime()),
+      endDate: String(validTo.getTime()),
+      addType: '2',
+      date: String(Date.now()),
+    };
+    var res = UrlFetchApp.fetch(conn.apiBase + '/v3/keyboardPwd/add', { method: 'post', payload: payload, muteHttpExceptions: true });
+    var data;
+    try { data = JSON.parse(res.getContentText()); } catch (e) { data = { errmsg: res.getContentText().slice(0, 120) }; }
+    if (data && (data.keyboardPwdId || data.errcode === 0)) {
+      return {
+        passcode: code,
+        pwdRef: String(data.keyboardPwdId || 'OK'),
+        simulated: false,
+        lockWritten: true,
+        validFrom: validFrom,
+        validTo: validTo,
+        apiBase: conn.apiBase,
+        lockId: String(lockId),
+      };
+    }
+    lastErr = data;
+    if (data && fatalCodes.indexOf(Number(data.errcode)) >= 0) break;
+  }
+  throw new Error(explainTtlockError_(lastErr));
 }
 
 // ---------- Teamup ----------
@@ -4981,18 +5606,28 @@ function buildTeamupNotes_(req) {
     + '\n電郵：' + String(req.email || '') + '\n旅團：' + String(req.troop || '')
     + '\n申請編號：' + String(req.refCode || '') + '\n用途：' + String(req.purpose || '');
 }
-/** 正規化成 Teamup 需要嘅 ISO 起訖時間（香港 +08:00） */
+/** 正規化成 Teamup 需要嘅 ISO 起訖時間（香港 +08:00，絕不帶 .000Z 毫秒以免 Teamup HTTP 400） */
 function toTeamupDt_(value, endOfDay) {
   if (!value) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    if (isNaN(value.getTime())) return '';
+    return Utilities.formatDate(value, 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm:ss") + '+08:00';
+  }
   var raw = String(value).trim();
-  if (/[zZ]|[+-]\d{2}:\d{2}$/.test(raw)) return raw;
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     return raw + (endOfDay ? 'T23:59:00+08:00' : 'T00:00:00+08:00');
+  }
+  if (/[zZ]$|[+-]\d{2}:\d{2}$/.test(raw)) {
+    var dTz = new Date(raw);
+    if (!isNaN(dTz.getTime())) {
+      return Utilities.formatDate(dTz, 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm:ss") + '+08:00';
+    }
+    return raw.replace(/\.\d{3}([zZ]|[+-]\d{2}:\d{2})$/, '$1');
   }
   if (/^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}/.test(raw)) {
     var t = raw.replace(' ', 'T');
     var parts = t.split('T');
-    var hm = parts[1];
+    var hm = parts[1].replace(/\.\d+$/, '');
     if (/^\d:\d{2}/.test(hm)) hm = '0' + hm;
     if (hm.length === 5) hm += ':00';
     return parts[0] + 'T' + hm.slice(0, 8) + '+08:00';
@@ -5000,7 +5635,7 @@ function toTeamupDt_(value, endOfDay) {
   var d = new Date(raw);
   if (isNaN(d.getTime())) return raw;
   if (endOfDay && raw.indexOf(':') < 0) { d.setHours(23, 59, 59, 999); }
-  return d.toISOString();
+  return Utilities.formatDate(d, 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm:ss") + '+08:00';
 }
 
 /** 申請人填表 → 喺「申請中」子日曆建事件 */
@@ -5013,15 +5648,29 @@ function createPendingTeamupEvent_(req) {
     toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true));
 }
 
-/** 批准：有 pending 事件就搬去確認子日曆；冇就新建。回傳 {warn, eventId} */
+/** 批准：有 pending 事件就搬去確認子日曆；若原事件已刪除或冇 ID 就新建。回傳 {warn, eventId} */
 function applyTeamupApproved_(booking, extraNotes) {
   var out = { warn: '', eventId: String(booking.teamupEventId || '').trim() };
+  if (!teamupReady_()) {
+    out.warn = 'Teamup 未設定（已略過日曆同步）';
+    return out;
+  }
   try {
     var extra = extraNotes || '';
-    var stamp = '\n✅ 已批准於 ' + new Date().toLocaleString('zh-HK') + extra;
+    var stamp = '\n✅ 已批准於 ' + formatHkDateTime_(new Date()) + extra;
     if (out.eventId) {
       var moved = teamupMoveToApproved_(out.eventId, booking, stamp);
-      if (moved) out.warn = moved;
+      if (!moved) return out;
+      // 原事件可能已喺 Teamup 手動刪除，自動改為新建確認事件並回傳新 eventId
+      var fallbackEv = createTeamupEvent_(teamupCfg_().approvedSub,
+        (booking.venueName || booking.venueId || '區總部') + '（已批准）',
+        buildTeamupNotes_(booking) + stamp,
+        toTeamupDt_(booking.startDate, false), toTeamupDt_(booking.endDate || booking.startDate, true));
+      if (fallbackEv.ok) {
+        out.eventId = fallbackEv.eventId || out.eventId;
+        return out;
+      }
+      out.warn = moved;
     } else {
       var ev = createTeamupEvent_(teamupCfg_().approvedSub,
         (booking.venueName || booking.venueId || '區總部') + '（已批准）',
@@ -5050,24 +5699,29 @@ function createTeamupEvent_(subId, title, notes, startDt, endDt) {
   try { var data = JSON.parse(r.text); return { ok: true, eventId: data && data.event ? data.event.id : '' }; }
   catch (e) { return { ok: true, eventId: '' }; }
 }
-/** 將 pending 事件搬去「確認借用」子日曆（轉色） */
+/** 將 pending 事件搬去「確認借用」子日曆（轉色），補發鎖匙時覆寫舊密碼備註避免重複 */
 function teamupMoveToApproved_(eventId, booking, extraNotes) {
   var c = teamupCfg_();
   if (!eventId) return '冇 Teamup 事件 ID';
   if (!c.approvedSub) return '未設定 TEAMUP_APPROVED_SUBCAL_ID';
   var cur = teamupApi_('get', c.calendarId + '/events/' + eventId);
-  var ev = cur && cur.event ? cur.event : {};
+  if (!cur || !cur.event) return '找不到原 Teamup 事件（' + eventId + '）';
+  var ev = cur.event;
   var title = (booking && (booking.venueName || booking.venueId))
     ? String(booking.venueName || booking.venueId) + '（已批准）'
     : ((ev.title || '區總部').replace('【申請】', '').replace('（已批准）', '').trim() + '（已批准）');
-  var notes = ev.notes || (booking ? buildTeamupNotes_(booking) : '');
-  if (extraNotes && notes.indexOf(extraNotes) < 0) notes = String(notes || '') + extraNotes;
+  var baseNotes = String(ev.notes || (booking ? buildTeamupNotes_(booking) : ''))
+    .replace(/\n✅ 已批准於 [^\n]*/g, '')
+    .replace(/\n🔑 密碼：[^\n]*/g, '');
+  var notes = baseNotes + (extraNotes || '');
+  var startDt = ev.start_dt || (booking ? toTeamupDt_(booking.startDate, false) : '');
+  var endDt = ev.end_dt || (booking ? toTeamupDt_(booking.endDate || booking.startDate, true) : startDt);
   var body = {
     subcalendar_ids: [Number(c.approvedSub)],
     title: title,
     notes: notes,
-    start_dt: ev.start_dt,
-    end_dt: ev.end_dt,
+    start_dt: startDt,
+    end_dt: endDt,
   };
   var r = teamupApi_('put', c.calendarId + '/events/' + eventId, body);
   return (r && r.event) ? '' : 'TeamUp 更新失敗';
@@ -5111,11 +5765,14 @@ function esc_(v) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 /** 批准 → 寄「已批准 + 入場密碼」俾申請人 */
-function sendVenueApprovalEmail_(req, passcode) {
+function sendVenueApprovalEmail_(req, passcode, validFrom, validTo) {
   var email = String(req.email || '').trim();
   if (!email) { console.log('無申請人電郵，跳過批准通知。'); return; }
   var cfg = venueMailConfig_();
   var name = req.name || '申請人';
+  var validLine = (validFrom && validTo)
+    ? ('<div style="font-size:12px;color:#166534;margin-top:6px;">密碼生效時段：' + esc_(formatHkDateTime_(validFrom)) + ' → ' + esc_(formatHkDateTime_(validTo)) + '（已含前後 15 分鐘緩衝）</div>')
+    : '';
   var html =
     '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:20px;border:1px solid #e1e4e8;border-radius:8px;">'
     + '<h2 style="color:#15803d;text-align:center;border-bottom:2px solid #bbf7d0;padding-bottom:10px;">✅ 場地借用已獲批准</h2>'
@@ -5127,9 +5784,10 @@ function sendVenueApprovalEmail_(req, passcode) {
     + '<b>用途：</b>' + esc_(req.purpose || '—')
     + '</div>'
     + '<div style="background:#f0fdf4;border:2px dashed #bbf7d0;border-radius:8px;padding:22px;text-align:center;margin:18px 0;">'
-    + '<div style="font-size:13px;color:#166534;font-weight:bold;">🔑 入場密碼</div>'
-    + '<div style="font-size:40px;font-weight:800;letter-spacing:6px;color:#166534;font-family:monospace;margin:10px 0;">' + esc_(passcode) + '</div>'
-    + '<div style="font-size:13px;color:#374151;">請於借用時段使用此密碼進入場地。</div>'
+    + '<div style="font-size:13px;color:#166534;font-weight:bold;">🔑 電子門鎖入場密碼</div>'
+    + '<div style="font-size:40px;font-weight:800;letter-spacing:6px;color:#166534;font-family:monospace;margin:10px 0;">' + esc_(passcode) + '#</div>'
+    + '<div style="font-size:13px;color:#374151;">請於借用時段在門鎖鍵盤輸入 <b>' + esc_(passcode) + '</b> 後按 <b>#</b> 開鎖。</div>'
+    + validLine
     + '</div>'
     + '<div style="background:#fffbeb;border-left:4px solid #f59e0b;padding:12px 16px;font-size:13px;color:#78350f;line-height:1.7;">'
     + '<b>使用守則：</b>使用完畢後請關閉所有電源、清走垃圾並鎖好場地。如有問題請聯絡區職員。'
@@ -5184,16 +5842,15 @@ function getCards_(token) {
     return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
   })[0];
   var isSuper = levelOfUser_(t.email, t.role) === LEVEL_SUPER;
+  if (!isSuper && u && String(u.active).toUpperCase() === 'FALSE') return ok([]);
+  var effRole = String((u && u.role) ? u.role : t.role || '').trim();
   var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
   var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).filter(function (c) {
-    // 一般帳戶必須是 Users 內有效的白名單角色；Script 維護超管無 Users 列，仍保留最高權限。
-    if (c.cardId === 'debitNote' && !isMaintenanceSuper_(t.email, t.role)
-      && (!u || String(u.active).toUpperCase() === 'FALSE' || !canGenerateDebitNoteRole_(u.role))) return false;
     // 隱藏卡片（enabled=FALSE）：只有層級 0 超管見到（用嚟私下加功能／升級），其他人一律睇唔到
     if (!c.enabled && !isSuper) return false;
     if (isSuper) { c.access = 'edit'; return true; }
     if (scopeOverride && scopeOverride.indexOf(c.cardId) < 0) return false;
-    var access = (perms[c.cardId] || {})[t.role] || '';
+    var access = (perms[c.cardId] || {})[effRole] || '';
     c.access = access;
     return access === 'edit' || access === 'view';
   }).sort(function (a, b) { return a.order - b.order; });
@@ -5269,8 +5926,7 @@ function savePerms_(token, matrix) {
     var row = [cid];
     roles.forEach(function (role) {
       var v = ((matrix[cid] || {})[role] || '').toString().toLowerCase();
-      if (cid === 'debitNote') row.push(canGenerateDebitNoteRole_(role) && (v === 'edit' || v === 'view') ? 'edit' : '');
-      else row.push(v === 'edit' || v === 'view' ? v : '');
+      row.push(v === 'edit' || v === 'view' ? v : '');
     });
     rows.push(row);
   });
@@ -5383,7 +6039,6 @@ function myCardAccess_(t) {
   var perms = readPerms_();
   var out = {};
   readSheet_(SHEET.CARDS).map(normalizeCard_).forEach(function (c) {
-    if (c.cardId === 'debitNote' && !canGenerateDebitNoteRole_(t.role)) return;
     if (lv === LEVEL_SUPER) { out[c.cardId] = 'edit'; return; }
     var a = (perms[c.cardId] || {})[t.role] || '';
     if (a === 'edit' || a === 'view') out[c.cardId] = a;
@@ -5437,7 +6092,6 @@ function delegatePerms_(token, targetRole, grants) {
   Object.keys(grants).forEach(function (cid) {
     var want = String(grants[cid] || '').toLowerCase();
     if (want !== 'edit' && want !== 'view' && want !== '') { rejected.push(cid + '：值不正確'); return; }
-    if (cid === 'debitNote' && want && !canGenerateDebitNoteRole_(targetRole)) { rejected.push(cid + '：此角色不可使用 DEBIT NOTE'); return; }
     var have = mine[cid] || '';
     if (want === 'edit' && have !== 'edit') { rejected.push(cid + '：你本身冇「可管理」權限'); return; }
     if (want === 'view' && !have) { rejected.push(cid + '：你本身冇此卡片權限'); return; }
@@ -5941,7 +6595,7 @@ function blueprint_() {
       ['SCIENER_USERNAME', '', '管鎖帳號（lock2.sciener.com / App，唔係開放平台帳）'],
       ['SCIENER_PASSWORD', '', '管鎖密碼'],
       ['SCIENER_LOCK_ID', '', '大門 Lock ID（數字；Config 係「一列 key」唔係欄。可用審批頁「讀取鎖列表」）'],
-      ['SCIENER_API_BASE', 'https://api.sciener.com', 'API 主機（唔好填 open.sciener.com 網站）'],
+      ['SCIENER_API_BASE', '', 'API 主機（留空自動跨區偵測 euapi.ttlock.com / api.ttlock.com / api.sciener.com；切勿填 open.* 網站）'],
       ['PWD_MODE', 'phone4', 'phone4=電話頭4位；phone4tail=尾4位；random=隨機6位'],
       ['ttlockClientId', '', '（舊名）等同 SCIENER_CLIENT_ID'],
       ['ttlockClientSecret', '', '（舊名）等同 SCIENER_CLIENT_SECRET'],
@@ -6022,7 +6676,7 @@ function blueprint_() {
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
       ['rooms', '地域房間使用情況', '🏢', 'builtin', '/rooms', '17／18／19 樓逐間房睇用途時段 · 今日總覽', 15, 'TRUE', 'FALSE', 'core', 'done'],
       ['orgchart', '地域及總會架構', '🏛', 'builtin', '/orgchart', '港島地域總監架構 · 總會領導層，自動跟官網更新', 16, 'TRUE', 'FALSE', 'core', 'done'],
-      ['debitNote', 'DEBIT NOTE 生成', '🧾', 'builtin', '/debit-note', '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（超管／DC／DDC_ADMIN／職員）', 17, 'TRUE', 'FALSE', 'core', 'done'],
+      ['debitNote', 'DEBIT NOTE 生成', '🧾', 'builtin', '/debit-note', '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出', 17, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
 
     { name: SHEET.UNITS, headerColor: '#bbf7d0', rows: [
@@ -6220,7 +6874,7 @@ function ensureSheetColumns_(bp) {
   var missing = want.filter(function (h) { return have.indexOf(h) < 0; });
   if (!missing.length) return [];
   sh.getRange(1, have.length + 1, 1, missing.length).setValues([missing]);
-  sh.getRange(1, 1, 1, have.length + missing.length).setFontWeight('bold');
+  sh.getRange(1, have.length + 1, 1, missing.length).setFontWeight('bold');
   return missing;
 }
 
@@ -6519,8 +7173,8 @@ function applyPassword_(email, newPassword) {
 }
 // ===================== YMIS 會員核實帳戶（舊版相容） =====================
 function getYmisCredentials_(token) {
-  var t = checkToken_(token);
-  if (!t.valid) return err('請先登入系統');
+  var auth = requireCardView_(token, 'ymis');
+  if (auth.error) return err(auth.error);
   var props = PropertiesService.getScriptProperties();
   var username = String(props.getProperty('YMIS_VERIFY_USERNAME') || '').trim();
   var password = String(props.getProperty('YMIS_VERIFY_PASSWORD') || '');

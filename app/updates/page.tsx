@@ -5,6 +5,18 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.24.0 — 🔑 場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程打通</h3>
+        <p>修復並打通 <code>/venue-regs</code> 一鍵批核、TTLock／Sciener 跨區連線建碼、Teamup 轉紅、電郵發送及 Google Sheet <code>VenueBookings</code> 完整回傳。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.24.0</a></p>
+        <ul>
+          <li>🌐 <b>跨區自動連線與帳號相容</b>：自動探測 <code>euapi.ttlock.com</code>／<code>api.ttlock.com</code>／<code>api.sciener.com</code>／<code>cnapi.ttlock.com</code> 及香港電話區號格式（<code>852</code>／<code>+852</code>），保留現有密碼生成規則（預設申請人電話頭 4 位，撞碼自動試尾 4 → +1）。</li>
+          <li>📥 <b>完整純文字回傳與零掉字</b>：批核後自動補齊 <code>passcode</code>、<code>pwdRef</code>（電子鎖 <code>keyboardPwdId</code>）、<code>teamupEventId</code> 欄並以純文字 <code>@</code> 格式寫回 Sheet（保留前導 <code>0</code>），同時即時回傳至審批頁顯示及支援一鍵 WhatsApp 傳送密碼。</li>
+          <li>🛡 <b>真實寫鎖把關＋補發鎖匙</b>：預設必須確認實體鎖／網關成功建碼先完成批核，不再靜默吞錯寄出無效隨機碼；對「僅確認未設鎖」或需重設時段之申請支援「🔑 補發／重製鎖匙」。</li>
+          <li>⚙️ <b>審批頁內建連線診斷與設定</b>：<code>/venue-regs</code> 直接顯示後端版本、電子鎖帳密、門鎖 Lock ID 與 Gateway 狀態，支援頁內直接純文字寫入 <code>Config</code> 及一鍵綁定預設門鎖。</li>
+          <li>⚠️ 部署：覆蓋更新 <code>Code.gs</code> → 執行一次 <code>setupSheets()</code>（只追加缺欄，零資料流失）→ 管理部署項目選「新版本」部署；健康檢查應回傳 <code>4.24.0</code>。</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.23.1 — 🛠 DEBIT NOTE 修正 Script 維護超管及入頁驗證</h3>
         <p>直接由 Apps Script 登入、刻意不存在於 <code>Users</code> 表的維護超管，現在與其他最高權限帳戶一樣可穩定使用 DEBIT NOTE。</p>
         <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.23.1</a></p>

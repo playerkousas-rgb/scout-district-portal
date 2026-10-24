@@ -2,21 +2,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { useRequireCard } from '@/lib/cardAccess';
+import { useRequireCardAccess } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import type { ActivityNotice, UserSession } from '@/lib/types';
 import BackLink, { BackBar } from '@/components/BackLink';
 
 const SECTIONS = ['小童軍', '幼童軍', '童軍', '深資童軍', '樂行童軍'];
 const NATURES = ['工作坊', '訓練班', '會議', '聚會', '比賽', '其他'];
-const OPS_ROLES = ['DC', 'SYSADMIN', 'DDC_ADMIN', 'DDC_TRAINING'];
 
 const EMPTY = { troop: '', activityName: '', section: '', nature: '', year: '', startDateTime: '', endDateTime: '', location: '', membersCount: '', leadersCount: '', parentsCount: '', leaderName: '', leaderPhone: '', leaderEmail: '', note: '' };
 
 export default function ActivityNoticesPage() {
   const router = useRouter();
   const { withDistrict } = useDistrict();
-  const session = useRequireCard('activity');
+  const { session, access } = useRequireCardAccess('activity', { redirectOnError: true });
   const [notices, setNotices] = useState<ActivityNotice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -41,7 +40,7 @@ export default function ActivityNoticesPage() {
   useEffect(() => { if (session) { load(); } }, [session]);
 
   const years = useMemo(() => Array.from(new Set(notices.map(n => n.year).filter(Boolean))) as string[], [notices]);
-  const isOps = !!session && OPS_ROLES.includes(session.role);
+  const isOps = !!session && (access === 'edit' || !!session.isAdmin);
 
   const filtered = useMemo(() => {
     let list = notices.filter(n =>

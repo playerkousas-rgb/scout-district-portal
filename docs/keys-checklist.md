@@ -42,26 +42,26 @@ node get-ids.js
 
 ---
 
-## B. 通通鎖 TTLock（共 5 條）
-| # | Config 欄位 | 係咩 | 去邊度攞 | 點驗證 |
+## B. 通通鎖 TTLock（先打通呢 4 項 + 1 個自動讀出嘅 Lock ID）
+
+> 💡 **點解喺手機「通通鎖 App」入面搵唔到「API Key」？**
+> 因為通通鎖 API 將授權分開兩邊：
+> 1. **應用金鑰（`App ID` + `App Secret`）** → 要用電腦去 **通通鎖開放平台 `https://open.ttlock.com`** 免費註冊「開發者帳號」並創建應用先攞到；
+> 2. **管鎖帳密（`Username` + `Password`）** → 就係你平時**手機開「TTLock 通通鎖 App」管理區總部把鎖嗰個登入帳號同密碼**（唔係開放平台網站密碼！）。
+
+| 順序 | Config 欄位（主名） | 舊相容名 | 係咩 | 去邊度攞（逐步位置） |
 |---|---|---|---|---|
-| B1 | `ttlockClientId` | 開發者 App ID | Vercel env `TTLOCK_CLIENT_ID` | 見「驗證 TTLock」 |
-| B2 | `ttlockClientSecret` | 開發者 App Secret | Vercel env `TTLOCK_CLIENT_SECRET` | 見「驗證 TTLock」 |
-| B3 | `ttlockUsername` | TTLock 登入帳號（lock2） | Vercel env `TTLOCK_USERNAME` | 見「驗證 TTLock」 |
-| B4 | `ttlockPassword` | TTLock 登入密碼 | Vercel env `TTLOCK_PASSWORD` | 見「驗證 TTLock」 |
-| B5 | `ttlockLockId` | 大門鎖 Lock ID | Vercel env `TTLOCK_LOCK_ID`（或重跑 `get-lock-id.js`） | 見「驗證 TTLock」 |
-| — | `ttlockApiBase` | 區域 server | 唔填就用預設 `https://api.ttlock.com` | — |
+| ① | `SCIENER_CLIENT_ID` | `ttlockClientId` | 開放平台 `App ID`（`client_id`） | 電腦開 **`https://open.ttlock.com`** → 右上角 **Register** 註冊開發者帳號 → 登入後入 **Console（控制台）→ App Management（應用管理）→ Create Application（創建應用）** → 審核通過（Approved）後點入應用詳情複製 **`App ID`** |
+| ② | `SCIENER_CLIENT_SECRET` | `ttlockClientSecret` | 開放平台 `App Secret`（`client_secret`） | 同上，喺 **`https://open.ttlock.com`** 應用詳情頁複製 **`App Secret`** |
+| ③ | `SCIENER_USERNAME` | `ttlockUsername` | **手機「通通鎖 App」**登入帳號 | 打開手機 **TTLock 通通鎖 App**（管住區總部大門鎖嗰個帳號）：如用香港電話註冊填 `852` + 8位電話（例 `85291234567`）；如用電郵註冊填電郵。**切勿填開放平台網站帳號！** |
+| ④ | `SCIENER_PASSWORD` | `ttlockPassword` | **手機「通通鎖 App」**登入密碼 | 上述手機 TTLock App 嘅明文登入密碼（後台會自動幫你做 MD5 加密；如手機 App 只綁咗 Apple/Google 第三方登入，請先喺 App「設定 → 帳號與安全」設返密碼） |
+| ⑤ | `SCIENER_LOCK_ID` | `ttlockLockId` | 大門鎖數字 `Lock ID` | **唔使自己搵！** 喺平台 `/venue-regs` 填好 ①～④ 點 **「🚀 儲存並即刻測試通通鎖連線＆讀取門鎖」**，系統會自動撈出門鎖清單同 Gateway 狀態，點 **「⚡ 一鍵設為預設門鎖」** 即自動綁定 |
+| — | `SCIENER_API_BASE` | `ttlockApiBase` | 伺服器區域 | **留空即可**（`v4.24.0` 自動跨區探測 `euapi.ttlock.com` / `api.ttlock.com` / `api.sciener.com`） |
 
-### 驗證 TTLock
-```bash
-cd services/skw-booking
-node get-lock-id.js
-# 輸入 B1~B4 → 若登入成功會列出你嘅鎖 + Lock ID + 有冇網關
-# 對返 B5 係咪你要嗰個鎖，而且「已連接網關」= 是（先可遠端建密碼）
-```
-
-> ⚠️ TTLock 區域：`get-ids.js` / `get-lock-id.js` 寫死 `https://api.ttlock.com`（global server）。
-> 如果你帳號註冊喺歐洲/中國 server，要用 `ttlockApiBase` 指返啱嗰個（eu / cn）。
+### 硬件必查：WiFi 網關（Gateway G2/G3）
+- 通通鎖本身行藍牙；要喺網頁一鍵遠端寫入「申請人電話頭 4 位」密碼，區總部必須插住 **通通鎖 WiFi 網關（Gateway）** 並連緊 WiFi。
+- 打開手機 **TTLock App → 左上角選單 → 網關（Gateway）**，確認網關顯示 **在線（Online）** 且關聯咗區總部把門鎖。
+- 喺 `/venue-regs` 讀鎖時見到 **`🟢 已接 WiFi Gateway（可遠端寫鎖）`** 就代表通通鎖 100% 打通！
 
 ---
 
