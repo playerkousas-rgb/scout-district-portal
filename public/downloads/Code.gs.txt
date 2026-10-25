@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.24.1
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.24.2
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -318,7 +318,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.24.1',
+      version: '4.24.2',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -1671,7 +1671,7 @@ function approveVenueBooking_(token, id, opts) {
     return err('此申請已批核並已發出電子鎖匙（如需重新製作鎖匙，請點「補發／重製鎖匙」）');
   }
 
-  // 1) TTLock 限時密碼（提前/延後 15 分鐘；電話頭4撞碼後逐個 +1，不改用電話尾4）
+  // 1) TTLock 限時密碼（電話頭4 → 撞碼改用尾4 → 再撞碼逐個 +1）
   var passcode = '';
   var pwdRef = '';
   var lockWritten = false;
@@ -1802,7 +1802,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.24.1',
+    version: '4.24.2',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -1840,7 +1840,7 @@ function saveVenueLockConfig_(token, cfg) {
     ['username', 'SCIENER_USERNAME', '管鎖帳號（TTLock / Sciener App 登入帳號）'],
     ['lockId', 'SCIENER_LOCK_ID', '大門 Lock ID（數字）'],
     ['apiBase', 'SCIENER_API_BASE', 'API 主機（留空自動偵測 euapi.ttlock.com / api.ttlock.com / api.sciener.com）'],
-    ['pwdMode', 'PWD_MODE', 'phone4=電話頭4位（撞碼逐個+1）；phone4tail=尾4位（撞碼逐個+1）；random=隨機6位'],
+    ['pwdMode', 'PWD_MODE', 'phone4=頭4位，撞碼試尾4再逐個+1；phone4tail=尾4位，撞碼試頭4再逐個+1；random=隨機6位'],
     ['teamupCalendarKey', 'TEAMUP_CALENDAR_KEY', 'Teamup 分享金鑰 ks...'],
     ['teamupPendingSub', 'TEAMUP_PENDING_SUBCAL_ID', '藍色（申請中）子日曆 ID'],
     ['teamupApprovedSub', 'TEAMUP_APPROVED_SUBCAL_ID', '紅色（確認借用）子日曆 ID'],
@@ -5403,7 +5403,7 @@ function genPasscode_() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-/** phone4=電話頭4位（預設）；phone4tail=電話尾4位；random=隨機6位；撞碼後均逐個 +1 */
+/** phone4=電話頭4位（預設）；phone4tail=電話尾4位；random=隨機6位 */
 function buildKeyboardPwd_(phone) {
   var mode = String(lockCfg_().pwdMode || 'phone4').toLowerCase();
   var digits = String(phone || '').replace(/\D/g, '');
@@ -5412,13 +5412,29 @@ function buildKeyboardPwd_(phone) {
   return genPasscode_();
 }
 
+function phoneTail4_(phone) {
+  var digits = String(phone || '').replace(/\D/g, '');
+  return digits.length >= 4 ? digits.slice(-4) : '';
+}
+
+function phoneHead4_(phone) {
+  var digits = String(phone || '').replace(/\D/g, '');
+  return (digits + '0000').slice(0, 4);
+}
+
 /**
- * 頭4位模式：先試電話頭4位，撞碼後只按數字逐個 +1（保留位數及前導 0），不試電話尾4位。
- * phone4tail 模式仍以尾4位作為起始碼，之後同樣逐個 +1；random 模式為 6 位。
+ * 頭4位模式：先試電話頭4位，再試電話尾4位，兩者都撞碼才逐個 +1。
+ * phone4tail 模式順序相反；random 模式以 6 位隨機碼開始，之後逐個 +1。
  */
 function passcodeCandidates_(phone) {
+  var mode = String(lockCfg_().pwdMode || 'phone4').toLowerCase();
   var first = buildKeyboardPwd_(phone);
   var list = [first];
+  var alternate = '';
+  if (mode === 'phone4' || mode === 'phone4head') alternate = phoneTail4_(phone);
+  else if (mode === 'phone4tail') alternate = phoneHead4_(phone);
+  if (alternate && list.indexOf(alternate) < 0) list.push(alternate);
+
   var len = first.length;
   var mod = Math.pow(10, len);
   var cur = parseInt(first, 10) || 0;
@@ -6575,7 +6591,7 @@ function blueprint_() {
       ['SCIENER_PASSWORD', '', '管鎖密碼'],
       ['SCIENER_LOCK_ID', '', '大門 Lock ID（數字；Config 係「一列 key」唔係欄。可用審批頁「讀取鎖列表」）'],
       ['SCIENER_API_BASE', '', 'API 主機（留空自動跨區偵測 euapi.ttlock.com / api.ttlock.com / api.sciener.com；切勿填 open.* 網站）'],
-      ['PWD_MODE', 'phone4', 'phone4=電話頭4位（撞碼逐個+1）；phone4tail=尾4位（撞碼逐個+1）；random=隨機6位'],
+      ['PWD_MODE', 'phone4', 'phone4=頭4位，撞碼試尾4再逐個+1；phone4tail=尾4位，撞碼試頭4再逐個+1；random=隨機6位'],
       ['ttlockClientId', '', '（舊名）等同 SCIENER_CLIENT_ID'],
       ['ttlockClientSecret', '', '（舊名）等同 SCIENER_CLIENT_SECRET'],
       ['ttlockUsername', '', '（舊名）等同 SCIENER_USERNAME'],

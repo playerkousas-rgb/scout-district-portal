@@ -46,7 +46,7 @@
 | 電子鎖 | `SCIENER_USERNAME` / `SCIENER_PASSWORD` | TTLock／Sciener 手機 App 管鎖帳號及密碼（兼容 `ttlockUsername` / `ttlockPassword`） |
 | 電子鎖 | `SCIENER_LOCK_ID` | 大門鎖數字 Lock ID（可喺 `/venue-regs` 點「測試讀取門鎖」後一鍵綁定） |
 | 電子鎖 | `SCIENER_API_BASE` | 留空自動跨區偵測 `euapi.ttlock.com` / `api.ttlock.com` / `api.sciener.com` |
-| 電子鎖 | `PWD_MODE` | 預設 `phone4`（電話頭 4 位，撞碼後逐個 +1；不改用電話尾 4）；可選 `phone4tail` / `random` |
+| 電子鎖 | `PWD_MODE` | 預設 `phone4`（電話頭 4 位；撞碼先試電話尾 4，再逐個 +1）；可選 `phone4tail` / `random` |
 | 電子鎖 | `ttlockDisabled` | 設 `TRUE` 時跳過實體寫鎖，改用模擬密碼測試流程 |
 | 電郵 | `notifyFrom` | 寄件人名稱（預設用區名） |
 
@@ -59,7 +59,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.24.1"` 即代表新版後台已上線。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.24.2"` 即代表新版後台已上線。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
