@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.24.1）
+ * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.24.2）
  *
  * 涵蓋：
  *  1. 跨區自動探測（api.sciener.com 10003 → 自動切換 euapi.ttlock.com + 852 電話帳號相容）
- *  2. 密碼規則（PWD_MODE=phone4：電話頭4位 → 撞碼只按數字 +1，不改用電話尾4位）及前導 0 純文字 '@' 回傳
+ *  2. 密碼規則（PWD_MODE=phone4：電話頭4位 → 撞碼先試電話尾4位，再逐個 +1）及前導 0 純文字 '@' 回傳
  *  3. 舊 Sheet 缺少 passcode / pwdRef / scienerLockId 欄時自動補欄並完整寫回（零掉字）
  *  4. Teamup pending → approved 轉色及補發鎖匙時覆寫舊密碼備註（唔重複疊加）
  *  5. 實體鎖／Gateway 離線（-2012）時嚴格報錯、唔假批核；傳 allowFallback=true 先啟用備用碼
@@ -285,7 +285,7 @@ function callPost(action, body = {}) {
   return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action, apiKey, ...body }) } }));
 }
 
-console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.24.1)');
+console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.24.2)');
 
 // 1. 登入超管／DC 並檢查初始健康狀態
 const loginRes = callPost('login', { email: ctx.MASTER_EMAIL, password: props.PORTAL_MASTER_PASSWORD });
@@ -294,10 +294,10 @@ const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.24.1');
+assert.strictEqual(h0.data.version, '4.24.2');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
-console.log('  ✓ getHealthCheck 回傳版本 4.24.1 及電子鎖初始狀態');
+console.log('  ✓ getHealthCheck 回傳版本 4.24.2 及電子鎖初始狀態');
 
 // 2. 模擬舊版 Sheet：刻意移除 VenueBookings 的 pwdRef / passcode 欄及 Venues 的 scienerLockId 欄
 sheets.VenueBookings._data[0] = [
@@ -431,7 +431,7 @@ assert.strictEqual(sentEmails.length, 1);
 assert.ok(sentEmails[0].htmlBody.includes('0512#'), '電郵應包含入場密碼及 # 提示');
 console.log('  ✓ 一鍵批准完整打通：香港時區準確、前導 0 密碼純文字寫回 Sheet、pwdRef／Teamup／電郵全部回傳');
 
-// 9. 驗證撞碼自動退避規則（頭4位 '0512' 被拒 → 只遞增 +1 得 '0513'，不試電話尾4）及 confirmOnly → reissue 補發流程
+// 9. 驗證撞碼自動退避規則（頭4位 '0512' 被拒 → 先試電話尾4位 '9876'，尾4亦撞才 +1 得 '0513'）及 confirmOnly → reissue 補發流程
 ttlockState.rejectCodes.add('0512');
 const submit2 = callPost('submitVenueRequest', {
   venueId: 'HQ-1704',
@@ -451,18 +451,20 @@ const ev2Id = submit2.data.teamupEventId;
 const confirmRes = callPost('confirmVenueBooking', { token, id: booking2Id });
 assert.strictEqual(confirmRes.ok, true);
 
-// 隨後點「補發電子鎖匙」（即使無傳 reissue，因為未有真實 pwdRef 亦允許直接補發；撞碼後只 +1）
+// 隨後點「補發電子鎖匙」（即使無傳 reissue，因為未有真實 pwdRef 亦允許直接補發；撞碼先試電話尾4）
 const reissueRes = callPost('approveVenueBooking', { token, id: booking2Id, reissue: true });
 assert.strictEqual(reissueRes.ok, true, '補發鎖匙應成功：' + JSON.stringify(reissueRes));
-assert.strictEqual(reissueRes.data.passcode, '0513', '頭 4 位撞碼時應直接 +1，不能使用電話尾 4 位 9876');
+assert.strictEqual(reissueRes.data.passcode, '9876', '頭 4 位撞碼時應改用電話尾 4 位 9876');
 assert.strictEqual(reissueRes.data.lockWritten, true);
 
-// 再重製一次鎖匙，確認 Teamup 備註唔會重複疊加兩行「🔑 密碼：」
+// 再令頭4及尾4都撞碼，確認兩者失敗後才 +1；同時確保 Teamup 備註只留最新密碼
+ttlockState.rejectCodes.add('9876');
 const reissueAgain = callPost('approveVenueBooking', { token, id: booking2Id, reissue: true });
 assert.strictEqual(reissueAgain.ok, true);
+assert.strictEqual(reissueAgain.data.passcode, '0513', '頭4和電話尾4均撞碼後才應使用 +1 備選碼');
 const pwdNoteMatches = String(teamupEvents[ev2Id].notes || '').match(/🔑 密碼：/g) || [];
 assert.strictEqual(pwdNoteMatches.length, 1, '重製鎖匙後 Teamup 備註只應保留最新一行密碼');
-console.log('  ✓ 電話頭4撞碼後只 +1、不改用尾4；僅確認後補發鎖匙及重製鎖匙覆寫 Teamup 備註全部通過');
+console.log('  ✓ 電話頭4撞碼後先改用尾4；僅確認後補發鎖匙及重製鎖匙覆寫 Teamup 備註全部通過');
 
 // 10. 驗證實機常見陷阱：Google Sheet 自動將日期轉為 Date 物件或 .000Z 字串時，Teamup 仍收標準 +08:00 唔彈 HTTP 400
 const submit3 = callPost('submitVenueRequest', {
