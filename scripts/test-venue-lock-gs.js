@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.24.0）
+ * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.24.1）
  *
  * 涵蓋：
  *  1. 跨區自動探測（api.sciener.com 10003 → 自動切換 euapi.ttlock.com + 852 電話帳號相容）
- *  2. 保持現有密碼規則（PWD_MODE=phone4：電話頭4位 → 撞碼自動試尾4位 → +1）及前導 0 純文字 '@' 回傳
+ *  2. 密碼規則（PWD_MODE=phone4：電話頭4位 → 撞碼只按數字 +1，不改用電話尾4位）及前導 0 純文字 '@' 回傳
  *  3. 舊 Sheet 缺少 passcode / pwdRef / scienerLockId 欄時自動補欄並完整寫回（零掉字）
  *  4. Teamup pending → approved 轉色及補發鎖匙時覆寫舊密碼備註（唔重複疊加）
  *  5. 實體鎖／Gateway 離線（-2012）時嚴格報錯、唔假批核；傳 allowFallback=true 先啟用備用碼
@@ -94,6 +94,7 @@ const ttlockState = {
   addedPwds: [],
 };
 const teamupEvents = {};
+const teamupState = { failNextCreate: false };
 let nextPwdId = 700100;
 let nextTeamupId = 5001;
 
@@ -213,6 +214,10 @@ const ctx = {
       const validTeamupIso = (s) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(String(s || ''));
       const tupCreate = url.match(/^https:\/\/api\.teamup\.com\/([^/]+)\/events$/);
       if (tupCreate && String(opt.method || 'get').toLowerCase() === 'post') {
+        if (teamupState.failNextCreate) {
+          teamupState.failNextCreate = false;
+          return reply(503, { error: 'Teamup unavailable' });
+        }
         const body = JSON.parse(opt.payload);
         if (!validTeamupIso(body.start_dt) || !validTeamupIso(body.end_dt)) {
           return reply(400, { error: { id: 'event_invalid_datetime_string', message: `Invalid datetime string: "${body.start_dt}"` } });
@@ -280,7 +285,7 @@ function callPost(action, body = {}) {
   return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action, apiKey, ...body }) } }));
 }
 
-console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.24.0)');
+console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.24.1)');
 
 // 1. 登入超管／DC 並檢查初始健康狀態
 const loginRes = callPost('login', { email: ctx.MASTER_EMAIL, password: props.PORTAL_MASTER_PASSWORD });
@@ -289,10 +294,10 @@ const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.24.0');
+assert.strictEqual(h0.data.version, '4.24.1');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
-console.log('  ✓ getHealthCheck 回傳版本 4.24.0 及電子鎖初始狀態');
+console.log('  ✓ getHealthCheck 回傳版本 4.24.1 及電子鎖初始狀態');
 
 // 2. 模擬舊版 Sheet：刻意移除 VenueBookings 的 pwdRef / passcode 欄及 Venues 的 scienerLockId 欄
 sheets.VenueBookings._data[0] = [
@@ -354,7 +359,18 @@ assert.strictEqual(bindRes.data.clientSecretSet, true, '留空 Secret 不可洗�
 assert.strictEqual(bindRes.data.passwordSet, true, '留空 Password 不可洗走舊值');
 assert.strictEqual(bindRes.data.boundVenues, 1, '應一鍵同步 Lock ID 至現有場地');
 
-// 5. 申請人提交借場（電話帶前導 0：05129876，時段為未來香港時間）
+// 5. Teamup 建立藍色事件失敗時，必須明確回報且不可只收進表格
+const venueRowsBeforeFailure = sheets.VenueBookings._data.length;
+teamupState.failNextCreate = true;
+const failedSubmit = callPost('submitVenueRequest', {
+  venueId: 'HQ-1704', name: '測試申請人', phone: '91234567', email: 'test@example.com',
+  startDate: '2027-05-15T19:00', endDate: '2027-05-15T20:00',
+});
+assert.strictEqual(failedSubmit.ok, false, 'Teamup 建立失敗不可回報申請成功');
+assert.ok(failedSubmit.error.includes('Teamup'), '應回報 Teamup 錯誤原因');
+assert.strictEqual(sheets.VenueBookings._data.length, venueRowsBeforeFailure, 'Teamup 建立失敗時不得新增孤立的 pending 表格記錄');
+
+// 6. 申請人提交借場（電話帶前導 0：05129876，時段為未來香港時間）
 const submit1 = callPost('submitVenueRequest', {
   venueId: 'HQ-1704',
   name: '陳大文領袖',
@@ -369,9 +385,11 @@ const submit1 = callPost('submitVenueRequest', {
 assert.strictEqual(submit1.ok, true);
 const booking1Id = submit1.data.id;
 const pendingEvId = submit1.data.teamupEventId;
-assert.ok(pendingEvId, '應建立 Teamup 申請中事件');
+assert.ok(pendingEvId, '成員系統提交後應由後台建立 Teamup 申請中事件');
+assert.deepStrictEqual(teamupEvents[pendingEvId].subcalendar_ids, [101], '新申請必須直接建立在藍色「申請中」子日曆');
+assert.ok(String(teamupEvents[pendingEvId].title).includes('【申請】'), '藍色申請事件標題應標示【申請】');
 
-// 6. 模擬 Gateway 離線（-2012）：一鍵批准必須明確報錯，唔可以靜默假批核或寄假密碼
+// 7. 模擬 Gateway 離線（-2012）：一鍵批准必須明確報錯，唔可以靜默假批核或寄假密碼
 ttlockState.gatewayOffline = true;
 const failApprove = callPost('approveVenueBooking', { token, id: booking1Id });
 assert.strictEqual(failApprove.ok, false, '網關離線時預設必須拒絕假批核');
@@ -381,7 +399,7 @@ const afterFailList = callGet('getVenueBookings', { token });
 assert.strictEqual(afterFailList.data.find(x => x.id === booking1Id).status, 'pending', '失敗後狀態必須維持 pending 以便重試');
 console.log('  ✓ Gateway 離線時嚴格攔截，不吞錯、不假批核、不寄假密碼');
 
-// 7. Gateway 恢復在線 → 一鍵批准：驗證香港 +08:00 時間（前後 15 分鐘緩衝）、前導 0 密碼 '0512' 純文字回傳、Teamup 轉紅及電郵
+// 8. Gateway 恢復在線 → 一鍵批准：驗證香港 +08:00 時間（前後 15 分鐘緩衝）、前導 0 密碼 '0512' 純文字回傳、Teamup 轉紅及電郵
 ttlockState.gatewayOffline = false;
 const okApprove = callPost('approveVenueBooking', { token, id: booking1Id });
 assert.strictEqual(okApprove.ok, true, '一鍵批准應成功：' + JSON.stringify(okApprove));
@@ -413,7 +431,7 @@ assert.strictEqual(sentEmails.length, 1);
 assert.ok(sentEmails[0].htmlBody.includes('0512#'), '電郵應包含入場密碼及 # 提示');
 console.log('  ✓ 一鍵批准完整打通：香港時區準確、前導 0 密碼純文字寫回 Sheet、pwdRef／Teamup／電郵全部回傳');
 
-// 8. 驗證撞碼自動退避規則（頭4位 '0512' 被拒 → 自動試尾4位 '9876'）及 confirmOnly → reissue 補發流程
+// 9. 驗證撞碼自動退避規則（頭4位 '0512' 被拒 → 只遞增 +1 得 '0513'，不試電話尾4）及 confirmOnly → reissue 補發流程
 ttlockState.rejectCodes.add('0512');
 const submit2 = callPost('submitVenueRequest', {
   venueId: 'HQ-1704',
@@ -433,10 +451,10 @@ const ev2Id = submit2.data.teamupEventId;
 const confirmRes = callPost('confirmVenueBooking', { token, id: booking2Id });
 assert.strictEqual(confirmRes.ok, true);
 
-// 隨後點「補發電子鎖匙」（即使無傳 reissue，因為未有真實 pwdRef 亦允許直接補發；並測試撞頭4自動改尾4）
+// 隨後點「補發電子鎖匙」（即使無傳 reissue，因為未有真實 pwdRef 亦允許直接補發；撞碼後只 +1）
 const reissueRes = callPost('approveVenueBooking', { token, id: booking2Id, reissue: true });
 assert.strictEqual(reissueRes.ok, true, '補發鎖匙應成功：' + JSON.stringify(reissueRes));
-assert.strictEqual(reissueRes.data.passcode, '9876', '頭 4 位撞碼時應按規則自動改用電話尾 4 位 9876');
+assert.strictEqual(reissueRes.data.passcode, '0513', '頭 4 位撞碼時應直接 +1，不能使用電話尾 4 位 9876');
 assert.strictEqual(reissueRes.data.lockWritten, true);
 
 // 再重製一次鎖匙，確認 Teamup 備註唔會重複疊加兩行「🔑 密碼：」
@@ -444,9 +462,9 @@ const reissueAgain = callPost('approveVenueBooking', { token, id: booking2Id, re
 assert.strictEqual(reissueAgain.ok, true);
 const pwdNoteMatches = String(teamupEvents[ev2Id].notes || '').match(/🔑 密碼：/g) || [];
 assert.strictEqual(pwdNoteMatches.length, 1, '重製鎖匙後 Teamup 備註只應保留最新一行密碼');
-console.log('  ✓ 電話頭4撞碼自動改尾4、僅確認後補發鎖匙、重製鎖匙覆寫 Teamup 備註全部通過');
+console.log('  ✓ 電話頭4撞碼後只 +1、不改用尾4；僅確認後補發鎖匙及重製鎖匙覆寫 Teamup 備註全部通過');
 
-// 9. 驗證實機常見陷阱：Google Sheet 自動將日期轉為 Date 物件或 .000Z 字串時，Teamup 仍收標準 +08:00 唔彈 HTTP 400
+// 10. 驗證實機常見陷阱：Google Sheet 自動將日期轉為 Date 物件或 .000Z 字串時，Teamup 仍收標準 +08:00 唔彈 HTTP 400
 const submit3 = callPost('submitVenueRequest', {
   venueId: 'HQ-1704',
   name: '張三領袖',
@@ -459,7 +477,7 @@ const submit3 = callPost('submitVenueRequest', {
   agreeRules: 'TRUE',
 });
 assert.strictEqual(submit3.ok, true);
-assert.strictEqual(submit3.data.warn, '', '帶 .000Z 嘅時間經 toTeamupDt_ 轉換後不應觸發 Teamup HTTP 400：' + submit3.data.warn);
+assert.ok(submit3.data.teamupEventId && teamupEvents[submit3.data.teamupEventId], '帶 .000Z 嘅時間應成功建立並回傳 Teamup 事件 ID');
 const approve3 = callPost('approveVenueBooking', { token, id: submit3.data.id });
 assert.strictEqual(approve3.ok, true);
 assert.strictEqual(approve3.data.passcode, '9365');

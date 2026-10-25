@@ -1,8 +1,8 @@
 # 🏛 區總部借場 — 一條龍流程（統一後台 v4.0）
 
-**申請人喺成員系統 (member-portal) 填表（唔使跳去 Teamup）→ GS 寫入 VenueBookings 並喺 Teamup「申請中」建事件 → 管理系統審批轉色。**
+**申請人喺成員系統 (member-portal) 填表（唔使跳去 Teamup）→ GS 必須先喺 Teamup 藍色「申請中」子日曆建立事件，再寫入 VenueBookings → 區管理系統一鍵批核時寫入 TTLock、將 Teamup 轉紅、電郵密碼並回傳記錄。**
 
-而家先測呢一步。TTLock 一鍵密碼 + 電郵申請人（`approveVenueBooking`）留低稍後再接。
+成員端只負責提交申請資料；Teamup event ID 由 GS 建立後回傳，唔使用成員端傳入嘅 ID。Teamup 未能建立藍色事件時，提交會回傳失敗，不會假裝收件成功或只寫入表格。舊 Config 的 `VENUE_SCRIPT_URL` 轉發欄已不再用於借場提交；此流程固定由共用 GS 建事件及寫入 VenueBookings。
 
 借場**寫入與審批**仍由同一個 Apps Script 後台（管理系統 + 成員系統共用）完成；
 下方房間**唯讀查閱**獨立由現有 Vercel 前端的 `/api/rooms/hq` 讀公開 iCalendar，毋須另起部署或更動正式 GS v4.18.0。
@@ -55,8 +55,8 @@
 
 ## 成員系統 (member-portal) 要接嘅 action
 申請表呼叫後台公開 `submitVenueRequest`（經 `/api/proxy` 帶 API Key），欄位：
-`venueId, name, phone, email, troop, position, purpose, startDate, endDate, agreeRules, teamupEventId`。
-電郵選填，但**有填先會收到批准/拒絕通知同入場密碼**。
+`venueId, name, phone, email, troop, position, purpose, startDate, endDate, agreeRules`。
+`teamupEventId` 由 GS 建立藍色事件後回傳，成員端不應自行指定。電郵選填，但**有填先會收到批准/拒絕通知同入場密碼**。
 
 ## 呢個 repo 檔案
 | 檔案 | 作用 |

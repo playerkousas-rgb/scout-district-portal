@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.24.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.24.1
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -318,7 +318,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.24.0',
+      version: '4.24.1',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -1506,12 +1506,6 @@ function submitVenueRequest_(b) {
   if (!req.startDate || !req.endDate) return err('請填寫借用時段');
   if (req.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(req.email))) return err('電郵格式不正確');
 
-  var fwd = callService_('VENUE', 'addRequest', b);
-  if (fwd) {
-    if (fwd.ok) return okSubmit_({ refCode: (fwd.data && fwd.data.refCode) || fwd.refCode || '' });
-    return err(fwd.error || '借場轉發失敗');
-  }
-
   var venue = readSheet_(SHEET.VENUES).filter(function (v) {
     return String(v.venueId).trim() === String(req.venueId).trim()
       || String(v.name || '').trim() === String(req.venueId).trim();
@@ -1522,24 +1516,24 @@ function submitVenueRequest_(b) {
   if (!sh) return err('尚未執行 setupSheets()');
 
   var rid = genId_('vr'), ref = genRef_('VR'), now = new Date().toISOString();
-  var teamupEventId = req.teamupEventId;
-  var warn = '';
+  var teamupEventId = '';
 
-  // ★ 填表即喺 Teamup「申請中」子日曆建事件（唔使申請人自己去 Teamup 填）
-  if (!teamupEventId) {
-    try {
-      var created = createPendingTeamupEvent_({
-        venueName: venue.name || req.venueId,
-        venueId: String(venue.venueId).trim(),
-        name: req.name, phone: req.phone, email: req.email,
-        troop: req.troop, purpose: req.purpose, refCode: ref,
-        startDate: req.startDate, endDate: req.endDate,
-      });
-      if (created.ok && created.eventId) teamupEventId = created.eventId;
-      else warn = created.error || 'Teamup 未建立申請事件';
-    } catch (e) {
-      warn = 'Teamup 建立申請事件失敗：' + e.message;
+  // 成員系統只提交表格資料；Teamup 事件必須由後台建立，確保一定落在藍色「申請中」子日曆。
+  // 不信任用戶端傳入的 eventId，亦不走 VENUE_SCRIPT_URL 外部轉發，避免成功收件但漏掉藍色事件。
+  try {
+    var created = createPendingTeamupEvent_({
+      venueName: venue.name || req.venueId,
+      venueId: String(venue.venueId).trim(),
+      name: req.name, phone: req.phone, email: req.email,
+      troop: req.troop, purpose: req.purpose, refCode: ref,
+      startDate: req.startDate, endDate: req.endDate,
+    });
+    if (!created.ok || !created.eventId) {
+      return err(created.error || 'Teamup 未能建立藍色「申請中」事件，請稍後再試');
     }
+    teamupEventId = created.eventId;
+  } catch (e) {
+    return err('Teamup 建立藍色「申請中」事件失敗：' + e.message);
   }
 
   appendRowObj_(sh, {
@@ -1563,7 +1557,7 @@ function submitVenueRequest_(b) {
   appendRecord_('venue', rid, ref, '🏛 借場：' + (venue.name || req.venueId), req.name, req.phone, req.troop || '', 'pending',
     req.startDate + ' → ' + req.endDate);
   notifyStaff_('🏛 新借場申請', '場地：' + (venue.name || req.venueId) + '\n申請人：' + req.name + '（' + req.phone + '）\n' + req.startDate + ' → ' + req.endDate);
-  return okSubmit_({ refCode: ref, id: rid, teamupEventId: teamupEventId || '', warn: warn });
+  return okSubmit_({ refCode: ref, id: rid, teamupEventId: teamupEventId });
 }
 
 // ===================== 借場：查閱／批核 =====================
@@ -1677,7 +1671,7 @@ function approveVenueBooking_(token, id, opts) {
     return err('此申請已批核並已發出電子鎖匙（如需重新製作鎖匙，請點「補發／重製鎖匙」）');
   }
 
-  // 1) TTLock 限時密碼（提前/延後 15 分鐘；撞碼自動試頭4→尾4→+1）
+  // 1) TTLock 限時密碼（提前/延後 15 分鐘；電話頭4撞碼後逐個 +1，不改用電話尾4）
   var passcode = '';
   var pwdRef = '';
   var lockWritten = false;
@@ -1808,7 +1802,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.24.0',
+    version: '4.24.1',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -1846,7 +1840,7 @@ function saveVenueLockConfig_(token, cfg) {
     ['username', 'SCIENER_USERNAME', '管鎖帳號（TTLock / Sciener App 登入帳號）'],
     ['lockId', 'SCIENER_LOCK_ID', '大門 Lock ID（數字）'],
     ['apiBase', 'SCIENER_API_BASE', 'API 主機（留空自動偵測 euapi.ttlock.com / api.ttlock.com / api.sciener.com）'],
-    ['pwdMode', 'PWD_MODE', 'phone4=電話頭4位；phone4tail=尾4位；random=隨機6位'],
+    ['pwdMode', 'PWD_MODE', 'phone4=電話頭4位（撞碼逐個+1）；phone4tail=尾4位（撞碼逐個+1）；random=隨機6位'],
     ['teamupCalendarKey', 'TEAMUP_CALENDAR_KEY', 'Teamup 分享金鑰 ks...'],
     ['teamupPendingSub', 'TEAMUP_PENDING_SUBCAL_ID', '藍色（申請中）子日曆 ID'],
     ['teamupApprovedSub', 'TEAMUP_APPROVED_SUBCAL_ID', '紅色（確認借用）子日曆 ID'],
@@ -5409,7 +5403,7 @@ function genPasscode_() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
-/** phone4=電話頭4位（預設）；phone4tail=尾4位；random=隨機6位 */
+/** phone4=電話頭4位（預設）；phone4tail=電話尾4位；random=隨機6位；撞碼後均逐個 +1 */
 function buildKeyboardPwd_(phone) {
   var mode = String(lockCfg_().pwdMode || 'phone4').toLowerCase();
   var digits = String(phone || '').replace(/\D/g, '');
@@ -5418,28 +5412,13 @@ function buildKeyboardPwd_(phone) {
   return genPasscode_();
 }
 
-function phoneTail4_(phone) {
-  var digits = String(phone || '').replace(/\D/g, '');
-  return digits.length >= 4 ? digits.slice(-4) : '';
-}
-
-function phoneHead4_(phone) {
-  var digits = String(phone || '').replace(/\D/g, '');
-  return (digits + '0000').slice(0, 4);
-}
-
-/** 保持現有密碼規則：頭4 → 尾4 → 遞增 +1 後備（保留位數與前導 0）；random 模式用 6 位 */
+/**
+ * 頭4位模式：先試電話頭4位，撞碼後只按數字逐個 +1（保留位數及前導 0），不試電話尾4位。
+ * phone4tail 模式仍以尾4位作為起始碼，之後同樣逐個 +1；random 模式為 6 位。
+ */
 function passcodeCandidates_(phone) {
-  var mode = String(lockCfg_().pwdMode || 'phone4').toLowerCase();
   var first = buildKeyboardPwd_(phone);
   var list = [first];
-  if (mode === 'phone4' || mode === 'phone4head') {
-    var tail = phoneTail4_(phone);
-    if (tail && list.indexOf(tail) < 0) list.push(tail);
-  } else if (mode === 'phone4tail') {
-    var head = phoneHead4_(phone);
-    if (head && list.indexOf(head) < 0) list.push(head);
-  }
   var len = first.length;
   var mod = Math.pow(10, len);
   var cur = parseInt(first, 10) || 0;
@@ -6596,7 +6575,7 @@ function blueprint_() {
       ['SCIENER_PASSWORD', '', '管鎖密碼'],
       ['SCIENER_LOCK_ID', '', '大門 Lock ID（數字；Config 係「一列 key」唔係欄。可用審批頁「讀取鎖列表」）'],
       ['SCIENER_API_BASE', '', 'API 主機（留空自動跨區偵測 euapi.ttlock.com / api.ttlock.com / api.sciener.com；切勿填 open.* 網站）'],
-      ['PWD_MODE', 'phone4', 'phone4=電話頭4位；phone4tail=尾4位；random=隨機6位'],
+      ['PWD_MODE', 'phone4', 'phone4=電話頭4位（撞碼逐個+1）；phone4tail=尾4位（撞碼逐個+1）；random=隨機6位'],
       ['ttlockClientId', '', '（舊名）等同 SCIENER_CLIENT_ID'],
       ['ttlockClientSecret', '', '（舊名）等同 SCIENER_CLIENT_SECRET'],
       ['ttlockUsername', '', '（舊名）等同 SCIENER_USERNAME'],
@@ -6623,10 +6602,10 @@ function blueprint_() {
       ['VENUE_RULES', '', '借場規定（留空用內建）'],
       ['CCTV_URL', '', '閉路電視指引 PDF'],
       ['STOCK_RULES', '', '借物資規定（留空用內建）'],
-      // 服務轉發（留空 = 寫入本表）
+      // 服務轉發（借物資／活動知會；借場提交固定由本 GS 處理）
       ['STOCK_SCRIPT_URL', '', '【借物資】外部收表 Script（留空=寫入本表）'],
       ['STOCK_SCRIPT_APIKEY', '', ''],
-      ['VENUE_SCRIPT_URL', '', '【借場】外部收表 Script（留空=寫入本表）'],
+      ['VENUE_SCRIPT_URL', '', '【舊設定，不再用於提交】借場現由本 GS 寫 VenueBookings + Teamup 藍色申請事件'],
       ['VENUE_SCRIPT_APIKEY', '', ''],
       ['ACTIVITY_SCRIPT_URL', '', '【活動知會】外部收表 Script（留空=寫入本表）'],
       ['ACTIVITY_SCRIPT_APIKEY', '', ''],

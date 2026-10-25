@@ -53,8 +53,8 @@
 
 ## 第 4 步：驗證（照 docs/venue-booking-flow.md）
 1. `Venues` 表加一個場地。
-2. member-portal 填表 → 後台 `submitVenueRequest` → `VenueBookings` 出現 pending。
-3. 審批頁批准 → Teamup 出現「確認借用」事件（或原有事件轉色）、申請人收到密碼電郵。
+2. member-portal 填表 → 後台 `submitVenueRequest` 先建立藍色「申請中」Teamup 事件，再寫入 `VenueBookings`；Teamup 失敗會明確回報，不會假成功。
+3. 審批頁一鍵批准 → TTLock 寫匙、Teamup 轉紅、電郵密碼並將 `passcode` / `pwdRef` 回傳至表格。
 4. 唔通就查 `docs/keys-checklist.md` 逐條 Key 驗證。
 
 ---
