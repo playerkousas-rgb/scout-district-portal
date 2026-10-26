@@ -1,6 +1,6 @@
 # 區後台 GS：只追加升級（v4.26.1）
 
-**完整程式：[`gs/Code.gs`](../gs/Code.gs)**；網站提供下載的 [`Code.gs.txt`](../public/downloads/Code.gs.txt) 必須與它完全相同。這份修補目前仍在未合併分支，**尚未合併 MAIN、未部署，亦未在真實 Apps Script／Sheet／外部服務上驗證**。本地 Node mock 測試通過不代表正式環境已驗證。正式 GS 更新由區方管理員在合併及自行檢查後操作；本文件不是部署已完成的聲明。
+**完整程式：[`gs/Code.gs`](../gs/Code.gs)**；網站提供下載的 [`Code.gs.txt`](../public/downloads/Code.gs.txt) 必須與它完全相同。v4.26.1 修補已於 PR #45 合併 MAIN，**尚未部署至正式 Apps Script，亦未在真實 Apps Script／Sheet／外部服務上驗證**。本地 Node mock 測試通過不代表正式環境已驗證。正式 GS 更新由區方管理員備份及檢查後自行操作；本文件不是部署已完成的聲明。
 
 ## 先備份與安全遷移
 
