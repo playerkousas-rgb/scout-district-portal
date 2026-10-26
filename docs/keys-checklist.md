@@ -17,7 +17,7 @@
 
 ## 登入及 YMIS 保障（僅日後決定部署本倉 v4.27.0 才適用）
 
-- **目前正式 4.18.0 毋須設定** `PORTAL_TOKEN_SECRET`；本倉 v4.26.1 安全修補雖已合併但尚未部署；v4.27.0 Vercel-only sheep 密碼流程仍待程式 PR 合併，兩者均須由區方自行部署；不要未備份、未核對 API Key 與 Script Properties 就直接覆蓋正式 GS。v4.27.0 的 `setupSheets()` 在缺少有效（至少 32 字元）值時會自動建立每專案獨立密鑰；管理員亦可先私下設定。首次建立／更換會令舊登入／重設連結失效。**房間卡更新本身不要求更新 GS。**
+- **目前正式 4.18.0 毋須設定** `PORTAL_TOKEN_SECRET`；本倉 v4.26.1 安全修補及 v4.27.0 Vercel-only sheep 密碼流程均已合併 MAIN，但尚未部署；兩者均須由區方自行部署；不要未備份、未核對 API Key 與 Script Properties 就直接覆蓋正式 GS。v4.27.0 的 `setupSheets()` 在缺少有效（至少 32 字元）值時會自動建立每專案獨立密鑰；管理員亦可先私下設定。首次建立／更換會令舊登入／重設連結失效。**房間卡更新本身不要求更新 GS。**
 - **Vercel（維護密碼）** `PORTAL_{區碼}_MASTER_PASSWORD`（筲箕灣例：`PORTAL_SKW_MASTER_PASSWORD`）。密碼長度由區方自行選擇；空值／未設定會停用維護登入，短密碼較易被猜中，登入流程亦沒有跨 Vercel instance 的分散式限速，建議使用長 passphrase。Apps Script 不儲存或讀取這個密碼；更新 Vercel env 後需重新部署。已簽發的 sheep session 最多仍有效 12 小時；改密碼只影響之後登入，不會立即撤銷現有 session。
 - **Vercel（機器橋接）** `PORTAL_{區碼}_MASTER_BRIDGE_SECRET`（例：`PORTAL_SKW_MASTER_BRIDGE_SECRET`），值由 Apps Script 試算表選單「🔐 顯示 Vercel 維護橋接密鑰」複製；Script Properties 對應名稱為 `PORTAL_MASTER_PROXY_SECRET`。此為高熵機器密鑰，非另一個人類密碼，無需記憶。`setupSheets()` 會移除舊 `PORTAL_MASTER_PASSWORD` Script Property。
 - **YMIS 卡啟用時**，先輪換先前披露的 YMIS 密碼及全部預設 DC／DDC／ADC／STAFF 區系統登入密碼，再私密設定 `YMIS_VERIFY_USERNAME`、`YMIS_VERIFY_PASSWORD`。詳見 [`YMIS 人工登入卡部署指引`](ymis-verification-feasibility.md)。勿將上述私密值交到 Git、Google Sheet、對話或公開環境變數。
