@@ -3,7 +3,19 @@ export default function UpdatesPage() {
   return (
     <>
       <h1 className="page-title">📢 更新 / 下載</h1>
-      <p className="page-sub">平台版本與後台程式碼下載。</p>
+      <p className="page-sub">平台版本與後台程式碼下載。Apps Script 只有在區方完成備份、設定及驗收後才由區方自行部署。</p>
+      <div className="info-card">
+        <h3>v4.26.0 — 💬「你講我聽」一般及 DC 保密意見箱</h3>
+        <p>配合 member-portal 的公開留言提交合約，支援意見／支援分類、可選聯絡回覆，以及 DC 專用保密提交。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.26.0</a></p>
+        <ul>
+          <li>🗂 一般留言寫入主試算表 <code>DistrictFeedback</code>；管理後台的「你講我聽｜意見箱」只由 Perms 授權的 ops 角色查閱。</li>
+          <li>🔒 DC 保密留言寫入 setup 自動建立的獨立 <code>DCConfidential</code> 試算表，分享名單只同步 Users 表內有效 DC；讀取 API 亦會獨立核對目前啟用的 DC／超管身份。</li>
+          <li>✉️ <code>DC_NOTIFY_EMAIL</code> 選填。通知信只含參考編號，不含留言或聯絡資料；未填仍正常收件及儲存。</li>
+          <li>🛡️ <code>setupSheets()</code> 只補建欄位及試算表，不清除既有資料；健康檢查新增 <code>feedbackReady</code>、<code>dcFeedbackReady</code>。</li>
+        </ul>
+        <p><b>部署提示：</b>下載檔尚未部署到正式 Apps Script。更新前依只追加升級指引備份；執行 <code>setupSheets()</code> 時需授權 Drive 存取，並確認 DC 帳戶電郵正確。</p>
+      </div>
       <div className="info-card">
         <h3>v4.25.4 — 🗓 候批申請可重疊，已批時段自動攔截</h3>
         <p>提交申請前由後端只查 Teamup 紅色「已批」子日曆，避免把跨日曆的已批時段誤當空檔；藍色申請中不會互相阻擋。</p>

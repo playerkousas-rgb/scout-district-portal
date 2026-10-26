@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.25.4）
+ * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.26.0）
  *
  * 涵蓋：
  *  1. 跨區自動探測（api.sciener.com 10003 → 自動切換 euapi.ttlock.com + 852 電話帳號相容）
@@ -16,14 +16,20 @@ const vm = require('vm');
 const crypto = require('crypto');
 const assert = require('assert');
 
-function makeSheet(name) {
+function makeSheet(name, ownerMap = null) {
   const data = [];
   const formats = {};
+  const protections = [];
   const sh = {
     _name: name,
     _data: data,
     _formats: formats,
-    getName: () => name,
+    getName: () => sh._name,
+    setName: (next) => {
+      if (ownerMap) { delete ownerMap[sh._name]; ownerMap[next] = sh; }
+      sh._name = next;
+      return sh;
+    },
     getLastRow: () => data.length,
     getLastColumn: () => (data[0] ? data[0].length : 0),
     getMaxRows: () => Math.max(data.length, 100),
@@ -65,29 +71,65 @@ function makeSheet(name) {
     setFrozenColumns: () => {},
     autoResizeColumns: () => {},
     insertColumnAfter: () => {},
-    protect: () => ({
-      setDescription: () => ({
-        setWarningOnly: () => {},
-        removeEditors: () => {},
-        getEditors: () => [],
+    getProtections: () => protections,
+    protect: () => {
+      const prot = {
+        description: '', editors: [],
+        setDescription(value) { this.description = value; return this; },
+        addEditor(value) { this.editors.push(typeof value === 'string' ? { getEmail: () => value } : value); return this; },
+        getEditors() { return this.editors; },
+        removeEditor(user) { this.editors = this.editors.filter(x => x !== user); },
+        getDescription() { return this.description; },
         canDomainEdit: () => false,
         setDomainEdit: () => {},
-      }),
-    }),
+        setWarningOnly: () => {},
+      };
+      protections.push(prot);
+      return prot;
+    },
   };
   return sh;
 }
 
 const sheets = {};
-const ss = {
-  getSheetByName: (n) => sheets[n] || null,
-  insertSheet: (n) => (sheets[n] = makeSheet(n)),
-  getSheets: () => Object.values(sheets),
-  getId: () => 'test-ss-id',
-  getUrl: () => 'https://docs.google.com/spreadsheets/d/test-ss-id/edit',
-};
+const mockSpreadsheets = { 'test-ss-id': null };
+function makeSpreadsheet(id, sheetMap) {
+  const map = sheetMap || {};
+  return {
+    _sheets: map,
+    getSheetByName: (n) => map[n] || null,
+    insertSheet: (n) => (map[n] = makeSheet(n, map)),
+    getSheets: () => Object.values(map),
+    getId: () => id,
+    getUrl: () => `https://docs.google.com/spreadsheets/d/${id}/edit`,
+  };
+}
+const ss = makeSpreadsheet('test-ss-id', sheets);
+mockSpreadsheets['test-ss-id'] = ss;
+let nextDcSheetId = 1;
 
 const sentEmails = [];
+const driveFiles = {};
+const driveUser = (email) => ({ getEmail: () => email });
+function mockDriveFile(id) {
+  if (!driveFiles[id]) {
+    driveFiles[id] = {
+      id,
+      owner: driveUser('sysadmin@skwscout.org.hk'),
+      editors: [],
+      viewers: [],
+      setSharing(access, permission) { this.access = access; this.permission = permission; },
+      getSharingAccess() { return this.access; },
+      getOwner() { return this.owner; },
+      getEditors() { return this.editors.slice(); },
+      getViewers() { return this.viewers.slice(); },
+      removeEditor(user) { this.editors = this.editors.filter(x => x !== user); },
+      removeViewer(user) { this.viewers = this.viewers.filter(x => x !== user); },
+      addViewer(email) { if (!this.viewers.some(x => x.getEmail() === email)) this.viewers.push(driveUser(email)); },
+    };
+  }
+  return driveFiles[id];
+}
 const ttlockState = {
   gatewayOffline: false,
   returnExistingPwdIdOnce: false,
@@ -123,12 +165,28 @@ const ctx = {
   console,
   SpreadsheetApp: {
     getActiveSpreadsheet: () => ss,
+    openById: (id) => mockSpreadsheets[id] || null,
+    create: (name) => {
+      const id = `dc-feedback-${nextDcSheetId++}`;
+      const spreadsheet = makeSpreadsheet(id, {});
+      spreadsheet.insertSheet('Sheet1');
+      mockSpreadsheets[id] = spreadsheet;
+      mockDriveFile(id).name = name;
+      return spreadsheet;
+    },
+    ProtectionType: { SHEET: 'SHEET' },
     getUi: () => { throw new Error('no ui'); },
     flush: () => {},
+  },
+  DriveApp: {
+    Access: { PRIVATE: 'PRIVATE' },
+    Permission: { NONE: 'NONE', VIEW: 'VIEW' },
+    getFileById: (id) => mockDriveFile(id),
   },
   Session: {
     getScriptTimeZone: () => 'America/Los_Angeles', // 刻意模擬錯時區 Apps Script 專案，驗證香港 +08:00 解析
     getActiveUser: () => ({ getEmail: () => 'hq@skwscout.org.hk' }),
+    getEffectiveUser: () => ({ getEmail: () => 'sysadmin@skwscout.org.hk' }),
   },
   LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
   Utilities: {
@@ -156,7 +214,7 @@ const ctx = {
     MimeType: { JSON: 'json' },
   },
   MailApp: {
-    sendEmail: (mail) => { sentEmails.push(mail); },
+    sendEmail: (...mail) => { sentEmails.push(mail.length === 1 ? mail[0] : { to: mail[0], subject: mail[1], body: mail[2] }); },
   },
   GmailApp: { sendEmail: () => {} },
   UrlFetchApp: {
@@ -365,7 +423,7 @@ function callPost(action, body = {}) {
   return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action, apiKey, ...body }) } }));
 }
 
-console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.25.4)');
+console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.26.0)');
 
 // 1. 登入超管／DC 並檢查初始健康狀態
 const loginRes = callPost('login', { email: ctx.MASTER_EMAIL, password: props.PORTAL_MASTER_PASSWORD });
@@ -374,10 +432,87 @@ const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.25.4');
+assert.strictEqual(h0.data.version, '4.26.0');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
-console.log('  ✓ getHealthCheck 回傳版本 4.25.4 及電子鎖初始狀態');
+assert.strictEqual(h0.data.feedbackReady, true, 'DistrictFeedback should be ready after setup');
+assert.strictEqual(h0.data.dcFeedbackReady, true, 'DCConfidential should be ready after setup');
+console.log('  ✓ getHealthCheck 回傳版本 4.26.0、意見箱就緒及電子鎖初始狀態');
+
+// 「你講我聽」公開提交、聯絡資料最小化及 DC 儲存隔離
+const feedbackDenied = callPost('submitDistrictFeedback', { category: 'wrong', message: '這是一段足夠長的測試留言。' });
+assert.strictEqual(feedbackDenied.ok, false, 'invalid feedback category must be rejected');
+const tooShortFeedback = callPost('submitDistrictFeedback', { category: 'opinion', message: '太短' });
+assert.strictEqual(tooShortFeedback.ok, false, 'short feedback must be rejected');
+const missingContact = callPost('submitDistrictFeedback', {
+  category: 'support', message: '我需要一段足夠長的支援留言內容。', wantReply: true, contactType: 'email', contact: '',
+});
+assert.strictEqual(missingContact.ok, false, 'reply requests require a contact account');
+const normalFeedback = callPost('submitDistrictFeedback', {
+  category: 'opinion', message: '這是一段一般意見留言，字數符合要求。', wantReply: false,
+  contactName: '不應保留', contactType: 'phone', contact: '+85291234567', dcOnly: false,
+});
+assert.strictEqual(normalFeedback.ok, true);
+const mainFeedbackRows = ctx.feedbackReadRows_(sheets.DistrictFeedback);
+assert.strictEqual(mainFeedbackRows.length, 1);
+assert.strictEqual(mainFeedbackRows[0].contactName, '', 'no-reply contactName must be discarded');
+assert.strictEqual(mainFeedbackRows[0].contactType, '', 'no-reply contactType must be discarded');
+assert.strictEqual(mainFeedbackRows[0].contact, '', 'no-reply contact must be discarded');
+assert.strictEqual(mainFeedbackRows[0].dcOnly, 'FALSE');
+
+const noNotifyFeedback = callPost('submitDistrictFeedback', {
+  category: 'opinion', message: '即使沒有通知地址，這則保密留言仍須安全儲存。', dcOnly: true,
+});
+assert.strictEqual(noNotifyFeedback.ok, true, 'DC-only feedback must save when notifications are unconfigured');
+assert.strictEqual(sentEmails.length, 0, 'no notification should be sent when DC_NOTIFY_EMAIL is blank');
+ctx.setConfigTextValue_('DC_NOTIFY_EMAIL', 'dc-notify@example.org', 'test-only notification address');
+const privateFeedback = callPost('submitDistrictFeedback', {
+  category: 'support', message: '這是一段只供區總監查看的保密支援留言。', wantReply: true,
+  contactName: '保密聯絡人', contactType: 'ig', contact: '@private-account', dcOnly: true,
+});
+assert.strictEqual(privateFeedback.ok, true);
+const confidentialId = ctx.getConfigValue_('DC_CONFIDENTIAL_SHEET_ID');
+const confidentialSheet = mockSpreadsheets[confidentialId].getSheetByName('DCConfidential');
+assert.strictEqual(ctx.feedbackReadRows_(confidentialSheet).length, 2, 'both notified and non-notified private feedback should persist');
+const dcFile = mockDriveFile(confidentialId);
+assert.strictEqual(dcFile.getSharingAccess(), 'PRIVATE');
+assert.deepStrictEqual(dcFile.getViewers().map(user => user.getEmail()), ['dc@skwscout.org.hk']);
+assert.deepStrictEqual(dcFile.getEditors().map(user => user.getEmail()), []);
+assert.strictEqual(ctx.feedbackReadRows_(sheets.DistrictFeedback).length, 1, 'private feedback must never be written to the main spreadsheet');
+assert.strictEqual(sentEmails.at(-1).to, 'dc-notify@example.org');
+assert.ok(!sentEmails.at(-1).body.includes('保密支援留言'), 'notification must not contain message content');
+
+const dcToken = ctx.makeToken_('dc@skwscout.org.hk', 'DC');
+const ddcToken = ctx.makeToken_('ddc.admin@skwscout.org.hk', 'DDC_ADMIN');
+const adcToken = ctx.makeToken_('adc.scout@skwscout.org.hk', 'ADC_SCOUT');
+assert.strictEqual(callGet('getDistrictFeedback', { token: dcToken }).ok, true);
+assert.strictEqual(callGet('getDistrictFeedback', { token: token }).ok, true, 'superadmin should read general feedback');
+assert.strictEqual(callGet('getDistrictFeedback', { token: ddcToken }).ok, true, 'ops role with view permission should read general feedback');
+assert.strictEqual(callGet('getDistrictFeedback', { token: adcToken }).ok, false, 'roles without permission cannot read general feedback');
+assert.strictEqual(callGet('getDCFeedback', { token: dcToken }).ok, true);
+assert.strictEqual(callGet('getDCFeedback', { token: token }).ok, true, 'superadmin should read confidential feedback');
+assert.strictEqual(callGet('getDCFeedback', { token: ddcToken }).ok, false, 'non-DC role cannot read confidential feedback');
+assert.strictEqual(callGet('getDCFeedback', { token: adcToken }).ok, false, 'non-DC role cannot read confidential feedback');
+const usersRows = sheets.Users._data;
+const dcUserRow = usersRows.findIndex((row, i) => i > 0 && row[0] === 'dc@skwscout.org.hk');
+const activeCol = usersRows[0].indexOf('active');
+usersRows[dcUserRow][activeCol] = 'FALSE';
+assert.strictEqual(callGet('getDCFeedback', { token: dcToken }).ok, false, 'disabled DC account cannot read confidential feedback');
+usersRows[dcUserRow][activeCol] = 'TRUE';
+const permsRows = sheets.Perms._data;
+const ddcCol = permsRows[0].indexOf('DDC_ADMIN');
+const dcCardRow = permsRows.findIndex((row, i) => i > 0 && row[0] === 'dcFeedback');
+permsRows[dcCardRow][ddcCol] = 'edit';
+assert.strictEqual(callGet('getDCFeedback', { token: ddcToken }).ok, false, 'private backend guard must not trust Perms');
+permsRows[dcCardRow][ddcCol] = '';
+
+const feedbackRowsBeforeSetup = sheets.DistrictFeedback._data.length;
+ctx.setupSheets();
+assert.strictEqual(sheets.DistrictFeedback._data.length, feedbackRowsBeforeSetup, 'setupSheets must preserve general feedback');
+assert.strictEqual(ctx.getConfigValue_('DC_CONFIDENTIAL_SHEET_ID'), confidentialId, 'setupSheets must reuse the separate confidential spreadsheet');
+assert.strictEqual(ctx.feedbackReadRows_(confidentialSheet).length, 2, 'setupSheets must preserve confidential feedback');
+console.log('  ✓ 留言驗證、聯絡資料清除、獨立 DC 儲存、後端角色限制及 setup 不清資料');
+sentEmails.length = 0; // 後續借場電郵斷言只統計借場流程
 
 // 2. 模擬舊版 Sheet：刻意移除 VenueBookings 的 pwdRef / passcode 欄及 Venues 的 scienerLockId 欄
 sheets.VenueBookings._data[0] = [
