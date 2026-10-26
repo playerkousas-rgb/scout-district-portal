@@ -42,11 +42,11 @@ export default function DCFeedbackPage() {
     <>
       <BackLink />
       <h1 className="page-title">🔒 DC 保密留言</h1>
-      <p className="page-sub">本管理頁及讀取 API 只授權 DC／超級管理員。資料在主試算表的 DCConfidential 分頁；此限制不阻止主試算表其他檢視者直接讀取該分頁。</p>
+      <p className="page-sub">只限區總監查閱；系統超級管理員亦可存取。資料在主試算表的 DCConfidential 分頁；此限制不阻止主試算表其他檢視者直接讀取該分頁。</p>
 
       <section className="info-card" aria-label="DC 保密留言列表">
         <div className="section-head">
-          <div><h3>只限 DC 查閱</h3><p>共 {items.length} 則。請勿複製或轉發留言內容；如有通知電郵，電郵只含參考編號。</p></div>
+          <div><h3>只限區總監查閱</h3><p>共 {items.length} 則。請勿複製或轉發留言內容；如有通知電郵，電郵只含參考編號。</p></div>
           <button className="btn-sm fps-secondary-btn" type="button" disabled={loading} onClick={() => setRefreshKey(x => x + 1)}>重新整理</button>
         </div>
 

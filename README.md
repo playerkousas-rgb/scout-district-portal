@@ -3,7 +3,7 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
-> **GS v4.26.1 認證修補（PR #45）及 v4.27.0 Vercel-only sheep 密碼流程（PR #47）已合併 MAIN；本分支新增 v4.28.0 旅團公開名錄後端，仍待合併。正式 Apps Script 尚未部署 v4.27.0／v4.28.0，亦未在真實 Apps Script／Sheet／外部服務驗證。** 更新原有 GS 前仍須先備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，正式 GS 由區方自行更新；助手不會代部署。修補新增認證與角色門禁，並保留 DC 保密意見分頁設計；Sheet 分頁保護不是檢視隔離。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
+> **GS v4.26.1 認證修補（PR #45）及 v4.27.0 Vercel-only sheep 密碼流程（PR #47）已合併 MAIN；v4.28.0 旅團公開名錄管理 API 已由 PR #49 合併 MAIN；本分支再修正 DC 保密卡說明及留言排序（v4.28.1），待合併。正式 Apps Script 尚未部署 v4.27.0／v4.28.1，亦未在真實 Apps Script／Sheet／外部服務驗證。** 更新原有 GS 前仍須先備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，正式 GS 由區方自行更新；助手不會代部署。修補新增認證與角色門禁，並保留 DC 保密意見分頁設計；Sheet 分頁保護不是檢視隔離。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
 >
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
@@ -30,7 +30,7 @@
    - **只有全新 Config 或舊 Config 缺少 `API_KEY_HASH` 整行**，才生成新 API Key（只顯示一次，請私下複製）；已有行連空白值都不覆寫。空白時須由區方另外明確生成 Key 並同步前端，未完成勿部署。
 4. `setupSheets()` 會在 Script Properties 缺少有效 `PORTAL_TOKEN_SECRET` 時自動建立每專案獨立的高熵密鑰（至少 32 字元）；亦會自動建立 Vercel→Apps Script 機器橋接密鑰。確認 `getHealthCheck` 顯示 `tokenSecretSet: true` 及 `masterProxyBridgeSet: true`。首次更換 token 密鑰會令舊 session／重設連結失效。
 5. `sheep` 維護帳戶密碼只存在 Vercel：設定 `PORTAL_{區碼}_MASTER_PASSWORD`（例如 `PORTAL_SKW_MASTER_PASSWORD`），建議先在 Vercel 設好新密碼再升級；密碼可自行選長短；短密碼較易被猜中，建議用可記住的長 passphrase（此登入流程沒有跨 Vercel instance 的分散式限速）。Apps Script 不讀取舊維護密碼；`setupSheets()` 會移除舊 `PORTAL_MASTER_PASSWORD` Script Property。Vercel 環境變數更新後需重新部署，變更才會生效；已簽發的 sheep session 最遲 12 小時到期，改密碼不會即時撤銷現有 session。
-6. 在 Apps Script 試算表選單「🔐 顯示 Vercel 維護橋接密鑰」，將顯示的機器密鑰設為對應 `PORTAL_{區碼}_MASTER_BRIDGE_SECRET`（例如 `PORTAL_SKW_MASTER_BRIDGE_SECRET`）。此值不是登入密碼、不需記憶；共用 API Key 單獨不能簽發維護 token。正式 Apps Script 更新仍由區方自行貼上／部署。不可提交任何密鑰或密碼。
+6. 在 Apps Script 試算表選單「🔐 顯示 Vercel 維護橋接密鑰」，複製顯示的密鑰，設為對應的 Vercel 環境變數 `PORTAL_{區碼}_MASTER_BRIDGE_SECRET`（例如 `PORTAL_SKW_MASTER_BRIDGE_SECRET`）。共用 API Key 單獨不能簽發維護 token。正式 Apps Script 更新仍由區方自行貼上／部署。不可提交任何密鑰或密碼。
 7. 新版拒絕共享初始密碼 `1234`／`scout1234`。**既有系統不會自動補預設 Users／Staff 帳戶**；只有全新空白試算表才建立隨機未知的臨時密碼帳戶，須由管理員另行重設。停用不再使用的帳戶；啟用 YMIS 卡前確認合資格 Users 帳戶已啟用。`MASTER_EMAIL` 只是帳號名稱，密碼不可寫入 Code.gs。
 8. **全新區**：部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：**任何人**）→ 攞 `/exec` 網址。**已有區**：管理部署 → 編輯**原有** Web App → 新版本；沿用舊 `/exec`。
 
@@ -70,7 +70,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.28.0"`，並確認 `feedbackReady`、`dcFeedbackReady` 均為 `true`，才代表意見箱後端已就緒。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.28.1"`，並確認 `feedbackReady`、`dcFeedbackReady` 均為 `true`，才代表意見箱後端已就緒。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -83,7 +83,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.28.0"`，且 `feedbackReady`、`dcFeedbackReady` 均為 `true`，即代表意見箱功能已就緒。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.28.1"`，且 `feedbackReady`、`dcFeedbackReady` 均為 `true`，即代表意見箱功能已就緒。
 
 ---
 
@@ -149,7 +149,7 @@
 - **一入去只睇自己支部**：跟角色自動揀（`ADC_GH` → 小童軍、`ADC_CUBS` → 幼童軍、`ADC_SCOUT` → 童軍），DC 等其他角色 = 全部支部；頂部隨時切換，揀完會記住（localStorage）。
 - **支部分開計**：探咗 17 旅童軍團，唔會當幼童軍團都探咗；冇填支部嘅記錄當「全旅」，邊個支部都計入。
 - 內建旅團名單跟港島地域官網「筲箕灣區旅團一覽表」（覆檢日期 2026-03-31），`101` 旅嗰啲 `1+A1+S1`（空童軍團／海童軍團）寫法照樣保留。
-- v4.28.0 新增旅團公開資料管理（集會時間、IG、FB、旅團網頁及獨立公開顯示開關）及 `listDistrictTroops` 公開 action；前端資料由 `/visit` →「旅團名單」維護。成員系統卡片 UI 需另在 `member-portal` repo 完成，合約見 [`docs/member-portal-troop-directory.md`](docs/member-portal-troop-directory.md)。
+- v4.28.0 新增旅團公開資料管理（集會時間、IG、FB、旅團網頁及獨立公開顯示開關）及 `listDistrictTroops` 公開 action；v4.28.1 更新 DC 保密卡說明並由前端保證最新留言置頂；前端資料由 `/visit` →「旅團名單」維護。成員系統卡片 UI 需另在 `member-portal` repo 完成，合約見 [`docs/member-portal-troop-directory.md`](docs/member-portal-troop-directory.md)。
 - 後台 4.8.1：新增 `Units`（旅團名單）同 `Visits`（探訪記錄）兩張表 + `getVisitBoard`／`saveVisit`／`deleteVisit`／`saveUnits`；權限用卡片 `visit` = ✏️。
 - **總會格式匯報（v4.10.0）**：`Visits` 表加四欄 `leaderMet`／`method`／`officerCount`／`support`；`getVisitBoard` 回傳 `districtName`（Config `districtName`）做匯報表頭。一筆記錄 = 匯報一行（同旅同日可以有幾行，例如電話一筆 Email 一筆，跟總會樣本）；日期出 `18.1.2026`、冇跟進出 `NA`、冇填人數當 1；排序旅號細到大、同旅舊到新。**舊部署升級：貼新 `Code.gs` → 跑一次 `setupSheets()` 就會自動補四欄，舊資料全部保留**；生成 Excel 嘅 xlsx 產生器係零依賴（`lib/xlsx.ts`＋`lib/hqReport.ts`）。
 - **一日一個旅一次（v4.8.1）**：同一日、同一個旅、同一位幹部只會有一筆記錄 —— 轉支部撳都當同一次（「今日去咗 206 旅」就係一次）。前端方塊會鎖住，後台 `saveVisit` 都會擋（雙重保險）。第二位幹部同日探同一個旅 = 佢有佢名下嗰筆（會先確認）。第二日、下個月再探同一個旅照樣得。
@@ -355,7 +355,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 | 檔案 | 用途 |
 |---|---|
-| `gs/Code.gs` | 完整統一後台 v4.28.0（旅團名錄後端待合併；Apps Script 須由區方自行部署，升級前依只追加指引備份） |
+| `gs/Code.gs` | 完整統一後台 v4.28.1（旅團名錄 API 已合併；Apps Script 須由區方自行部署，升級前依只追加指引備份） |
 | `public/downloads/Code.gs.txt` | 與 `gs/Code.gs` 同一份內容，供網站「更新／下載」直接下載 |
 | `gs/Code.gs.course.js` | 每個訓練班嘅收表 Script 模板 |
 | `app/api/proxy/route.ts` | 前端 → Apps Script 嘅代理（API Key 唔出前端） |

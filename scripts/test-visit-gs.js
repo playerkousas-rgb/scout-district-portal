@@ -383,9 +383,14 @@ check('成員公開名錄只回傳啟用及公開旅團的公開欄位，並保�
   assert.strictEqual(invalid.ok, false, 'non-http(s) URLs must be rejected');
 });
 
-check('健康檢查版本 4.28.0', () => {
+check('DC 保密留言卡清楚標示區總監及系統超管存取範圍', () => {
+  const card = ctx.normalizeCard_({ cardId: 'dcFeedback', description: '舊卡片說明' });
+  assert.strictEqual(card.description, '只限區總監查閱（系統超級管理員亦可）');
+});
+
+check('健康檢查版本 4.28.1', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.28.0');
+  assert.strictEqual(parsed.data.version, '4.28.1');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

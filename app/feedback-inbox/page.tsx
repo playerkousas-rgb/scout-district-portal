@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import BackLink, { BackBar } from '@/components/BackLink';
 import { api } from '@/lib/api';
+import { newestFeedbackFirst } from '@/lib/feedback';
 import { useRequireCardAccess } from '@/lib/cardAccess';
 import type { DistrictFeedback } from '@/lib/types';
 
@@ -34,10 +35,10 @@ export default function FeedbackInboxPage() {
 
   useEffect(() => { void load(); }, [load, refreshKey]);
 
-  const shown = useMemo(
-    () => filter === 'all' ? items : items.filter(item => item.category === filter),
-    [filter, items],
-  );
+  const shown = useMemo(() => {
+    const filtered = filter === 'all' ? items : items.filter(item => item.category === filter);
+    return newestFeedbackFirst(filtered);
+  }, [filter, items]);
 
   if (checking) return <div className="center"><div className="spinner" /></div>;
   if (!session) return (
@@ -52,7 +53,7 @@ export default function FeedbackInboxPage() {
 
       <section className="info-card" aria-label="意見列表">
         <div className="section-head">
-          <div><h3>一般留言</h3><p>共 {items.length} 則 · 留言內容及自願提供的聯絡資料僅供有權限的區務人員查閱。</p></div>
+          <div><h3>一般留言</h3><p>共 {items.length} 則 · 最新留言排最前；留言內容及自願提供的聯絡資料僅供有權限的區務人員查閱。</p></div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <select aria-label="篩選留言類別" value={filter} onChange={event => setFilter(event.target.value as typeof filter)}>
               <option value="all">全部類別</option>

@@ -1,6 +1,6 @@
 # 🔑 借場一條龍 — API Key 找回 + 驗證 Checklist（統一後台 v4.0）
 
-> **版本提示（2026-10）**：現時正式共用後台係已恢復登入的 **4.18.0**。本頁 Script Properties／貼上新版 GS 等步驟**只適用於日後另行決定升級本倉 v4.28.0**，唔係維持 4.18.0 或開啟房間卡的必要條件。今次房間查閱只改 Vercel，已按現有 Config 的紅色子日曆 ID 設定預設值，**毋須新增環境變數／Teamup API Token**；`TEAMUP_APPROVED_SUB_ID` 僅於 ID 日後變更時選用，詳見[房間使用情況](venue-booking-flow.md)。**唔好照本頁先升級 GS 而斷登入。**
+> **版本提示（2026-10）**：現時正式共用後台係已恢復登入的 **4.18.0**。本頁 Script Properties／貼上新版 GS 等步驟**只適用於日後另行決定升級本倉 v4.28.1**，唔係維持 4.18.0 或開啟房間卡的必要條件。今次房間查閱只改 Vercel，已按現有 Config 的紅色子日曆 ID 設定預設值，**毋須新增環境變數／Teamup API Token**；`TEAMUP_APPROVED_SUB_ID` 僅於 ID 日後變更時選用，詳見[房間使用情況](venue-booking-flow.md)。**唔好照本頁先升級 GS 而斷登入。**
 >
 > 你唔記得啲 Key 邊度嚟，好正常 — 安全嘅 Key 應該存喺 **Vercel**（booking 專案）嘅環境變數或區後台受保護 Config；
 > 唔好寫入 Git。以下教你核對設定；舊版 Teamup Token 曾被寫入 repo，請先輪換。
@@ -15,11 +15,11 @@
 
 ---
 
-## 登入及 YMIS 保障（僅日後決定部署本倉 v4.28.0 才適用）
+## 登入及 YMIS 保障（僅日後決定部署本倉 v4.28.1 才適用）
 
-- **目前正式 4.18.0 毋須設定** `PORTAL_TOKEN_SECRET`；本倉 v4.26.1 安全修補與 v4.27.0 Vercel-only sheep 密碼流程已合併 MAIN；v4.28.0 旅團名錄後端尚待合併；正式 GS 尚未部署，更新後均須由區方自行部署；不要未備份、未核對 API Key 與 Script Properties 就直接覆蓋正式 GS。v4.28.0 的 `setupSheets()` 在缺少有效（至少 32 字元）值時會自動建立每專案獨立密鑰；管理員亦可先私下設定。首次建立／更換會令舊登入／重設連結失效。**房間卡更新本身不要求更新 GS。**
+- **目前正式 4.18.0 毋須設定** `PORTAL_TOKEN_SECRET`；本倉 v4.26.1 安全修補與 v4.27.0 Vercel-only sheep 密碼流程已合併 MAIN；v4.28.0 旅團名錄後端已由 PR #49 合併；v4.28.1 DC 卡片說明修正待合併；正式 GS 尚未部署，更新後均須由區方自行部署；不要未備份、未核對 API Key 與 Script Properties 就直接覆蓋正式 GS。v4.28.1 的 `setupSheets()` 在缺少有效（至少 32 字元）值時會自動建立每專案獨立密鑰；管理員亦可先私下設定。首次建立／更換會令舊登入／重設連結失效。**房間卡更新本身不要求更新 GS。**
 - **Vercel（維護密碼）** `PORTAL_{區碼}_MASTER_PASSWORD`（筲箕灣例：`PORTAL_SKW_MASTER_PASSWORD`）。密碼長度由區方自行選擇；空值／未設定會停用維護登入，短密碼較易被猜中，登入流程亦沒有跨 Vercel instance 的分散式限速，建議使用長 passphrase。Apps Script 不儲存或讀取這個密碼；更新 Vercel env 後需重新部署。已簽發的 sheep session 最多仍有效 12 小時；改密碼只影響之後登入，不會立即撤銷現有 session。
-- **Vercel（機器橋接）** `PORTAL_{區碼}_MASTER_BRIDGE_SECRET`（例：`PORTAL_SKW_MASTER_BRIDGE_SECRET`），值由 Apps Script 試算表選單「🔐 顯示 Vercel 維護橋接密鑰」複製；Script Properties 對應名稱為 `PORTAL_MASTER_PROXY_SECRET`。此為高熵機器密鑰，非另一個人類密碼，無需記憶。`setupSheets()` 會移除舊 `PORTAL_MASTER_PASSWORD` Script Property。
+- **Vercel（機器橋接）** `PORTAL_{區碼}_MASTER_BRIDGE_SECRET`（例：`PORTAL_SKW_MASTER_BRIDGE_SECRET`），值由 Apps Script 試算表選單「🔐 顯示 Vercel 維護橋接密鑰」複製；Script Properties 對應名稱為 `PORTAL_MASTER_PROXY_SECRET`。將顯示的密鑰複製到 Vercel 對應環境變數。`setupSheets()` 會移除舊 `PORTAL_MASTER_PASSWORD` Script Property。
 - **YMIS 卡啟用時**，先輪換先前披露的 YMIS 密碼及全部預設 DC／DDC／ADC／STAFF 區系統登入密碼，再私密設定 `YMIS_VERIFY_USERNAME`、`YMIS_VERIFY_PASSWORD`。詳見 [`YMIS 人工登入卡部署指引`](ymis-verification-feasibility.md)。勿將上述私密值交到 Git、Google Sheet、對話或公開環境變數。
 
 ---
