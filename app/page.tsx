@@ -193,12 +193,12 @@ export default function HomePage() {
     e.preventDefault(); setForceErr('');
     if (!session) return;
     if (forcePw1.length < 8) { setForceErr('新密碼最少 8 個字元'); return; }
-    if (forcePw1 === '1234') { setForceErr('新密碼不可沿用預設密碼 1234'); return; }
+    if (forcePw1 === '1234' || forcePw1 === 'scout1234') { setForceErr('新密碼不可使用共用初始密碼'); return; }
     if (forcePw1 !== forcePw2) { setForceErr('兩次輸入嘅新密碼唔一樣'); return; }
     setForceBusy(true);
     try {
-      // 首次登入：舊密碼一定係預設 1234（或上級代設嘅密碼——請用戶輸入）
-      const r = await api.changePassword(session.token, forceOld || '1234', forcePw1);
+      // 首次登入時輸入電郵重設後的新密碼，或管理員發出的隨機臨時密碼
+      const r = await api.changePassword(session.token, forceOld, forcePw1);
       if (r.ok) {
         const next = { ...session, mustChangePassword: false };
         saveSession(next); setSession(next); setForcePw1(''); setForcePw2(''); setForceOld('');
@@ -328,19 +328,19 @@ export default function HomePage() {
     );
   }
 
-  // 首次登入（預設密碼 1234）→ 必須先改密碼，改完先入主控台
+  // 首次登入或管理員發出臨時密碼 → 必須先改密碼，改完先入主控台
   if (session.mustChangePassword) {
     return (
       <div className="center-bg">
         <div className="panel">
           <div className="logo">🔑</div>
           <h1>首次登入：請先設定新密碼</h1>
-          <p className="sub">{session.displayName}（{session.roleLabel}）— 為保安全，預設密碼只可用一次。</p>
+          <p className="sub">{session.displayName}（{session.roleLabel}）— 為保安全，請立即更改初始／臨時密碼。</p>
           {forceErr && <div className="err">{forceErr}</div>}
           <form onSubmit={handleForceChange}>
-            <div className="field"><label>目前密碼（預設 1234；如上級代設請輸入該密碼）</label>
-              <input type="password" placeholder="1234" value={forceOld} onChange={e => setForceOld(e.target.value)} autoComplete="current-password" /></div>
-            <div className="field"><label>新密碼（最少 8 字元，不可再用 1234）</label>
+            <div className="field"><label>目前密碼（輸入管理員提供的一次性密碼）</label>
+              <input type="password" placeholder="一次性密碼" value={forceOld} onChange={e => setForceOld(e.target.value)} autoComplete="current-password" /></div>
+            <div className="field"><label>新密碼（最少 8 字元，不可使用共用初始密碼）</label>
               <input type="password" value={forcePw1} onChange={e => setForcePw1(e.target.value)} autoComplete="new-password" /></div>
             <div className="field"><label>再輸入一次</label>
               <input type="password" value={forcePw2} onChange={e => setForcePw2(e.target.value)} autoComplete="new-password" /></div>

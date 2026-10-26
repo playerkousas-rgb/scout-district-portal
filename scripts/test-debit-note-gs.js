@@ -55,7 +55,7 @@ async function loginWithPassword(email, password) {
   return result.data;
 }
 async function login(email) {
-  return loginWithPassword(email, '1234');
+  return loginWithPassword(email, 'LOCAL_MOCK_USER_PASSWORD_NOT_FOR_REAL_USE');
 }
 
 (async () => {
@@ -105,7 +105,7 @@ async function login(email) {
   assert.equal((await get('listDebitNotes', { token: sysadmin.token })).ok, true);
   console.log('  ✓ 預設未授權 ADC 被擋；SYSADMIN 可讀帳簿');
 
-  // 管理員可自由設定任何卡片／角色為 — / 👁 (view) / ✏️ (edit)，後台原樣保存並按 Perms 執行。
+  // 一般卡片 Perms 由管理員設定；YMIS 始終按明確角色白名單維持只讀。
   const bundle = await get('getPerms', { token: dc.token });
   assert.equal(bundle.ok, true);
   bundle.data.matrix.debitNote.ADC_SCOUT = 'view';
@@ -114,7 +114,7 @@ async function login(email) {
   assert.equal(savedPerms.ok, true);
   const after = await get('getPerms', { token: dc.token });
   assert.equal(after.data.matrix.debitNote.ADC_SCOUT, 'view');
-  assert.equal(after.data.matrix.ymis.ADC_SCOUT, 'edit');
+  assert.equal(after.data.matrix.ymis.ADC_SCOUT, 'view');
   const adcCards = await get('getCards', { token: adc.token });
   assert.equal(adcCards.data.find(item => item.cardId === 'debitNote')?.access, 'view');
   assert.equal((await get('listDebitNotes', { token: adc.token })).ok, true, '👁 view 應可查閱帳簿');
@@ -198,8 +198,8 @@ async function login(email) {
   console.log('  ✓ 無效批次整批 rollback；後端自行驗證金額及 Ref，唔信 client');
 
   const health = await get('getHealthCheck');
-  assert.equal(health.data.version, '4.24.0');
-  console.log('  ✓ setupSheets 補卡及 DebitNotes 帳簿成功，健康檢查版本 4.24.0');
+  assert.equal(health.data.version, '4.26.1');
+  console.log('  ✓ setupSheets 補卡及 DebitNotes 帳簿成功，健康檢查版本 4.26.1');
   console.log('\n全部後台門禁及帳簿整合測試通過 ✓');
 })().catch(error => {
   console.error(error);

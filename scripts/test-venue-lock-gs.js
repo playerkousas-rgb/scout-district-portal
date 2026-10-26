@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.26.0）
+ * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.26.1）
  *
  * 涵蓋：
  *  1. 跨區自動探測（api.sciener.com 10003 → 自動切換 euapi.ttlock.com + 852 電話帳號相容）
@@ -400,7 +400,6 @@ const ctx = {
 const code = fs.readFileSync(path.join(__dirname, '..', 'gs', 'Code.gs'), 'utf8');
 vm.createContext(ctx);
 vm.runInContext(code, ctx, { filename: 'Code.gs' });
-ctx.MASTER_PW = props.PORTAL_MASTER_PASSWORD;
 ctx.setupSheets();
 
 // 設定 API Key 供 doGet / doPost 驗證
@@ -423,7 +422,7 @@ function callPost(action, body = {}) {
   return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action, apiKey, ...body }) } }));
 }
 
-console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.26.0)');
+console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.26.1)');
 
 // 1. 登入超管／DC 並檢查初始健康狀態
 const loginRes = callPost('login', { email: ctx.MASTER_EMAIL, password: props.PORTAL_MASTER_PASSWORD });
@@ -432,12 +431,48 @@ const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.26.0');
+assert.strictEqual(h0.data.version, '4.26.1');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
 assert.strictEqual(h0.data.feedbackReady, true, 'DistrictFeedback should be ready after setup');
 assert.strictEqual(h0.data.dcFeedbackReady, true, 'DCConfidential should be ready after setup');
-console.log('  ✓ getHealthCheck 回傳版本 4.26.0、意見箱就緒及電子鎖初始狀態');
+console.log('  ✓ getHealthCheck 回傳版本 4.26.1、意見箱就緒及電子鎖初始狀態');
+assert.strictEqual(h0.data.tokenSecretSet, true, 'setup should create a private token signing secret');
+assert.ok(props.PORTAL_TOKEN_SECRET && props.PORTAL_TOKEN_SECRET.length >= 32, 'token secret should be stored in Script Properties');
+assert.strictEqual(ctx.MASTER_PW, undefined, 'the source must not define a hard-coded maintenance password');
+assert.strictEqual(ctx.login_('sheep', '0728').ok, false, 'the published legacy maintenance password must no longer work');
+assert.strictEqual(callPost('login', { email: 'sysadmin@skwscout.org.hk', password: '1234' }).ok, false,
+  'shared preset credentials must be denied');
+
+// A token signed with the former source-visible secret must not verify.
+const legacyPayload = `attacker@example.invalid|SYSADMIN|${Date.now() + 60 * 60 * 1000}`;
+const legacySignature = ctx.sha256_(legacyPayload + 'CHANGE_ME_DISTRICT_SECRET_請改成長亂碼').slice(0, 32);
+const legacyToken = ctx.Utilities.base64EncodeWebSafe(`${legacyPayload}|${legacySignature}`);
+assert.strictEqual(ctx.checkToken_(legacyToken).valid, false, 'legacy public signing secret must not forge a token');
+
+// API-key auth must reject missing keys/hashes; health check remains the only documented bypass.
+const savedApiHash = cfgRows[hashIdx][1];
+cfgRows[hashIdx][1] = '';
+assert.strictEqual(callGet('getPublicInfo').ok, false, 'missing API_KEY_HASH must fail closed');
+cfgRows[hashIdx][1] = savedApiHash;
+
+// Force-change accounts may only verify/read cards/change password until their temporary password is rotated.
+const securityUsersRows = sheets.Users._data;
+const securityUsersHeader = securityUsersRows[0];
+const sysadminRow = securityUsersRows.find((r, i) => i > 0 && r[securityUsersHeader.indexOf('email')] === 'sysadmin@skwscout.org.hk');
+const saltCol = securityUsersHeader.indexOf('salt'), hashCol = securityUsersHeader.indexOf('passwordHash');
+sysadminRow[saltCol] = 'unit-test-salt';
+sysadminRow[hashCol] = ctx.sha256_('OneTimeTempPass_123' + sysadminRow[saltCol]);
+sysadminRow[securityUsersHeader.indexOf('mustChangePassword')] = 'TRUE';
+const forceLogin = callPost('login', { email: 'sysadmin@skwscout.org.hk', password: 'OneTimeTempPass_123' });
+assert.strictEqual(forceLogin.ok, true);
+assert.strictEqual(forceLogin.data.mustChangePassword, true);
+assert.strictEqual(callGet('getUsers', { token: forceLogin.data.token }).ok, false,
+  'must-change-password token cannot read user records');
+assert.strictEqual(callPost('changePassword', { token: forceLogin.data.token, oldPassword: 'OneTimeTempPass_123', newPassword: 'NewUniquePassword_2026' }).ok, true,
+  'must-change-password token can change its own password');
+assert.strictEqual(callGet('getUsers', { token: forceLogin.data.token }).ok, true,
+  'account regains authorized access after changing its password');
 
 // 「你講我聽」公開提交、聯絡資料最小化及 DC 儲存隔離
 const feedbackDenied = callPost('submitDistrictFeedback', { category: 'wrong', message: '這是一段足夠長的測試留言。' });
@@ -479,6 +514,11 @@ assert.strictEqual(ctx.feedbackReadRows_(sheets.DistrictFeedback).length, 1, 'DC
 assert.strictEqual(sentEmails.at(-1).to, 'dc-notify@example.org');
 assert.ok(!sentEmails.at(-1).body.includes('保密支援留言'), 'notification must not contain message content');
 
+// Tests use explicitly rotated credentials for normal users, so their fixtures are not force-change sessions.
+for (const email of ['dc@skwscout.org.hk', 'ddc.admin@skwscout.org.hk', 'adc.scout@skwscout.org.hk']) {
+  const row = sheets.Users._data.find((r, i) => i > 0 && r[0] === email);
+  if (row) row[sheets.Users._data[0].indexOf('mustChangePassword')] = 'FALSE';
+}
 const dcToken = ctx.makeToken_('dc@skwscout.org.hk', 'DC');
 const ddcToken = ctx.makeToken_('ddc.admin@skwscout.org.hk', 'DDC_ADMIN');
 const adcToken = ctx.makeToken_('adc.scout@skwscout.org.hk', 'ADC_SCOUT');

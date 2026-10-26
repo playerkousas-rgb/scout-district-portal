@@ -92,6 +92,8 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(code, ctx, { filename: 'Code.gs' });
+const testApiKey = 'visit-test-api-key';
+sheets.Config.appendRow(['API_KEY_HASH', ctx.sha256_(testApiKey), 'test only']);
 
 const dcToken = ctx.makeToken_('dc@x.org', 'DC', 12);
 const ghToken = ctx.makeToken_('gh@x.org', 'ADC_GH', 12);
@@ -257,15 +259,17 @@ check('名單唔可以空、旅號唔可以重複、冇權限唔改得', () => {
 });
 
 check('doGet / doPost 路由通', () => {
-  const g = JSON.parse(ctx.doGet({ parameter: { action: 'getVisitBoard', token: dcToken } }));
+  const denied = JSON.parse(ctx.doGet({ parameter: { action: 'getVisitBoard', token: dcToken } }));
+  assert.strictEqual(denied.ok, false, 'missing API key must fail closed');
+  const g = JSON.parse(ctx.doGet({ parameter: { action: 'getVisitBoard', token: dcToken, apiKey: testApiKey } }));
   assert.strictEqual(g.ok, true);
   assert.ok(Array.isArray(g.data.visits));
   const p = JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({
-    action: 'saveVisit', token: dcToken, visit: { troop: '17', section: 'scout', visitDate: `${thisYear}-05-05` },
+    action: 'saveVisit', apiKey: testApiKey, token: dcToken, visit: { troop: '17', section: 'scout', visitDate: `${thisYear}-05-05` },
   }) } }));
   assert.strictEqual(p.ok, true);
   const del = JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({
-    action: 'deleteVisit', token: dcToken, id: p.data.id,
+    action: 'deleteVisit', apiKey: testApiKey, token: dcToken, id: p.data.id,
   }) } }));
   assert.strictEqual(del.ok, true);
 });
@@ -341,9 +345,9 @@ check('舊 Visits 表（未升級）跑 ensureSheetColumns_ 自動補四欄，�
   sheets.Visits = makeSheet('Visits', [VISIT_HEAD]);   // 還原，等其他測試環境乾淨
 });
 
-check('健康檢查版本 4.19.1', () => {
+check('健康檢查版本 4.26.1', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.19.1');
+  assert.strictEqual(parsed.data.version, '4.26.1');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

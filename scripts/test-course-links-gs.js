@@ -175,6 +175,8 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(code, ctx, { filename: 'Code.gs' });
+const testApiKey = 'course-links-test-api-key';
+sheets.Config.appendRow(['API_KEY_HASH', ctx.sha256_(testApiKey), 'test only']);
 
 function tokenFor(email, role) { return ctx.makeToken_(email, role, 12); }
 
@@ -206,7 +208,7 @@ check('getCourseLinks（管理端）：新欄照返，而且唔洩漏 scriptApiK
 });
 
 check('doGet listCourseLinks（HTTP 形狀）：公開回應剝走 script key，新欄喺度', () => {
-  const raw = ctx.doGet({ parameter: { action: 'listCourseLinks' } });
+  const raw = ctx.doGet({ parameter: { action: 'listCourseLinks', apiKey: testApiKey } });
   const body = JSON.parse(raw);
   assert.ok(body.ok);
   const a = body.data.find(x => x.courseId === 'cl-2607');

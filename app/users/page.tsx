@@ -157,11 +157,17 @@ export default function UsersPage() {
   }
 
   async function resetToDefault(u: PortalUser) {
-    if (!session || !confirm(`把「${u.displayName || u.email}」密碼重設為預設 1234？對方下次登入必須即刻改密碼。`)) return;
+    if (!session || !confirm(`為「${u.displayName || u.email}」產生新的隨機一次性密碼？對方首次登入後必須立即更改。`)) return;
     setBusy(true); setError(''); setMessage('');
     const r = await api.updateUser(session.token, u.email, { resetToDefault: true });
     setBusy(false);
-    if (r.ok) { setMessage(`${u.displayName || u.email} 密碼已重設為 1234（首次登入必改）。`); load(session); }
+    if (r.ok) {
+      const temporaryPassword = r.data?.temporaryPassword || '';
+      setMessage(temporaryPassword
+        ? `${u.displayName || u.email} 的一次性臨時密碼：${temporaryPassword}（請私下交付；登入後必須立即更改）。`
+        : '已重設密碼，請聯絡系統管理員。');
+      load(session);
+    }
     else setError(r.error || '重設失敗');
   }
 
@@ -199,7 +205,7 @@ export default function UsersPage() {
       <h1 className="page-title">👥 帳戶管理及批量開戶</h1>
       <p className="page-sub">
         只有 <b>副區總監或以上</b> 可以開戶；只可以開 <b>區長／區領袖／助理區領袖</b>（可多人）。
-        DC、DDC、ADC、STAFF 係預設帳戶（@skwscout.org.hk，預設密碼 <code>1234</code>，首次登入必須改密碼）。
+        DC、DDC、ADC、STAFF 係預設帳戶（@skwscout.org.hk）；共用初始密碼已停用，請用忘記密碼或管理員產生的一次性臨時密碼登入。
         只可管理層級比自己低嘅帳戶。密碼只以雜湊寫入該區 Google Sheet。
       </p>
       {error && <div className="err">{error}</div>}
@@ -290,12 +296,12 @@ export default function UsersPage() {
                   <span className="role-chip">{u.role}</span>
                   <span className="lvl-chip dark">L{typeof u.level === 'number' ? u.level : levelOf({ role: u.role })} {u.levelLabel || levelLabel(levelOf({ role: u.role }))}</span>
                   <span className={u.active ? 'state on' : 'state off'}>{u.active ? '啟用中' : '已停用'}</span>
-                  {u.mustChangePassword && <span className="state warn" title="仍用緊預設密碼，首次登入會被要求改">🔑 未改密碼</span>}
+                  {u.mustChangePassword && <span className="state warn" title="仍需更換初始／臨時密碼；更改前 API 只允許改密碼">🔑 未改密碼</span>}
                   {!isCreatableRole(u.role) && <span className="role-chip">預設位</span>}
                 </div>
                 <div className="user-actions" style={{ flexWrap: 'wrap', gap: 6 }}>
                   <button className="mini-btn" disabled={busy || !canTouch(u)} onClick={() => toggleUser(u)}>{u.active ? '停用' : '啟用'}</button>
-                  <button className="mini-btn" disabled={busy || !canTouch(u)} onClick={() => resetToDefault(u)} title="重設為 1234，對方下次登入必改">🔑 重設 1234</button>
+                  <button className="mini-btn" disabled={busy || !canTouch(u)} onClick={() => resetToDefault(u)} title="產生隨機一次性密碼，登入後必須更改">🔑 產生臨時密碼</button>
                   <button className="mini-btn" disabled={busy || !canTouch(u)} onClick={() => { setEditingCards(u.email); setCardsDraft(u.cards || ''); }}>🎯 卡片範圍</button>
                   <button className="mini-btn danger" disabled={busy || !canTouch(u)} onClick={() => removeUser(u)}>刪除</button>
                 </div>

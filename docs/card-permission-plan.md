@@ -170,7 +170,7 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
 4. 借場批核行 **`approveVenueBooking`**（TTLock 限時密碼 → Teamup 轉色 → 電郵），拒絕/取消行 `setVenueBookingStatus`。
 
 ### 兩邊都要
-1. **簽署密鑰／維護帳號**：已移除程式碼內的公開 `TOKEN_SECRET`／`MASTER_PW`；每區在 Apps Script Script Properties 必設私密 `PORTAL_TOKEN_SECRET`（≥32 字元），選用維護登入則設 `PORTAL_MASTER_PASSWORD`（≥12 字元），並旋轉既有帳號密碼。
+1. **簽署密鑰／維護帳號**：已移除程式碼內的公開 `TOKEN_SECRET`／`MASTER_PW`；每區在 Apps Script Script Properties 需有私密 `PORTAL_TOKEN_SECRET`（≥32 字元；v4.26.1 `setupSheets()` 缺少有效值時會自動建立），選用維護登入則設 `PORTAL_MASTER_PASSWORD`（≥12 字元），並旋轉既有帳號密碼。
 2. **API Key**：每區 Code.gs 自動隨機生成（唔寫死），存 Vercel env + App 內登記。
 3. **防濫用**：重複報名檢查（email+course）、honeypot／reCAPTCHA、Apps Script quota 注意。
 
