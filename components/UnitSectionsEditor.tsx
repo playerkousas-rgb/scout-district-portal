@@ -1,199 +1,80 @@
 'use client';
-/**
- * 🧱 旅→團階層編輯器（v4.29.0 UnitSections 表）
- *
- * 每個團（支部單位）一列：旅號／支部下拉、團代號（常規團留空；A1＝空、S1＝海）、
- * 集會時間、集會地點、三個社交網址、啟用／公開 checkbox。
- * 整份覆寫儲存（同 Units 名單一樣）；後台做權限、dup key、網址同代號驗證。
- * 未補建 UnitSections 表（舊 GS）時只顯示升級提示，編輯器唔開放。
- */
 import { useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import type { UnitSection, VisitBoard, VisitSection } from '@/lib/types';
-import { SECTIONS, SECTION_LABEL, SECTION_EMOJI } from '@/lib/visits';
+import { SECTIONS, SECTION_LABEL } from '@/lib/visits';
+import { blankUnitSection, unitSectionDrafts } from '@/lib/unitSectionDrafts';
 
-function blankRow(troop = '', section: VisitSection | '' = ''): UnitSection {
-  return {
-    troop,
-    section,
-    unitCode: '',
-    meetingTime: '',
-    location: '',
-    instagramUrl: '',
-    facebookUrl: '',
-    websiteUrl: '',
-    active: true,
-    publicVisible: true,
-  };
-}
-
-export default function UnitSectionsEditor({
-  board, canEdit, token, reload, flash, setError,
-}: {
-  board: VisitBoard;
-  canEdit: boolean;
-  token: string;
-  reload: () => Promise<void>;
-  flash: (s: string) => void;
-  setError: (s: string) => void;
+/** 按旅維護，各支部一張編輯卡；儲存只影響所選旅。 */
+export default function UnitSectionsEditor({ board, canEdit, token, reload, flash, setError }: {
+  board: VisitBoard; canEdit: boolean; token: string; reload: () => Promise<void>;
+  flash: (s: string) => void; setError: (s: string) => void;
 }) {
-  const [rows, setRows] = useState<UnitSection[]>(() => (board.unitSections || []).map(r => ({ ...r })));
+  const router = useRouter();
+  const params = useSearchParams();
+  const initial = board.units.find(u => u.troop === params.get('troop')) || board.units[0];
+  const [troop, setTroop] = useState(initial?.troop || '');
+  const [rows, setRows] = useState(() => unitSectionDrafts(initial, board.unitSections || []));
+  const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const ready = board.unitSectionsReady === true;
-  const troopOptions = board.units.map(u => ({ troop: u.troop, label: u.label || u.troop }));
-
-  function patch(i: number, p: Partial<UnitSection>) {
-    setRows(prev => prev.map((r, idx) => (idx === i ? { ...r, ...p } : r)));
+  const ready = board.unitSectionsReady === true && board.unitSectionsScopedSave === true;
+  const disabled = !canEdit || saving;
+  function patch(i: number, value: Partial<UnitSection>) {
+    setRows(prev => prev.map((row, index) => index === i ? { ...row, ...value } : row));
+    setDirty(true);
   }
-  function addRow() {
-    const firstTroop = troopOptions[0]?.troop || '';
-    setRows(prev => [...prev, blankRow(firstTroop)]);
+  function selectTroop(value: string) {
+    if (dirty && !window.confirm('所選旅的修改尚未儲存，確定放棄修改並切換？')) return;
+    setTroop(value);
+    const query = new URLSearchParams(params.toString());
+    query.set('troop', value);
+    router.replace(`${window.location.pathname}?${query.toString()}`, { scroll: false });
+    setRows(unitSectionDrafts(board.units.find(u => u.troop === value), board.unitSections || []));
+    setDirty(false);
   }
-  function removeRow(i: number) {
-    setRows(prev => prev.filter((_, idx) => idx !== i));
-  }
-
   async function save() {
-    if (rows.some(r => !String(r.troop).trim() || !r.section)) {
-      setError('請為每列填寫旅號及支部，或移除未填好的列；未有資料寫入。');
-      return;
-    }
-    const clean = rows;
-    if (!clean.length && (board.unitSections || []).length && !window.confirm('確定清空所有旅的團級維護資料？成員名錄將回落自動骨架。')) return;
-    setSaving(true);
-    const r = await api.saveUnitSections(token, clean);
-    setSaving(false);
-    if (r.ok) {
-      flash(`已儲存 ${r.data?.count ?? clean.length} 個團`);
+    if (!troop || rows.some(r => !r.section)) { setError('請為每個團選擇支部。'); return; }
+    if (!rows.length && !window.confirm('確定移除此旅的團級資料並回落自動列表？其他旅不受影響。')) return;
+    setSaving(true); setError('');
+    try {
+      const result = await api.saveUnitSections(token, rows, troop);
+      if (!result.ok) { setError(result.error || '儲存失敗'); return; }
+      setDirty(false);
+      flash(`已儲存第 ${troop} 旅 ${rows.length} 個團的獨立資料，其他旅不受影響`);
       await reload();
-      setRows(clean.map(x => ({ ...x })));
-    } else {
-      setError(r.error || '儲存失敗');
-    }
+    } catch { setError('連線失敗，修改仍保留，請再試。'); }
+    finally { setSaving(false); }
   }
-
-  if (!ready) {
-    return (
-      <div className="info-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-        <strong>團層級編輯尚未啟用</strong>
-        <p className="fps-help">
-          請區方先把 GS v4.29.0 更新至 Apps Script 並執行 setupSheets() 補建 UnitSections 表；
-          完成後即可喺度維護每個團嘅集會時間、地點同社交帳戶。未維護嘅旅，成員端會按支部團數自動顯示骨架。
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="info-card">
-      <div className="section-head">
-        <div>
-          <h3>旅→團階層：各團集會資料（{rows.length}）</h3>
-          <p>
-            每個團一列。旅號同支部用下拉選擇；團代號常規團留空，空童軍團填 A1、海童軍團填 S1。
-            集會時間同地點會顯示喺成員端該團嘅彈窗；空白欄位唔會公開。取消「啟用」或「公開」即從成員名錄隱藏該團。
-            同一旅＋支部＋代號唔可以重複；淨空全部列再儲存＝回落自動骨架。
-          </p>
-        </div>
-        {canEdit && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="mini-btn" onClick={addRow}>＋ 加一個團</button>
-            <button className="btn-sm" disabled={saving} onClick={save}>{saving ? '儲存中…' : '💾 儲存團資料'}</button>
-          </div>
-        )}
-      </div>
-
-      <div className="mtx-scroll">
-        <table className="perm-table vs-units">
-          <thead>
-            <tr>
-              <th>旅號</th><th>支部</th><th>團代號</th>
-              <th>集會時間</th><th>集會地點</th>
-              <th>Instagram 網址</th><th>Facebook 網址</th><th>網頁</th>
-              <th>啟用</th><th>成員名錄</th>{canEdit && <th />}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={canEdit ? 11 : 10} className="fps-help" style={{ textAlign: 'center', padding: 16 }}>
-                  未維護任何團 — 成員端而家按 Units 嘅支部團數自動顯示骨架（詳情空白會回落旅層級資料）。
-                </td>
-              </tr>
-            )}
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td>
-                  <select
-                    value={r.troop} disabled={!canEdit}
-                    onChange={e => patch(i, { troop: e.target.value })}
-                    style={{ width: 130 }}
-                    aria-label={`第 ${i + 1} 列旅號`}
-                  >
-                    <option value="">— 揀旅團 —</option>
-                    {troopOptions.map(o => (
-                      <option key={o.troop} value={o.troop}>{o.troop} {o.label}</option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <select
-                    value={r.section} disabled={!canEdit}
-                    onChange={e => patch(i, { section: e.target.value as VisitSection | '' })}
-                    style={{ width: 120 }}
-                    aria-label={`第 ${i + 1} 列支部`}
-                  >
-                    <option value="">—</option>
-                    {SECTIONS.map(k => (
-                      <option key={k} value={k}>{SECTION_EMOJI[k]} {SECTION_LABEL[k]}</option>
-                    ))}
-                  </select>
-                </td>
-                <td>
-                  <input
-                    value={r.unitCode} disabled={!canEdit} maxLength={10}
-                    onChange={e => patch(i, { unitCode: e.target.value.toUpperCase() })}
-                    style={{ width: 64 }} placeholder="常規留空"
-                    aria-label={`第 ${i + 1} 列團代號`}
-                  />
-                </td>
-                <td>
-                  <input
-                    value={r.meetingTime} disabled={!canEdit} maxLength={200}
-                    onChange={e => patch(i, { meetingTime: e.target.value })}
-                    style={{ width: 170 }} placeholder="例如：星期六 14:00–17:00"
-                  />
-                </td>
-                <td>
-                  <input
-                    value={r.location} disabled={!canEdit} maxLength={200}
-                    onChange={e => patch(i, { location: e.target.value })}
-                    style={{ width: 170 }} placeholder="例如：校本部禮堂"
-                  />
-                </td>
-                <td><input type="url" value={r.instagramUrl} disabled={!canEdit} onChange={e => patch(i, { instagramUrl: e.target.value })} style={{ width: 200 }} placeholder="https://instagram.com/…" /></td>
-                <td><input type="url" value={r.facebookUrl} disabled={!canEdit} onChange={e => patch(i, { facebookUrl: e.target.value })} style={{ width: 200 }} placeholder="https://facebook.com/…" /></td>
-                <td><input type="url" value={r.websiteUrl} disabled={!canEdit} onChange={e => patch(i, { websiteUrl: e.target.value })} style={{ width: 200 }} placeholder="https://…" /></td>
-                <td style={{ textAlign: 'center' }}>
-                  <input type="checkbox" checked={r.active !== false} disabled={!canEdit} onChange={e => patch(i, { active: e.target.checked })} aria-label={`第 ${i + 1} 列啟用`} />
-                </td>
-                <td style={{ textAlign: 'center' }}>
-                  <input type="checkbox" checked={r.publicVisible !== false} disabled={!canEdit} onChange={e => patch(i, { publicVisible: e.target.checked })} aria-label={`第 ${i + 1} 列於成員名錄顯示`} />
-                </td>
-                {canEdit && (
-                  <td>
-                    <button className="mini-btn" style={{ color: '#b91c1c' }} onClick={() => removeRow(i)} aria-label={`刪除第 ${i + 1} 列`}>✕</button>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="fps-help" style={{ marginTop: 8 }}>
-        社交平台／網頁請貼完整 http:// 或 https:// 網址（後台會再驗證）；空白即喺成員端隱藏。
-        團代號格式：常規團留空；A 開頭＝空童軍團（A1）、S 開頭＝海童軍團（S1）。
-      </p>
+  if (!ready) return <div className="info-card"><strong>各支部獨立設定尚未啟用</strong><p>請先更新 GS v4.30.0、執行 setupSheets() 並更新原有 Web App 部署，以啟用 UnitSections。</p></div>;
+  return <section className="info-card" aria-label="各旅各支部資料設定">
+    <h3>各旅・各支部獨立設定</h3>
+    <p>先選旅，再逐支部填寫集會時間、地點及社交平台。例如第 82 旅的五個支部各有自己的資料，互不覆蓋。儲存只影響所選旅。</p>
+    <label>選擇旅團 <select value={troop} disabled={saving} onChange={e => selectTroop(e.target.value)}>
+      {board.units.map(u => <option key={u.troop} value={u.troop}>{u.troop} · {u.label}</option>)}
+    </select></label>
+    <p className="fps-help">已按支部團數補出尚未設定的支部；空欄不會複製旅層的時間或社交平台。填寫後按下方「儲存此旅」才會寫入。</p>
+    <div className="unit-editor-grid">
+      {rows.map((row, i) => <fieldset key={`${troop}-${i}`} className="unit-editor-card" disabled={disabled}>
+        <legend>{row.section ? SECTION_LABEL[row.section] : '新增支部'}{row.unitCode ? ` · ${row.unitCode}` : ''}</legend>
+        <label>支部<select value={row.section} onChange={e => patch(i, { section: e.target.value as VisitSection | '' })}>
+          <option value="">請選擇支部</option>{SECTIONS.map(s => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
+        </select></label>
+        <label>團代號<input value={row.unitCode} maxLength={3} placeholder="單團留空；多團填 1／2，空團 A1、海團 S1" onChange={e => patch(i, { unitCode: e.target.value.toUpperCase() })} /></label>
+        <label>集會時間<input value={row.meetingTime} maxLength={200} placeholder="例如：星期六 14:00–17:00" onChange={e => patch(i, { meetingTime: e.target.value })} /></label>
+        <label>集會地點<input value={row.location} maxLength={200} onChange={e => patch(i, { location: e.target.value })} /></label>
+        {(['instagramUrl', 'facebookUrl', 'websiteUrl'] as const).map((field, index) => <label key={field}>{['Instagram', 'Facebook', '網站'][index]}
+          <input type="url" value={row[field]} maxLength={500} placeholder="https://…（此支部專用）" onChange={e => patch(i, { [field]: e.target.value })} />
+        </label>)}
+        <label><input type="checkbox" checked={row.active !== false} onChange={e => patch(i, { active: e.target.checked })} /> 支部啟用</label>
+        <label><input type="checkbox" checked={row.publicVisible !== false} onChange={e => patch(i, { publicVisible: e.target.checked })} /> 在成員名錄公開</label>
+        {canEdit && <button type="button" className="mini-btn" onClick={() => { setRows(prev => prev.filter((_, index) => index !== i)); setDirty(true); }}>移除此團設定</button>}
+      </fieldset>)}
     </div>
-  );
+    {canEdit && <div className="unit-editor-actions">
+      <button type="button" className="mini-btn" disabled={saving || !troop} onClick={() => { setRows(prev => [...prev, blankUnitSection(troop)]); setDirty(true); }}>＋ 新增支部／團</button>
+      <button type="button" className="btn-sm" disabled={saving || !troop} onClick={save}>{saving ? '儲存中…' : `儲存第 ${troop} 旅（只影響此旅）`}</button>
+      <span role="status">{dirty ? '尚未儲存' : '切換旅團可查看其他旅的資料'}</span>
+    </div>}
+  </section>;
 }

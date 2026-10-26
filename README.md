@@ -3,7 +3,7 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
-> **本分支 GS v4.29.1 已對齊 member-portal 最新 MAIN `9dbe876`（PR #22）保存的 v4.29.0 快照及管理端 patch。** 新增旅→團名錄、`UnitSections` 表及管理編輯器；v4.29.1 保留同一 v1.3 API 格式，修正全部團隱藏後重新產生骨架、公開網址清洗及不完整提交驗證。原始 v4.29.0 快照保留不改，見 [`gs/releases`](gs/releases/README.md)。**尚未部署或在真實 Apps Script／Sheet／外部服務驗證**；區方須先備份並閱讀 [GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，由區方自行更新原有專案及 deployment。房間讀取仍用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
+> **本分支 v4.30.0：恢復既有 YMIS 帳密內頁入口（不是重新設計頁面），補齊個人卡片排序及按旅、按支部編輯資料。** YMIS 仍從 Script Properties 讀取 `YMIS_VERIFY_USERNAME`／`YMIS_VERIFY_PASSWORD`；SYSADMIN（含已簽署的維護超管）亦可使用。第82旅五個支部可各自設定時間、地點和社交平台；新介面使用按旅儲存，舊 GS 未支援時會禁止編輯以免覆寫其他旅。**尚未合併／部署正式環境，亦未使用真實帳密或 Sheet 驗證。** 升級前先備份並閱讀 [GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)。
 >
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
@@ -235,7 +235,7 @@
 
 ## 🪪 YMIS 會員核實（人工登入卡）
 
-區方改用較簡單嘅方案：DC／DDC／ADC 總監級同區職員登入區系統後，可喺主控台撳「YMIS 會員核實」卡；入頁開官方 YMIS 登入網站，按「顯示帳密（60 秒）」短暫查看**區獲發嘅核實帳戶**，再自行喺 YMIS 網站輸入。SYSADMIN／維護帳號、區長／一般領袖／助理區領袖不可見。呢個功能**唔係 YMIS SSO／自動查會員**；示範版只顯示無法登入的虛構資料。
+區方改用較簡單嘅方案：DC／DDC／ADC 總監級同區職員登入區系統後，可喺主控台撳「YMIS 會員核實」卡；入頁開官方 YMIS 登入網站，按「顯示帳密（60 秒）」短暫查看**區獲發嘅核實帳戶**，再自行喺 YMIS 網站輸入。SYSADMIN／已簽署維護帳號亦可使用；區長／一般領袖／助理區領袖仍不可見。呢個功能**唔係 YMIS SSO／自動查會員**；示範版只顯示無法登入的虛構資料。
 
 真實帳密**不可寫入程式碼／Google Sheet／聊天**。區方管理員須先輪換曾在對話中披露的 YMIS 密碼及區系統初始登入密碼，按上方步驟在 **Script Properties** 設 `PORTAL_TOKEN_SECRET`、部署新版 `gs/Code.gs` 並執行 `setupSheets()`，再私密設定 `YMIS_VERIFY_USERNAME`／`YMIS_VERIFY_PASSWORD`、更新 Web App 版本及前端。部署後由區方自行核實能否在官方 YMIS 登入；本地未測真實帳密。權限及風險見 [`YMIS 部署指引`](docs/ymis-verification-feasibility.md)，現有資料更新順序見 [`GS 無損升級步驟`](docs/gs-upgrade-no-data-loss.md)。
 

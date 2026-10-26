@@ -774,6 +774,7 @@ export interface VisitBoard {
   today: string;
   districtName?: string;    // 區會名（Config districtName，總會匯報表頭用）
   publicTroopFieldsReady?: boolean; // GS v4.28.0 Units 公開資料欄已補齊
+  unitSectionsScopedSave?: boolean; // GS v4.30.0：只儲存所選旅，不覆寫其他旅
   unitSectionsReady?: boolean;      // GS v4.29.0 UnitSections 表已補建
   unitSections?: UnitSection[];     // 全部維護列（含停用／非公開，管理端專用）
   units: ScoutUnit[];

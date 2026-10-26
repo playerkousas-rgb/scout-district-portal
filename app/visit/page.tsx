@@ -816,6 +816,10 @@ function UnitsTab({ board, canEdit, token, reload, flash, setError }: {
 
   return (
     <>
+      <UnitSectionsEditor
+        board={board} canEdit={canEdit} token={token}
+        reload={reload} flash={flash} setError={setError}
+      />
       {!publicFieldsReady && (
         <div className="info-card" style={{ borderLeft: '4px solid #f59e0b' }}>
           <strong>公開資料欄位尚未啟用</strong>
@@ -892,10 +896,7 @@ function UnitsTab({ board, canEdit, token, reload, flash, setError }: {
         </div>
       )}
 
-      <UnitSectionsEditor
-        board={board} canEdit={canEdit} token={token}
-        reload={reload} flash={flash} setError={setError}
-      />
+
     </>
   );
 }

@@ -520,6 +520,7 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
         districtName: '筲箕灣區',
         units: d.units,
         unitSectionsReady: true,
+        unitSectionsScopedSave: true,
         unitSections: d.unitSections || [],
         visits: d.visits,
         years: [y - 2, y - 1, y, y + 1],
@@ -577,8 +578,11 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
     }
     case 'saveUnitSections': {
       if (!u) return fail('未登入或登入已過期（示範版）。');
-      d.unitSections = ((payload.rows || payload.unitSections || []) as AnyObj[]).map(x => ({ ...x }));
-      persistDb(); return ok({ saved: true, count: d.unitSections.length });
+      const incoming = ((payload.rows || payload.unitSections || []) as AnyObj[]).map(x => ({ ...x }));
+      if (payload.troop !== undefined && incoming.some(x => x.troop !== payload.troop)) return fail('只可儲存所選旅的團資料');
+      d.unitSections = payload.troop !== undefined
+        ? [...(d.unitSections || []).filter(x => x.troop !== payload.troop), ...incoming] : incoming;
+      persistDb(); return ok({ saved: true, count: incoming.length });
     }
 
     // ── 聯絡簿（v4.9.0 姓名自訂） ──

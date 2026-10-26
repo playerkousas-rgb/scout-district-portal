@@ -360,9 +360,9 @@ export const api = {
     callPost('deleteVisit', { token, id }),
   saveUnits: (token: string, units: ScoutUnit[]): Promise<ApiResult<{ saved: boolean; count: number }>> =>
     callPost('saveUnits', { token, units }),
-  /** v4.29.0：整份覆寫 UnitSections（旅→團階層）；需要 visit 卡 edit 權限 */
-  saveUnitSections: (token: string, rows: UnitSection[]): Promise<ApiResult<{ saved: boolean; count: number }>> =>
-    callPost('saveUnitSections', { token, rows }),
+  /** v4.30.0：傳 troop 時只儲存所選旅；省略時相容舊版全表儲存。需要 visit edit。 */
+  saveUnitSections: (token: string, rows: UnitSection[], troop?: string): Promise<ApiResult<{ saved: boolean; count: number }>> =>
+    callPost('saveUnitSections', { token, rows, ...(troop !== undefined ? { troop } : {}) }),
 
   saveAwardTypes: (token: string, types: AwardType[]): Promise<ApiResult<{ saved: boolean; count: number; newColumns: string[] }>> =>
     callPost('saveAwardTypes', { token, types }),

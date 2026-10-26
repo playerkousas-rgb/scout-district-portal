@@ -304,4 +304,47 @@ check('POST rows 與 unitSections 相容別名都可用，GET 不可儲存團資
   assert.strictEqual(denied.ok, false);
 });
 
+check('按旅儲存第82旅五支部，不覆寫其他旅或其自訂欄位', () => {
+  const { ctx, sheets } = buildContext();
+  const token = ctx.makeToken_('dc@x.org', 'DC', 12);
+  const other = { troop: '206', section: 'scout', unitCode: '', meetingTime: '原有時間' };
+  assert.strictEqual(ctx.saveUnitSections_(token, [other]).ok, true);
+  sheets.UnitSections._data[0].push('custom');
+  sheets.UnitSections._data[1].push('保留原有自訂資料');
+  const unchanged = JSON.stringify(sheets.UnitSections._data[1]);
+  const rows = ['gh', 'cub', 'scout', 'venture', 'rover'].map((section, i) => ({
+    troop: '82', section, unitCode: '', meetingTime: `第${i}個時段`, location: `地點${i}`,
+    instagramUrl: `https://example.org/${section}`,
+  }));
+  const req = { action: 'saveUnitSections', token, troop: '82', rows, apiKey: 'us-test-api-key' };
+  const saved = JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(req) } }));
+  assert.strictEqual(saved.ok, true, saved.error);
+  assert.strictEqual(saved.data.count, 5);
+  assert.strictEqual(JSON.stringify(sheets.UnitSections._data[1]), unchanged);
+  const troop = ctx.listDistrictTroops_().data.troops.find(t => t.troop === '82');
+  assert.strictEqual(troop.units.length, 5);
+  assert.strictEqual(new Set(troop.units.map(u => u.meetingTime)).size, 5);
+  assert.strictEqual(new Set(troop.units.map(u => u.instagramUrl)).size, 5);
+  const before = JSON.stringify(sheets.UnitSections._data);
+  assert.strictEqual(ctx.saveUnitSections_(token, [other], '82').ok, false, '拒絕混入其他旅');
+  assert.strictEqual(ctx.saveUnitSections_(token, rows, 'missing').ok, false);
+  assert.strictEqual(JSON.stringify(sheets.UnitSections._data), before);
+  assert.strictEqual(ctx.getVisitBoard_(token).data.unitSectionsScopedSave, true);
+  assert.strictEqual(ctx.saveUnitSections_(token, [], '82').ok, true);
+  assert.strictEqual(JSON.stringify(sheets.UnitSections._data[1]), unchanged);
+});
+
+check('同一支部可分開儲存兩個常規團，各有獨立集會時間', () => {
+  const { ctx } = buildContext();
+  const token = ctx.makeToken_('dc@x.org', 'DC', 12);
+  assert.strictEqual(ctx.saveUnitSections_(token, [
+    { troop: '114', section: 'cub', unitCode: '1', meetingTime: '早上' },
+    { troop: '114', section: 'cub', unitCode: '2', meetingTime: '下午' },
+  ], '114').ok, true);
+  const units = ctx.listDistrictTroops_().data.troops.find(t => t.troop === '114').units;
+  assert.strictEqual(units.length, 2);
+  assert.strictEqual(units[0].meetingTime, '早上');
+  assert.strictEqual(units[1].meetingTime, '下午');
+});
+
 console.log('\n✅ 全部 ' + pass + ' 項測試通過');

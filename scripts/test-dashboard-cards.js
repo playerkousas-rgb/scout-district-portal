@@ -30,21 +30,15 @@ assert.equal(directory.title, '旅團資料');
 assert.equal(directory.url, '/visit?tab=units');
 assert.equal(directory.access, 'edit');
 assert.equal(isDashboardShortcut(directory), true, '捷徑不能使用 Sheet 卡片顯示開關');
-const official = result.find(c => c.cardId === 'ymisWebsiteShortcut');
-assert.equal(official.type, 'jump');
-assert.equal(official.url, YMIS_LOGIN_URL);
-assert.equal(official.access, 'view');
-assert.ok(!result.some(c => c.cardId === 'ymis'), '不能偽造 YMIS 帳密權限');
-assert.equal(isDashboardShortcut(official), true);
-assert.deepEqual(result.map(c => c.cardId), ['visit', 'troopDirectoryShortcut', 'ymisWebsiteShortcut']);
-assert.deepEqual(dashboardCards(result, superUser), result, '不重複加入捷徑');
-console.log('✓ 超管看見旅團資料及官方 YMIS 入口，不會新增帳密權限');
+assert.ok(!result.some(c => c.cardId === 'ymisWebsiteShortcut'), '不再新增直接外連 YMIS 卡');
+assert.ok(!result.some(c => c.cardId === 'ymis'), '不偽造後台未授權的卡片');
+assert.deepEqual(dashboardCards(result, superUser), result);
+const actualYmis = dashboardCards([{ ...ymis, type: 'jump', url: YMIS_LOGIN_URL }], superUser)[0];
+assert.equal(actualYmis.type, 'builtin');
+assert.equal(actualYmis.url, '/ymis', '既有 YMIS 卡必須開舊版帳密內頁');
+assert.equal(actualYmis.access, 'view');
+console.log('✓ 移除官方網站捷徑；已獲授權的 YMIS 卡回到既有帳密內頁');
 
-for (const session of [dc, { role: 'STAFF', level: 4 }, { role: 'LEADER', level: 5 }]) {
-  assert.ok(!dashboardCards([visit], session).some(c => c.cardId === 'ymisWebsiteShortcut'));
-}
-assert.equal(dashboardCards([ymis], superUser).length, 1, '已有真正 YMIS 卡時保留後台結果');
-assert.equal(dashboardCards([ymis], superUser)[0], ymis);
 assert.ok(!dashboardCards([], dc).some(c => c.cardId === 'troopDirectoryShortcut'));
 assert.ok(!dashboardCards([{ ...visit, enabled: false }], superUser).some(c => c.cardId === 'troopDirectoryShortcut'));
 const readonly = dashboardCards([{ ...visit, access: 'view' }], dc).find(c => isDashboardShortcut(c));

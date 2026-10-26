@@ -9,7 +9,7 @@ const typeLabel: Record<string, string> = { builtin: '內建', jump: '跳轉', r
 export default function CardItem({
   card, role, canToggle = false, toggling = false, onToggle,
   canReorder = false, first = false, last = false,
-  onMoveUp, onMoveDown, dragProps,
+  onMoveUp, onMoveDown, onMoveTo, position, total, dragProps,
 }: {
   card: CardDef; role: string;
   /** 超管：顯示「開啟／隱藏」開關 */
@@ -22,6 +22,9 @@ export default function CardItem({
   last?: boolean;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  onMoveTo?: (position: number) => void;
+  position?: number;
+  total?: number;
   dragProps?: React.HTMLAttributes<HTMLDivElement> & { draggable?: boolean; onDragStart?: (e: React.DragEvent) => void; onDragOver?: (e: React.DragEvent) => void; onDrop?: (e: React.DragEvent) => void; onDragEnd?: (e: React.DragEvent) => void };
 }) {
   const router = useRouter();
@@ -60,7 +63,7 @@ export default function CardItem({
       onClick={handleClick}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick(); } }}
+      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleClick(); } }}
       title={title}
       {...(canReorder ? (dragProps || {}) : {})}
     >
@@ -75,7 +78,10 @@ export default function CardItem({
           {isView ? '👁 可看' : '✏️ 可管理'}{card.embed && card.type !== 'builtin' ? ' · 無感' : ''}
         </span>
         {canReorder && (
-          <span className="card-move" onClick={(e) => e.stopPropagation()}>
+          <span className="card-move" onClick={(e) => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+            {total && <select value={position} aria-label={`${card.title} 的排列位置`} onChange={e => onMoveTo?.(Number(e.target.value))}>
+              {Array.from({ length: total }, (_, i) => <option key={i} value={i}>第 {i + 1} 位</option>)}
+            </select>}
             <button type="button" className="move-btn" disabled={first} aria-label="上移" title="上移" onClick={onMoveUp}>▲</button>
             <button type="button" className="move-btn" disabled={last} aria-label="下移" title="下移" onClick={onMoveDown}>▼</button>
           </span>
