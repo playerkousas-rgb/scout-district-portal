@@ -5,6 +5,16 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.25.1 — 🔑 重用過期 TTLock 密碼並修正批核搬色</h3>
+        <p>處理借場上線後發現的鎖匙重複、密碼撞碼及 Teamup 重複事件問題。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.25.1</a></p>
+        <ul>
+          <li>🔁 TTLock 先查現有鍵盤密碼：相同密碼已過期或有效期不重疊時，更新原有 keyboardPwdId，不另開新 key。</li>
+          <li>🔢 同碼仍在申請時段使用時按頭4 → 尾4 → +1 順序選碼；不再因舊 key 記錄而錯誤跳過尾4。</li>
+          <li>🔵→🔴 批核直接更新原 Teamup 事件；更新失敗只回報原因，不再另建紅色重複事件。</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.25.0 — 🏕 借場活動資料寫入 Teamup 必填自訂欄位</h3>
         <p>成員系統借場表新增活動名稱及參加人數；GS 會將申請資料保存到 <code>VenueBookings</code>，並於藍色申請事件填入 Teamup 必填自訂欄位。</p>
         <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.25.0</a></p>

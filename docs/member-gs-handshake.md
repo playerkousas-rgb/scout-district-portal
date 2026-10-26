@@ -384,10 +384,10 @@ member-portal 借場表提交
 健康檢查 `?action=getHealthCheck`（免 Key）會回：
 
 ```json
-{ "version": "4.25.0", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
+{ "version": "4.25.1", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
 ```
 
-確認改動已部署後，health check 應回傳 `version: "4.25.0"`。
+確認改動已部署後，health check 應回傳 `version: "4.25.1"`。
 
 ## 部署
 
