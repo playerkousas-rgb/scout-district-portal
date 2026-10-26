@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { loadSession, saveSession, clearSession } from '@/lib/session';
 import { useDistrict } from '@/lib/useDistrict';
 import type { UserSession, CardDef } from '@/lib/types';
+import { dashboardCards, isDashboardShortcut } from '@/lib/dashboardCards';
 import { canManageAccounts } from '@/lib/accountRoles';
 import { canDelegate, isSuper, levelLabel, levelOf } from '@/lib/levels';
 import { applyCardOrder, clearCardOrder, loadCardOrder, moveInList, saveCardOrder, type CardOrderMap } from '@/lib/cardOrder';
@@ -93,7 +94,7 @@ export default function HomePage() {
       const r = await api.getCards(s.token);
       // 後台已過濾：隱藏卡片只會回傳俾超管（enabled=false 用作標示）
       if (r.ok && r.data) {
-        const defaults = r.data.slice().sort((a, b) => a.order - b.order);
+        const defaults = dashboardCards(r.data, s);
         const saved = loadCardOrder(districtCode || '', s.email || '');
         setCardOrder(saved);
         setCards(applyCardOrder(defaults, saved));
@@ -235,7 +236,7 @@ export default function HomePage() {
     setCardBusy(card.cardId); setError('');
     try {
       const r = await api.setCardEnabled(session.token, card.cardId, !card.enabled);
-      if (r.ok) setCards(prev => prev.map(c => c.cardId === card.cardId ? { ...c, enabled: !card.enabled } : c));
+      if (r.ok) await loadCards(session);
       else setError(r.error || '操作失敗');
     } catch { setError('連線失敗'); } finally { setCardBusy(''); }
   }
@@ -422,7 +423,7 @@ export default function HomePage() {
             {cards.map((c, i) => (
               <CardItem
                 key={c.cardId} card={c} role={session.role}
-                canToggle={superUser}
+                canToggle={superUser && !isDashboardShortcut(c)}
                 toggling={cardBusy === c.cardId}
                 onToggle={() => toggleCardEnabled(c)}
                 canReorder

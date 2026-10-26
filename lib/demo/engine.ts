@@ -518,7 +518,10 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       return ok({
         from, to, today: today(),
         districtName: '筲箕灣區',
-        units: d.units, visits: d.visits,
+        units: d.units,
+        unitSectionsReady: true,
+        unitSections: d.unitSections || [],
+        visits: d.visits,
         years: [y - 2, y - 1, y, y + 1],
         sections: [
           { key: 'gh', label: '小童軍' }, { key: 'cub', label: '幼童軍' }, { key: 'scout', label: '童軍' },
@@ -571,6 +574,11 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       if (!u) return fail('未登入或登入已過期（示範版）。');
       d.units = ((payload.units || []) as AnyObj[]).map(x => ({ ...x }));
       persistDb(); return ok({ saved: true, count: d.units.length });
+    }
+    case 'saveUnitSections': {
+      if (!u) return fail('未登入或登入已過期（示範版）。');
+      d.unitSections = ((payload.rows || payload.unitSections || []) as AnyObj[]).map(x => ({ ...x }));
+      persistDb(); return ok({ saved: true, count: d.unitSections.length });
     }
 
     // ── 聯絡簿（v4.9.0 姓名自訂） ──

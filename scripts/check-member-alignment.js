@@ -198,6 +198,14 @@ function main() {
   console.log('\n[5] level 詞彙');
   problems += levelCheck(dir);
 
+  console.log('\n[6] 旅→團 v1.3 巢狀欄位（實際 GS 回應經成員端 sanitizer）');
+  try {
+    require('./test-member-troop-contract.js').checkMemberTroopContract(dir);
+  } catch (error) {
+    problems++;
+    console.log('  ❌ ' + error.message);
+  }
+
   console.log('\n' + (problems ? `⚠️ 有 ${problems} 項要處理` : '🎉 完全對齊'));
   process.exit(problems ? 1 : 0);
 }

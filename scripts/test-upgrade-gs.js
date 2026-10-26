@@ -663,6 +663,29 @@ check('整本全新空白 Sheet 仍可初始化並只在首次建立時種初始
   }
 });
 
+check('舊 UnitSections 自訂欄位及既有集會資料升級保留，重跑不重複補欄', () => {
+  const previous = sheets.UnitSections;
+  sheets.UnitSections = makeSheet('UnitSections', [
+    ['troop', 'location', 'custom'], ['206', '既有地點必須保留', '自訂資料'],
+  ]);
+  try {
+    guardedSetup();
+    assert.deepStrictEqual(sheets.UnitSections._data[0].slice(0, 3), ['troop', 'location', 'custom']);
+    assert.deepStrictEqual(sheets.UnitSections._data[1].slice(0, 3), ['206', '既有地點必須保留', '自訂資料']);
+    const after = JSON.stringify(sheets.UnitSections._data);
+    guardedSetup();
+    assert.strictEqual(JSON.stringify(sheets.UnitSections._data), after);
+  } finally { sheets.UnitSections = previous; }
+});
+
+check('現行發布快照與開發源一致，原 v4.29.0 凍結快照保留', () => {
+  const current = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.29.1.gs'), 'utf8');
+  assert.strictEqual(current, code);
+  const frozen = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.29.0.gs'), 'utf8');
+  assert.ok(frozen.includes("version: '4.29.0'"));
+  assert.ok(code.includes("version: '4.29.1'"));
+});
+
 check('前端可下載的完整 Code.gs 與後台原始檔完全一致', () => {
   const downloadable = fs.readFileSync(path.join(__dirname, '..', 'public', 'downloads', 'Code.gs.txt'), 'utf8');
   assert.ok(downloadable === code, '如更新 gs/Code.gs，記得同步更新 public/downloads/Code.gs.txt');

@@ -9,7 +9,7 @@ import type {
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
   CourseLink, Venue, VenueLockInfo, VenueLockConfigStatus, VenueLockConfigInput, VenueApproveResult, BackendHealthInfo,
   VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
-  Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
+  Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit, UnitSection,
   Circular, CircularsBoard, CircularStatus, DistrictFeedback, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
   CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec, HubCoursesResult,
   DistrictTroopDirectory,
@@ -360,6 +360,9 @@ export const api = {
     callPost('deleteVisit', { token, id }),
   saveUnits: (token: string, units: ScoutUnit[]): Promise<ApiResult<{ saved: boolean; count: number }>> =>
     callPost('saveUnits', { token, units }),
+  /** v4.29.0：整份覆寫 UnitSections（旅→團階層）；需要 visit 卡 edit 權限 */
+  saveUnitSections: (token: string, rows: UnitSection[]): Promise<ApiResult<{ saved: boolean; count: number }>> =>
+    callPost('saveUnitSections', { token, rows }),
 
   saveAwardTypes: (token: string, types: AwardType[]): Promise<ApiResult<{ saved: boolean; count: number; newColumns: string[] }>> =>
     callPost('saveAwardTypes', { token, types }),

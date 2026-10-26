@@ -149,6 +149,24 @@ check('getVisitBoard：ADC_SCOUT defaultSection=scout；旅在冊＋五支部', 
   assert.ok(b.data.units.length >= 9);
   assert.ok(b.data.sections.length === 5);
 });
+check('v4.29.0 團階層：getVisitBoard 帶 unitSectionsReady＋示範列；saveUnitSections 整份覆寫', () => {
+  const b = demoCall('getVisitBoard', { token: T.adc }, 'GET');
+  assert.strictEqual(b.data.unitSectionsReady, true);
+  assert.strictEqual(b.data.unitSections.length, 3, '示範庫有 3 列（含 60 非公開）');
+  const scout206 = b.data.unitSections.find((x: any) => x.troop === '206' && x.section === 'scout');
+  assert.ok(scout206 && /禮堂/.test(scout206.location));
+  const save = demoCall('saveUnitSections', {
+    token: T.adc,
+    rows: [{ troop: '17', section: 'cub', unitCode: '', meetingTime: '示範時間', location: '示範地點',
+      instagramUrl: '', facebookUrl: '', websiteUrl: '', active: true, publicVisible: true }],
+  }, 'POST');
+  assert.ok(save.ok);
+  assert.strictEqual(save.data.count, 1);
+  const after = demoCall('getVisitBoard', { token: T.adc }, 'GET');
+  assert.strictEqual(after.data.unitSections.length, 1);
+  assert.strictEqual(after.data.unitSections[0].troop, '17');
+  resetDemoData();
+});
 
 // ── 6. 聯絡簿 ──
 check('聯絡簿：改姓名 → round-trip；留空還原', () => {

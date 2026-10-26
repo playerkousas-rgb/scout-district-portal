@@ -696,6 +696,34 @@ export interface DistrictTroopPublic {
   instagramUrl: string;
   facebookUrl: string;
   websiteUrl: string;
+  /** v4.29.0：五支部團數原始字串（只含實際有開團嘅 key），例如 { scout: '1+A1' } */
+  sectionCounts?: Partial<Record<VisitSection, string>>;
+  /** v4.29.0：旗下各團（支部單位）；未維護時後台按團數自動產骨架 */
+  units?: DistrictUnitPublic[];
+}
+
+/** v4.29.0 一個團（支部單位）嘅公開詳情；對應 GS UnitSections 表一列嘅公開切面 */
+export interface DistrictUnitPublic {
+  section: VisitSection | '';
+  /** 常規團為 ''；A1／S1＝空／海童軍團 */
+  unitCode: string;
+  label: string;
+  meetingTime: string;
+  location: string;
+  instagramUrl: string;
+  facebookUrl: string;
+  websiteUrl: string;
+}
+
+/**
+ * UnitSections 表維護列（管理端用，含內部旗標）。
+ * label 唔係 Sheet 欄位（由後台 publicUnitLabel_ 推算），所以係可選。
+ */
+export interface UnitSection extends Omit<DistrictUnitPublic, 'label'> {
+  troop: string;
+  label?: string;
+  active: boolean;
+  publicVisible: boolean;
 }
 
 export interface DistrictTroopDirectory {
@@ -746,6 +774,8 @@ export interface VisitBoard {
   today: string;
   districtName?: string;    // 區會名（Config districtName，總會匯報表頭用）
   publicTroopFieldsReady?: boolean; // GS v4.28.0 Units 公開資料欄已補齊
+  unitSectionsReady?: boolean;      // GS v4.29.0 UnitSections 表已補建
+  unitSections?: UnitSection[];     // 全部維護列（含停用／非公開，管理端專用）
   units: ScoutUnit[];
   visits: Visit[];
   years: number[];
