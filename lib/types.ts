@@ -355,6 +355,7 @@ export interface VenueLockConfigStatus {
   teamupPendingSub: string;
   teamupApprovedSub: string;
   teamupRejectedSub: string;
+  teamupAttendeeFieldSet?: boolean;
   teamupReady: boolean;
   notifyStaffEmail: string;
   venueCount: number;
@@ -409,6 +410,7 @@ export interface BackendHealthInfo {
   district?: string;
   districtCode?: string;
   teamupConfigured?: boolean;
+  teamupAttendeeFieldSet?: boolean;
   ttlockConfigured?: boolean;
   lockIdSet?: boolean;
   ttlockDisabled?: boolean;
@@ -421,6 +423,8 @@ export interface VenueBooking {
   venueId?: string;
   venueName?: string;
   purpose?: string;
+  activityName?: string;
+  attendeeCount?: number | string;
   startDate?: string;
   endDate?: string;
   name?: string;

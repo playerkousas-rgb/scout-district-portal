@@ -28,8 +28,10 @@
 |---|---|---|
 | Teamup | `TEAMUP_API_KEY` | 兼容舊欄名 `teamupApiKey`（舊有值照讀） |
 | Teamup | `TEAMUP_CALENDAR_KEY` | 兼容舊 `teamupCalendarId` |
+| Teamup | `TEAMUP_PENDING_SUBCAL_ID` | 藍色（申請中）子日曆 ID |
 | Teamup | `TEAMUP_APPROVED_SUBCAL_ID` | 「確認借用區總部」子日曆 ID；兼容舊 `teamupApprovedSubId` |
 | Teamup | `TEAMUP_REJECTED_SUBCAL_ID` | 選填；兼容舊 `teamupRejectedSubId` |
+| Teamup | `TEAMUP_FIELD_ATTENDEE_KEY` | 參加人數 custom field key；目前 API 回應為 `1`，Config 填 `1` |
 | TTLock | `ttlockClientId` / `ttlockClientSecret` | 通通鎖開發者應用 |
 | TTLock | `ttlockUsername` / `ttlockPassword` | App 登入帳密 |
 | TTLock | `ttlockLockId` | 大門鎖 Lock ID |
@@ -39,7 +41,7 @@
 | 電郵 | `notifyFrom` | 選填：寄件人顯示名稱，不是 Gmail 地址 |
 | 電郵 | `approverEmail` | 不用填；現行 Code.gs 沒有使用 |
 
-> 由 v3.0 升上嚟嘅區：舊 `teamup*` 欄名照用，程式自動 fallback，唔使搬。
+> 由 v3.0 升上嚟嘅區：舊 `teamup*` 欄名照用，程式自動 fallback，唔使搬。領袖姓名／職位使用內建 `who` 欄位；參加人數使用 `custom["1"]`，Config 填 `TEAMUP_FIELD_ATTENDEE_KEY=1`。成員系統不接觸 Teamup API Token。
 
 ---
 

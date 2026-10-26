@@ -3,7 +3,7 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
-> **現時正式共用後台維持可用的 v4.18.0。** 倉庫內 v4.19.1 `gs/Code.gs` 登入另要求 `PORTAL_TOKEN_SECRET`，未完成遷移之前**唔可以覆蓋正式 4.18.0**。區總部房間讀取改用 Vercel 公開唯讀 Teamup ICS，**不需更動 GS／Users／Sheet／密碼**，見[房間設定](docs/venue-booking-flow.md)。下方「全新部署」步驟不適用於今次房間修正。
+> **現時正式共用後台維持可用的 v4.18.0。** 倉庫內 v4.25.0 `gs/Code.gs` 登入另要求 `PORTAL_TOKEN_SECRET`，未完成遷移之前**唔可以覆蓋正式 4.18.0**。區總部房間讀取改用 Vercel 公開唯讀 Teamup ICS，**不需更動 GS／Users／Sheet／密碼**，見[房間設定](docs/venue-booking-flow.md)。下方「全新部署」步驟不適用於今次房間修正。
 >
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
@@ -42,6 +42,7 @@
 | Teamup | `TEAMUP_PENDING_SUBCAL_ID` | 「申請中」藍色子日曆 ID |
 | Teamup | `TEAMUP_APPROVED_SUBCAL_ID` | 「確認借用區總部」子日曆 ID |
 | Teamup | `TEAMUP_REJECTED_SUBCAL_ID` | 選填（拒絕子日曆） |
+| Teamup | `TEAMUP_FIELD_ATTENDEE_KEY` | 參加人數自訂欄位 key；目前日曆 API 回應顯示為 `1` |
 | 電子鎖 | `SCIENER_CLIENT_ID` / `SCIENER_CLIENT_SECRET` | TTLock／Sciener 開放平台 App ID & Secret（兼容 `ttlockClientId` / `ttlockClientSecret`） |
 | 電子鎖 | `SCIENER_USERNAME` / `SCIENER_PASSWORD` | TTLock／Sciener 手機 App 管鎖帳號及密碼（兼容 `ttlockUsername` / `ttlockPassword`） |
 | 電子鎖 | `SCIENER_LOCK_ID` | 大門鎖數字 Lock ID（可喺 `/venue-regs` 點「測試讀取門鎖」後一鍵綁定） |
@@ -49,6 +50,8 @@
 | 電子鎖 | `PWD_MODE` | 預設 `phone4`（電話頭 4 位；撞碼先試電話尾 4，再逐個 +1）；可選 `phone4tail` / `random` |
 | 電子鎖 | `ttlockDisabled` | 設 `TRUE` 時跳過實體寫鎖，改用模擬密碼測試流程 |
 | 電郵 | `notifyFrom` | 寄件人名稱（預設用區名） |
+
+領袖姓名及職位使用 Teamup 內建 `who` 欄位；參加人數使用 `custom` 內的欄位 key（目前日曆事件回應為 `"1"`，Config 填 `1`）。成員系統不需要 Teamup API Token。`setupSheets()` 只追加缺少欄位／Config key，不會清除既有資料。
 
 > 唔記得 Key 喺邊度攞 → 睇 [`docs/keys-checklist.md`](docs/keys-checklist.md) 逐條倒返出嚟＋驗證。
 > ℹ️ 借場/借物資規則（VENUE_RULES_URL / VENUE_TERMS_URL / STOCK_RULES_URL）已改由成員系統內建，後台唔使再填。
@@ -59,11 +62,11 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.24.2"` 即代表新版後台已上線。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.25.0"` 即代表新版後台已上線。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
-  `venueId, name, phone, email, troop, position, purpose, startDate, endDate, agreeRules`。Teamup event ID 由 GS 後台建立及回傳，成員端毋須傳入。
+  `venueId, name, phone, email, troop, position, purpose, activityName, attendeeCount, startDate, endDate, agreeRules`。`activityName` 必填（≤120 字）；`attendeeCount` 必填（1–9999 正整數）；`agreeRules` 必須為 `true`。Teamup event ID 由 GS 後台建立及回傳，成員端毋須傳入。
 - ⚠️ `email` 選填，但**冇填就收唔到批准密碼電郵**。
 
 ### 第 6 步：端到端測試
@@ -72,7 +75,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.19.1"` 即代表用緊呢次更新嘅後台。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.25.0"` 即代表用緊倉庫最新版後台。
 
 ---
 
@@ -217,7 +220,7 @@
 - **地域房間**：17／18／19 樓公開 Google Calendar ICS，沿用原本逐間房／打通房計算及 3 分鐘快取。
 - **區總部**：只保留同地域房間並列的**原有月曆格仔、逐個地點的逐日時段及今日總覽**，不另開 Teamup 月曆窗。今日「有冇已 BOOK」由 Vercel 唯讀紅色「確認借用區總部」iCalendar 子日曆判斷，包括手動加入的確認事件，**不計藍色申請中**，亦唔靠借場表批准狀態。JSON 僅含匿名時段，唔回傳人名、備註、入場密碼或原始 Teamup ID；來源讀不到會顯示警告，**唔代表區總部空置**。
 
-**正式啟用（維持可登入的 GS v4.18.0）**：只部署此 Next.js/Vercel 改動；**唔使**更新 Apps Script、執行 `setupSheets()`、改 Sheet 或任何登入密碼。原有 `PORTAL_SKW_APIKEY` 照舊，網址優先讀共用 Config `TEAMUP_BOOKING_URL`（透過 `getPublicInfo.teamupBookingUrl`），留空先沿用成員系統公開後備網址；本倉唔硬編碼公開分享連結。已按用戶提供的現有 Config 數字確認**紅色 11188257**、藍色 11188256，直接讀紅色 feed；預設**唔使加 Vercel env**。日後 ID 變更才可選用 `TEAMUP_APPROVED_SUB_ID` 覆蓋，但會驗證來源屬紅色日曆。**不用 Teamup API Token**。不要將本倉 v4.19.1 GS 覆蓋正式 4.18.0（未設 `PORTAL_TOKEN_SECRET` 會阻擋登入）。詳細對照見 [`docs/venue-booking-flow.md`](docs/venue-booking-flow.md)。
+**正式啟用（維持可登入的 GS v4.18.0）**：只部署此 Next.js/Vercel 改動；**唔使**更新 Apps Script、執行 `setupSheets()`、改 Sheet 或任何登入密碼。原有 `PORTAL_SKW_APIKEY` 照舊，網址優先讀共用 Config `TEAMUP_BOOKING_URL`（透過 `getPublicInfo.teamupBookingUrl`），留空先沿用成員系統公開後備網址；本倉唔硬編碼公開分享連結。已按用戶提供的現有 Config 數字確認**紅色 11188257**、藍色 11188256，直接讀紅色 feed；預設**唔使加 Vercel env**。日後 ID 變更才可選用 `TEAMUP_APPROVED_SUB_ID` 覆蓋，但會驗證來源屬紅色日曆。**不用 Teamup API Token**。不要將本倉 v4.25.0 GS 覆蓋正式 4.18.0（未設 `PORTAL_TOKEN_SECRET` 會阻擋登入）。詳細對照見 [`docs/venue-booking-flow.md`](docs/venue-booking-flow.md)。
 
 本地示範 `?demo=1` 有匿名示範事件（不嵌入真日曆）；測試：`node --experimental-strip-types scripts/test-teamup-hq-ics.ts`、`node --experimental-strip-types scripts/test-room-card-compat.ts`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node --experimental-strip-types scripts/test-demo-engine.ts`、`npm run build`。2026-10-20 已獨立取得用戶公開連結的**紅色單一子日曆 ICS**，確認類別及每月第一個星期五重複規則；測試加入相同格式的匿名樣本。**Vercel 預覽受登入保護，尚需部署後核對頁面真實回應**；不能把來源測試當成正式畫面已驗收。
 
@@ -343,7 +346,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 | 檔案 | 用途 |
 |---|---|
-| `gs/Code.gs` | 完整統一後台 v4.19.1（已用的 Sheet 請先依只追加升級指引備份） |
+| `gs/Code.gs` | 完整統一後台 v4.25.0（已用的 Sheet 請先依只追加升級指引備份） |
 | `public/downloads/Code.gs.txt` | 與 `gs/Code.gs` 同一份內容，供網站「更新／下載」直接下載 |
 | `gs/Code.gs.course.js` | 每個訓練班嘅收表 Script 模板 |
 | `app/api/proxy/route.ts` | 前端 → Apps Script 嘅代理（API Key 唔出前端） |

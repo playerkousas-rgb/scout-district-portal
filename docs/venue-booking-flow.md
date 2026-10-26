@@ -33,7 +33,8 @@
 | `TEAMUP_CALENDAR_KEY` | Teamup 分享金鑰（形如 `ks...`，唔係 c/ 開頭）（兼容舊 `teamupCalendarId`） |
 | `TEAMUP_APPROVED_SUBCAL_ID` | 「確認借用區總部」子日曆 ID（批准後建事件／轉色）（兼容舊 `teamupApprovedSubId`） |
 | `TEAMUP_REJECTED_SUBCAL_ID` | （選填）拒絕子日曆 ID（兼容舊 `teamupRejectedSubId`） |
-| `TEAMUP_PENDING_SUBCAL_ID` | （選填）藍色（申請中）子日曆 |
+| `TEAMUP_PENDING_SUBCAL_ID` | 藍色（申請中）子日曆 |
+| `TEAMUP_FIELD_ATTENDEE_KEY` | 參加人數 custom field key；此日曆事件 JSON 顯示為 `"1"`，Config 填 `1` |
 | `ttlockClientId` / `ttlockClientSecret` | 通通鎖 TTLock 開發者應用 |
 | `ttlockUsername` / `ttlockPassword` | TTLock App 登入帳密 |
 | `ttlockLockId` | 大門鎖 Lock ID |
@@ -51,11 +52,12 @@
 - **Vercel 新環境變數預設毋須加。**用戶已確認現有 Config：`TEAMUP_APPROVED_SUBCAL_ID=11188257` 為紅色已批，`TEAMUP_PENDING_SUBCAL_ID=11188256` 為藍色申請中（公開子日曆 ID，**非**私人 Token）。程式使用已核對的紅色 ID 預設值，直接讀紅色專屬 ICS，並再次核對紅色 `CATEGORIES`／日曆名稱，避免用錯藍色 ID 時將其誤作空置；空的紅色 feed 亦可正確顯示未見借用。**日後**紅色 ID 改變，才可選 Vercel `TEAMUP_APPROVED_SUB_ID` 覆蓋。已存在的 `PORTAL_SKW_APIKEY` 用來讀 `getPublicInfo.teamupBookingUrl`，不新增／更動；`TEAMUP_API_KEY` 不須複製到 Vercel，公開分享網址亦不寫入倉庫。公開分享連結應有合適查閱權限；來源 iCalendar 可能有同步延遲，只涵蓋過去約 6 個月至未來約 12 個月，超出範圍會標示不可用。
 - `/api/rooms/hq` 上游固定 `ics.teamup.com`，禁跳轉並限制檔案大小；不接受訪客提供 URL，亦不返回原始 ICS／Token／名稱／電話／備註／入場密碼／Teamup UID，只回匿名時段。區系統前端收到舊版已知預設卡名時，僅在顯示層改成「區總部及地域房間使用情況」；**不改 Cards 表自訂名稱或原有儲存格**。舊後台 `getCards_` 若因個別帳戶 `cards` 白名單漏掉 `rooms`，前端只於成功登入、SKW 區補出查閱卡；借場審批 `venueReg` 仍受原 `canVenue` 限制。
 - 「月曆」及「逐個地點」保留原有地域房間與區總部已批時段格仔／逐日清單，**不額外嵌入 Teamup 月曆窗或另設新視窗按鈕**；「今日總覽」只用紅色 ICS 判斷區總部有冇已 BOOK，唔計藍色申請中。來源失敗顯示不可用，不把缺資料說成空置。「地域原版日曆」維持只顯示地域房間。🎭 示範模式使用獨立匿名模擬事件。
-- **驗證與部署**：只部署此 Next.js/Vercel 改動；**不要因房間功能貼上本倉 v4.19.1 `gs/Code.gs`**（該版本會強制 `PORTAL_TOKEN_SECRET`，未設時堵塞正式 v4.18.0 全部登入）。2026-10-20 已從用戶提供的公開網址取得紅色 11188257 ICS，核對名稱及已批事件；其中存在 `RRULE:FREQ=MONTHLY;BYDAY=1FR`，故已補足 parser 的每月第 N 個星期重複規則及匿名樣本測試。測試：`node --experimental-strip-types scripts/test-teamup-hq-ics.ts`、`node --experimental-strip-types scripts/test-room-card-compat.ts`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node --experimental-strip-types scripts/test-demo-engine.ts`、`npm run build`。**Vercel PR 預覽有登入保護，仍要在部署後核對正式頁面的真實 Teamup 事件與今日狀態，未驗收不可聲稱正式畫面已讀通。**
+- **驗證與部署**：只部署此 Next.js/Vercel 改動；**不要因房間功能貼上本倉 v4.25.0 `gs/Code.gs`**（該版本會強制 `PORTAL_TOKEN_SECRET`，未設時堵塞正式 v4.18.0 全部登入）。2026-10-20 已從用戶提供的公開網址取得紅色 11188257 ICS，核對名稱及已批事件；其中存在 `RRULE:FREQ=MONTHLY;BYDAY=1FR`，故已補足 parser 的每月第 N 個星期重複規則及匿名樣本測試。測試：`node --experimental-strip-types scripts/test-teamup-hq-ics.ts`、`node --experimental-strip-types scripts/test-room-card-compat.ts`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node --experimental-strip-types scripts/test-demo-engine.ts`、`npm run build`。**Vercel PR 預覽有登入保護，仍要在部署後核對正式頁面的真實 Teamup 事件與今日狀態，未驗收不可聲稱正式畫面已讀通。**
 
 ## 成員系統 (member-portal) 要接嘅 action
 申請表呼叫後台公開 `submitVenueRequest`（經 `/api/proxy` 帶 API Key），欄位：
-`venueId, name, phone, email, troop, position, purpose, startDate, endDate, agreeRules`。
+`venueId, name, phone, email, troop, position, purpose, activityName, attendeeCount, startDate, endDate, agreeRules`。
+`activityName` 必填（最多 120 字）；`attendeeCount` 必須為 1–9999 正整數；`agreeRules` 必須為 `true`。GS 會儲存兩欄，並將姓名＋職位寫入 Teamup 內建 `who` 欄位、參加人數寫入 `custom["1"]`。Config 的 `TEAMUP_FIELD_ATTENDEE_KEY` 填 `1`；**不可把 `TEAMUP_API_KEY` 傳給成員系統**。
 `teamupEventId` 由 GS 建立藍色事件後回傳，成員端不應自行指定。電郵選填，但**有填先會收到批准/拒絕通知同入場密碼**。
 
 ## 呢個 repo 檔案

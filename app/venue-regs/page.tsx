@@ -31,7 +31,8 @@ const PWD_MODE_LABELS: Record<string, string> = {
 };
 
 const EMPTY_VENUE: Venue = { venueId: '', name: '', location: '', capacity: '', note: '', scienerLockId: '', active: 'TRUE' };
-const EMPTY_BORROW = { venueId: '', name: '', phone: '', email: '', troop: '', purpose: '', startDate: '', endDate: '' };
+const EMPTY_BORROW = { venueId: '', name: '', position: '', phone: '', email: '', troop: '', purpose: '', activityName: '', attendeeCount: '', startDate: '', endDate: '', agreeRules: false };
+const EMPTY_EDIT = { venueId: '', name: '', phone: '', email: '', troop: '', purpose: '', startDate: '', endDate: '' };
 const EMPTY_CFG_FORM: VenueLockConfigInput = {
   clientId: '',
   clientSecret: '',
@@ -100,7 +101,7 @@ export default function VenueRegsPage() {
   const [showBorrow, setShowBorrow] = useState(false);
   const [borrow, setBorrow] = useState({ ...EMPTY_BORROW });
   const [editId, setEditId] = useState('');
-  const [edit, setEdit] = useState({ ...EMPTY_BORROW });
+  const [edit, setEdit] = useState({ ...EMPTY_EDIT });
 
   function applyCfgStatus(st: VenueLockConfigStatus) {
     setCfgStatus(st);
@@ -300,8 +301,10 @@ export default function VenueRegsPage() {
 
   async function createBorrow() {
     if (!session) return;
-    if (!borrow.venueId || !borrow.name.trim() || !borrow.phone.trim() || !borrow.startDate || !borrow.endDate) {
-      setError('借用：場地、姓名、電話、起訖時間必填');
+    if (!borrow.venueId || !borrow.name.trim() || !borrow.phone.trim() || !borrow.activityName.trim()
+      || !Number.isInteger(Number(borrow.attendeeCount)) || Number(borrow.attendeeCount) < 1 || Number(borrow.attendeeCount) > 9999
+      || !borrow.startDate || !borrow.endDate || !borrow.agreeRules) {
+      setError('借用：場地、姓名、電話、活動名稱、1 至 9999 的參加人數、起訖時間及同意守則必填');
       return;
     }
     setBusy(true);
@@ -310,13 +313,16 @@ export default function VenueRegsPage() {
     const r = await api.submitVenueRequest({
       venueId: borrow.venueId,
       name: borrow.name.trim(),
+      position: borrow.position.trim(),
+      activityName: borrow.activityName.trim(),
+      attendeeCount: borrow.attendeeCount,
+      agreeRules: borrow.agreeRules ? 'TRUE' : '',
       phone: borrow.phone.trim(),
       email: borrow.email.trim(),
       troop: borrow.troop.trim(),
       purpose: borrow.purpose.trim() || '區職員代借',
       startDate: borrow.startDate,
       endDate: borrow.endDate,
-      agreeRules: 'TRUE',
     });
     setBusy(false);
     if (r.ok) {
@@ -876,12 +882,19 @@ export default function VenueRegsPage() {
               {venues.map(v => <option key={v.venueId} value={v.venueId}>{v.name}</option>)}
             </select>
             <input placeholder="姓名 *" value={borrow.name} onChange={e => setBorrow({ ...borrow, name: e.target.value })} />
+            <input placeholder="職位" value={borrow.position} onChange={e => setBorrow({ ...borrow, position: e.target.value })} />
             <input placeholder="電話 *" value={borrow.phone} onChange={e => setBorrow({ ...borrow, phone: e.target.value })} />
             <input placeholder="電郵" value={borrow.email} onChange={e => setBorrow({ ...borrow, email: e.target.value })} />
             <input placeholder="旅團" value={borrow.troop} onChange={e => setBorrow({ ...borrow, troop: e.target.value })} />
+            <input placeholder="活動名稱 *" maxLength={120} value={borrow.activityName} onChange={e => setBorrow({ ...borrow, activityName: e.target.value })} />
+            <input placeholder="參加人數 *" type="number" min={1} max={9999} step={1} value={borrow.attendeeCount} onChange={e => setBorrow({ ...borrow, attendeeCount: e.target.value })} />
             <input placeholder="用途" value={borrow.purpose} onChange={e => setBorrow({ ...borrow, purpose: e.target.value })} />
             <input type="datetime-local" value={borrow.startDate} onChange={e => setBorrow({ ...borrow, startDate: e.target.value })} />
             <input type="datetime-local" value={borrow.endDate} onChange={e => setBorrow({ ...borrow, endDate: e.target.value })} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+              <input type="checkbox" checked={borrow.agreeRules} onChange={e => setBorrow({ ...borrow, agreeRules: e.target.checked })} />
+              已確認並同意借用守則 *
+            </label>
             <button className="btn-sm" disabled={busy} onClick={createBorrow}>建立借用申請</button>
           </div>
         )}
@@ -908,6 +921,7 @@ export default function VenueRegsPage() {
                     {b.email ? ` · ✉️ ${b.email}` : ''}
                     {b.troop ? ` · ${b.troop}` : ''}
                   </span>
+                  {b.activityName && <span>🎯 {b.activityName}{b.attendeeCount ? ` · 👥 ${b.attendeeCount} 人` : ''}</span>}
                   <span>🕒 {b.startDate}{b.endDate ? ` → ${b.endDate}` : ''} · {b.purpose || '—'}</span>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
                     {b.refCode && <span className="rcode">{b.refCode}</span>}

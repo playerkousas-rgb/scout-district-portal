@@ -5,6 +5,17 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.25.0 — 🏕 借場活動資料寫入 Teamup 必填自訂欄位</h3>
+        <p>成員系統借場表新增活動名稱及參加人數；GS 會將申請資料保存到 <code>VenueBookings</code>，並於藍色申請事件填入 Teamup 必填自訂欄位。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.25.0</a></p>
+        <ul>
+          <li>✅ 後端驗證活動名稱最多 120 字、參加人數為 1–9999 正整數；舊 <code>VenueBookings</code> 只追加 <code>activityName</code>／<code>attendeeCount</code> 欄。</li>
+          <li>🔗 領袖姓名／職位寫入 Teamup 內建 <code>who</code> 欄位；參加人數寫入 <code>custom["1"]</code>。Config 的 <code>TEAMUP_FIELD_ATTENDEE_KEY</code> 填 <code>1</code>。</li>
+          <li>🔴 批核轉紅時保留／更新 <code>who</code> 及參加人數自訂欄位；現有藍色申請→紅色批核流程不變。</li>
+          <li>⚠️ 若參加人數欄位 key 未設定，GS 會清楚拒絕建立事件，避免表格收到未同步的申請。</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.24.0 — 🔑 場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程打通</h3>
         <p>修復並打通 <code>/venue-regs</code> 一鍵批核、TTLock／Sciener 跨區連線建碼、Teamup 轉紅、電郵發送及 Google Sheet <code>VenueBookings</code> 完整回傳。</p>
         <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.24.0</a></p>
