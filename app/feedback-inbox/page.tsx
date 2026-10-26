@@ -48,7 +48,7 @@ export default function FeedbackInboxPage() {
     <>
       <BackLink />
       <h1 className="page-title">💬 你講我聽｜意見箱</h1>
-      <p className="page-sub">一般意見及支援留言。DC 保密留言存放在獨立試算表，不會顯示於此列表。</p>
+      <p className="page-sub">一般意見及支援留言。DC 留言另存於主試算表的 DCConfidential 分頁，不會顯示於此列表。</p>
 
       <section className="info-card" aria-label="意見列表">
         <div className="section-head">

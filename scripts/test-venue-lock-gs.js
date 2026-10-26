@@ -471,14 +471,11 @@ const privateFeedback = callPost('submitDistrictFeedback', {
   contactName: '保密聯絡人', contactType: 'ig', contact: '@private-account', dcOnly: true,
 });
 assert.strictEqual(privateFeedback.ok, true);
-const confidentialId = ctx.getConfigValue_('DC_CONFIDENTIAL_SHEET_ID');
-const confidentialSheet = mockSpreadsheets[confidentialId].getSheetByName('DCConfidential');
-assert.strictEqual(ctx.feedbackReadRows_(confidentialSheet).length, 2, 'both notified and non-notified private feedback should persist');
-const dcFile = mockDriveFile(confidentialId);
-assert.strictEqual(dcFile.getSharingAccess(), 'PRIVATE');
-assert.deepStrictEqual(dcFile.getViewers().map(user => user.getEmail()), ['dc@skwscout.org.hk']);
-assert.deepStrictEqual(dcFile.getEditors().map(user => user.getEmail()), []);
-assert.strictEqual(ctx.feedbackReadRows_(sheets.DistrictFeedback).length, 1, 'private feedback must never be written to the main spreadsheet');
+const confidentialSheet = sheets.DCConfidential;
+assert.ok(confidentialSheet, 'setupSheets must create the DCConfidential tab in the main spreadsheet');
+assert.strictEqual(ctx.feedbackReadRows_(confidentialSheet).length, 2, 'both notified and non-notified DC feedback should persist in the DC tab');
+assert.strictEqual(ctx.getDCFeedbackSheet_(), confidentialSheet);
+assert.strictEqual(ctx.feedbackReadRows_(sheets.DistrictFeedback).length, 1, 'DC feedback must stay in its own tab, not the general inbox tab');
 assert.strictEqual(sentEmails.at(-1).to, 'dc-notify@example.org');
 assert.ok(!sentEmails.at(-1).body.includes('保密支援留言'), 'notification must not contain message content');
 
@@ -509,9 +506,9 @@ permsRows[dcCardRow][ddcCol] = '';
 const feedbackRowsBeforeSetup = sheets.DistrictFeedback._data.length;
 ctx.setupSheets();
 assert.strictEqual(sheets.DistrictFeedback._data.length, feedbackRowsBeforeSetup, 'setupSheets must preserve general feedback');
-assert.strictEqual(ctx.getConfigValue_('DC_CONFIDENTIAL_SHEET_ID'), confidentialId, 'setupSheets must reuse the separate confidential spreadsheet');
-assert.strictEqual(ctx.feedbackReadRows_(confidentialSheet).length, 2, 'setupSheets must preserve confidential feedback');
-console.log('  ✓ 留言驗證、聯絡資料清除、獨立 DC 儲存、後端角色限制及 setup 不清資料');
+assert.strictEqual(sheets.DCConfidential, confidentialSheet, 'setupSheets must reuse the confidential tab');
+assert.strictEqual(ctx.feedbackReadRows_(confidentialSheet).length, 2, 'setupSheets must preserve DC feedback');
+console.log('  ✓ 留言驗證、聯絡資料清除、DC 分頁分流、後端角色限制及 setup 不清資料');
 sentEmails.length = 0; // 後續借場電郵斷言只統計借場流程
 
 // 2. 模擬舊版 Sheet：刻意移除 VenueBookings 的 pwdRef / passcode 欄及 Venues 的 scienerLockId 欄

@@ -42,7 +42,7 @@ export default function DCFeedbackPage() {
     <>
       <BackLink />
       <h1 className="page-title">🔒 DC 保密留言</h1>
-      <p className="page-sub">本頁由後端直接限制 DC／超級管理員查閱；資料儲存在獨立 Google 試算表，並非全區共用主試算表。</p>
+      <p className="page-sub">本管理頁及讀取 API 只授權 DC／超級管理員。資料在主試算表的 DCConfidential 分頁；此限制不阻止主試算表其他檢視者直接讀取該分頁。</p>
 
       <section className="info-card" aria-label="DC 保密留言列表">
         <div className="section-head">
