@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.28.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.28.1
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -379,7 +379,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.28.0',
+      version: '4.28.1',
       feedbackReady: feedbackReady_(),
       dcFeedbackReady: dcFeedbackReady_(),
       districtName: getConfigValue_('districtName') || '',
@@ -1967,7 +1967,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.28.0',
+    version: '4.28.1',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -6455,7 +6455,10 @@ function notifyStaff_(subject, body) {
 function normalizeCard_(c) {
   return {
     cardId: String(c.cardId).trim(), title: c.title, icon: c.icon, type: c.type, url: c.url,
-    description: c.description, order: Number(c.order) || 0,
+    description: String(c.cardId).trim() === 'dcFeedback'
+      ? '只限區總監查閱（系統超級管理員亦可）'
+      : c.description,
+    order: Number(c.order) || 0,
     enabled: String(c.enabled).toUpperCase() !== 'FALSE',
     embed: String(c.embed).toUpperCase() === 'TRUE',
     source: c.source || 'core',
@@ -7397,7 +7400,7 @@ function blueprint_() {
       ['orgchart', '地域及總會架構', '🏛', 'builtin', '/orgchart', '港島地域總監架構 · 總會領導層，自動跟官網更新', 16, 'TRUE', 'FALSE', 'core', 'done'],
       ['debitNote', 'DEBIT NOTE 生成', '🧾', 'builtin', '/debit-note', '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出', 17, 'TRUE', 'FALSE', 'core', 'done'],
       ['feedback', '你講我聽｜意見箱', '💬', 'builtin', '/feedback-inbox', '查閱一般意見及支援留言', 18, 'TRUE', 'FALSE', 'core', 'done'],
-      ['dcFeedback', 'DC 保密留言', '🔒', 'builtin', '/dc-feedback', '只限區總監及超級管理員查閱', 19, 'TRUE', 'FALSE', 'core', 'done'],
+      ['dcFeedback', 'DC 保密留言', '🔒', 'builtin', '/dc-feedback', '只限區總監查閱（系統超級管理員亦可）', 19, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
 
     { name: SHEET.UNITS, headerColor: '#bbf7d0', rows: [
