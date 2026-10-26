@@ -1,8 +1,8 @@
 # 🏛 區總部借場 — 一條龍流程（統一後台 v4.0）
 
-**申請人喺成員系統 (member-portal) 填表（唔使跳去 Teamup）→ GS 必須先喺 Teamup 藍色「申請中」子日曆建立事件，再寫入 VenueBookings → 區管理系統一鍵批核時寫入 TTLock、將 Teamup 轉紅、電郵密碼並回傳記錄。**
+**申請人喺成員系統 (member-portal) 填表（唔使跳去 Teamup）→ GS 先查紅色「已批」事件，只攔截已批時段；藍色「申請中」事件可互相重疊，建立藍色事件後再寫入 VenueBookings → 區管理系統一鍵批核時寫入 TTLock、建立紅色事件並刪除原藍色事件、電郵密碼並回傳記錄。**
 
-成員端只負責提交申請資料；Teamup event ID 由 GS 建立後回傳，唔使用成員端傳入嘅 ID。Teamup 未能建立藍色事件時，提交會回傳失敗，不會假裝收件成功或只寫入表格。舊 Config 的 `VENUE_SCRIPT_URL` 轉發欄已不再用於借場提交；此流程固定由共用 GS 建事件及寫入 VenueBookings。
+成員端只負責提交申請資料；Teamup event ID 由 GS 建立後回傳，唔使用成員端傳入嘅 ID。Teamup 未能建立藍色事件時，提交會回傳失敗，不會假裝收件成功或只寫入表格。v4.25.4 起，GS 提交前只查紅色「已批」子日曆：紅色時段重疊會拒絕並且不寫表；藍色「申請中」事件不互相阻擋，故 Teamup 後台須將藍色子日曆的 **Allow Overlapping Events** 設為開啟。職員批核／補發鎖匙前亦會重查紅色時段，避免兩筆候批申請最後都獲批重疊。紅色子日曆保持不允許重疊。紅色查詢失敗會安全拒絕提交／批核，而非假設空檔。舊 Config 的 `VENUE_SCRIPT_URL` 轉發欄已不再用於借場提交；此流程固定由共用 GS 建事件及寫入 VenueBookings。
 
 借場**寫入與審批**仍由同一個 Apps Script 後台（管理系統 + 成員系統共用）完成；
 下方房間**唯讀查閱**獨立由現有 Vercel 前端的 `/api/rooms/hq` 讀公開 iCalendar，毋須另起部署或更動正式 GS v4.18.0。
@@ -18,7 +18,7 @@
       │  點「✅ 批准」→ 前端 call confirmVenueBooking
       ▼
 後台 confirmVenueBooking_（status=approved）：
-   Teamup 轉色：有 teamupEventId → 搬去「確認借用」子日曆；冇就新建
+   Teamup 有 teamupEventId → 先喺紅色「確認借用」子日曆建立新事件，再刪除舊藍色事件；冇舊 ID 就只建紅色事件
 
 （稍後）approveVenueBooking_ = 上面 + TTLock 限時密碼 + 電郵密碼
 
@@ -52,7 +52,7 @@
 - **Vercel 新環境變數預設毋須加。**用戶已確認現有 Config：`TEAMUP_APPROVED_SUBCAL_ID=11188257` 為紅色已批，`TEAMUP_PENDING_SUBCAL_ID=11188256` 為藍色申請中（公開子日曆 ID，**非**私人 Token）。程式使用已核對的紅色 ID 預設值，直接讀紅色專屬 ICS，並再次核對紅色 `CATEGORIES`／日曆名稱，避免用錯藍色 ID 時將其誤作空置；空的紅色 feed 亦可正確顯示未見借用。**日後**紅色 ID 改變，才可選 Vercel `TEAMUP_APPROVED_SUB_ID` 覆蓋。已存在的 `PORTAL_SKW_APIKEY` 用來讀 `getPublicInfo.teamupBookingUrl`，不新增／更動；`TEAMUP_API_KEY` 不須複製到 Vercel，公開分享網址亦不寫入倉庫。公開分享連結應有合適查閱權限；來源 iCalendar 可能有同步延遲，只涵蓋過去約 6 個月至未來約 12 個月，超出範圍會標示不可用。
 - `/api/rooms/hq` 上游固定 `ics.teamup.com`，禁跳轉並限制檔案大小；不接受訪客提供 URL，亦不返回原始 ICS／Token／名稱／電話／備註／入場密碼／Teamup UID，只回匿名時段。區系統前端收到舊版已知預設卡名時，僅在顯示層改成「區總部及地域房間使用情況」；**不改 Cards 表自訂名稱或原有儲存格**。舊後台 `getCards_` 若因個別帳戶 `cards` 白名單漏掉 `rooms`，前端只於成功登入、SKW 區補出查閱卡；借場審批 `venueReg` 仍受原 `canVenue` 限制。
 - 「月曆」及「逐個地點」保留原有地域房間與區總部已批時段格仔／逐日清單，**不額外嵌入 Teamup 月曆窗或另設新視窗按鈕**；「今日總覽」只用紅色 ICS 判斷區總部有冇已 BOOK，唔計藍色申請中。來源失敗顯示不可用，不把缺資料說成空置。「地域原版日曆」維持只顯示地域房間。🎭 示範模式使用獨立匿名模擬事件。
-- **驗證與部署**：只部署此 Next.js/Vercel 改動；**不要因房間功能貼上本倉 v4.25.3 `gs/Code.gs`**（該版本會強制 `PORTAL_TOKEN_SECRET`，未設時堵塞正式 v4.18.0 全部登入）。2026-10-20 已從用戶提供的公開網址取得紅色 11188257 ICS，核對名稱及已批事件；其中存在 `RRULE:FREQ=MONTHLY;BYDAY=1FR`，故已補足 parser 的每月第 N 個星期重複規則及匿名樣本測試。測試：`node --experimental-strip-types scripts/test-teamup-hq-ics.ts`、`node --experimental-strip-types scripts/test-room-card-compat.ts`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node --experimental-strip-types scripts/test-demo-engine.ts`、`npm run build`。**Vercel PR 預覽有登入保護，仍要在部署後核對正式頁面的真實 Teamup 事件與今日狀態，未驗收不可聲稱正式畫面已讀通。**
+- **驗證與部署**：只部署此 Next.js/Vercel 改動；**不要因房間功能貼上本倉 v4.25.4 `gs/Code.gs`**（該版本會強制 `PORTAL_TOKEN_SECRET`，未設時堵塞正式 v4.18.0 全部登入）。2026-10-20 已從用戶提供的公開網址取得紅色 11188257 ICS，核對名稱及已批事件；其中存在 `RRULE:FREQ=MONTHLY;BYDAY=1FR`，故已補足 parser 的每月第 N 個星期重複規則及匿名樣本測試。測試：`node --experimental-strip-types scripts/test-teamup-hq-ics.ts`、`node --experimental-strip-types scripts/test-room-card-compat.ts`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node --experimental-strip-types scripts/test-demo-engine.ts`、`npm run build`。**Vercel PR 預覽有登入保護，仍要在部署後核對正式頁面的真實 Teamup 事件與今日狀態，未驗收不可聲稱正式畫面已讀通。**
 
 ## 成員系統 (member-portal) 要接嘅 action
 申請表呼叫後台公開 `submitVenueRequest`（經 `/api/proxy` 帶 API Key），欄位：

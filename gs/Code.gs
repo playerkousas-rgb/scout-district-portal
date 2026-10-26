@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.25.3
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.25.4
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -318,7 +318,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.25.3',
+      version: '4.25.4',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -1523,10 +1523,14 @@ function submitVenueRequest_(b) {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
   if (!sh) return err('尚未執行 setupSheets()');
 
+  var approvedCheck = checkApprovedTeamupOverlap_(req.startDate, req.endDate);
+  if (!approvedCheck.ok) return err(approvedCheck.error);
+  if (approvedCheck.conflict) return err('該時段已有已批借用，請選擇其他時段後再申請。');
+
   var rid = genId_('vr'), ref = genRef_('VR'), now = new Date().toISOString();
   var teamupEventId = '';
 
-  // 成員系統只提交表格資料；Teamup 事件必須由後台建立，確保一定落在藍色「申請中」子日曆。
+  // 新申請只檢查紅色「已批」時段；藍色「申請中」可重疊，讓多人同時候批。
   // 不信任用戶端傳入的 eventId，亦不走 VENUE_SCRIPT_URL 外部轉發，避免成功收件但漏掉藍色事件。
   try {
     var created = createPendingTeamupEvent_({
@@ -1641,6 +1645,9 @@ function confirmVenueBooking_(token, id) {
   if (!rawBooking) return err('找不到申請');
   var booking = normalizeVenueBookingRow_(rawBooking);
   if (String(booking.status).toLowerCase() === 'approved') return err('此申請已批核');
+  var approvedCheck = checkApprovedTeamupOverlap_(booking.startDate, booking.endDate, booking.teamupEventId);
+  if (!approvedCheck.ok) return err(approvedCheck.error);
+  if (approvedCheck.conflict) return err('該時段已有另一筆已批借用，未能批核此申請');
 
   var tup = applyTeamupApproved_(booking, '');
   var tupMsg = tup.warn || '';
@@ -1682,6 +1689,9 @@ function approveVenueBooking_(token, id, opts) {
   if (String(booking.status).toLowerCase() === 'approved' && alreadyRealKey && !isReissue) {
     return err('此申請已批核並已發出電子鎖匙（如需重新製作鎖匙，請點「補發／重製鎖匙」）');
   }
+  var approvedCheck = checkApprovedTeamupOverlap_(booking.startDate, booking.endDate, booking.teamupEventId);
+  if (!approvedCheck.ok) return err(approvedCheck.error);
+  if (approvedCheck.conflict) return err('該時段已有另一筆已批借用，未能批核此申請');
 
   // 1) TTLock 限時密碼（電話頭4 → 撞碼改用尾4 → 再撞碼逐個 +1）
   var passcode = '';
@@ -1814,7 +1824,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.25.3',
+    version: '4.25.4',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -5789,6 +5799,77 @@ function toTeamupDt_(value, endOfDay) {
   if (isNaN(d.getTime())) return raw;
   if (endOfDay && raw.indexOf(':') < 0) { d.setHours(23, 59, 59, 999); }
   return Utilities.formatDate(d, 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm:ss") + '+08:00';
+}
+
+/** Teamup event start_dt/end_dt 可為 ISO 日期字串或 Unix timestamp。 */
+function teamupEventDateMs_(value, endOfDay) {
+  if (typeof value === 'number' && isFinite(value)) return value < 100000000000 ? value * 1000 : value;
+  if (/^\d{10,13}$/.test(String(value || ''))) {
+    var numeric = Number(value);
+    return numeric < 100000000000 ? numeric * 1000 : numeric;
+  }
+  return parseVenueDateMs_(value, endOfDay);
+}
+
+/**
+ * 檢查申請時段是否撞到紅色「已批」事件。
+ * 藍色「申請中」事件刻意不納入檢查，容許多筆候批申請重疊。
+ */
+function checkApprovedTeamupOverlap_(startDate, endDate, excludeEventId) {
+  var c = teamupCfg_();
+  if (!c.apiKey || !c.calendarId || !c.approvedSub) {
+    return { ok: false, error: '暫時無法確認已批借用時段，請稍後再試或聯絡管理員' };
+  }
+  var startMs = parseVenueDateMs_(startDate, false);
+  var endMs = parseVenueDateMs_(endDate || startDate, true);
+  if (!isFinite(startMs) || !isFinite(endMs) || endMs <= startMs) {
+    return { ok: false, error: '借用時段格式不正確，請檢查開始及結束時間' };
+  }
+
+  // Teamup events API 接受日期範圍；前後各擴一天，確保跨日事件亦在查詢結果內，之後再精確比較時間。
+  var dayMs = 24 * 60 * 60 * 1000;
+  var queryStart = Utilities.formatDate(new Date(startMs - dayMs), 'Asia/Hong_Kong', 'yyyy-MM-dd');
+  var queryEnd = Utilities.formatDate(new Date(endMs + dayMs), 'Asia/Hong_Kong', 'yyyy-MM-dd');
+  var url = 'https://api.teamup.com/' + c.calendarId + '/events'
+    + '?startDate=' + encodeURIComponent(queryStart)
+    + '&endDate=' + encodeURIComponent(queryEnd)
+    + '&subcalendarId%5B%5D=' + encodeURIComponent(String(c.approvedSub))
+    + '&tz=' + encodeURIComponent('Asia/Hong_Kong');
+
+  try {
+    var res = teamupFetch_(url, { method: 'get' });
+    if (res.code < 200 || res.code >= 300) {
+      return { ok: false, error: '暫時無法確認已批借用時段（Teamup HTTP ' + res.code + '），請稍後再試' };
+    }
+    var data;
+    try { data = JSON.parse(res.text || '{}'); }
+    catch (parseError) { return { ok: false, error: '暫時無法讀取已批借用時段，請稍後再試' }; }
+    if (!data || !Array.isArray(data.events)) {
+      return { ok: false, error: 'Teamup 未回傳完整已批借用清單，為免重複預約請稍後再試' };
+    }
+
+    var approvedId = String(c.approvedSub);
+    for (var i = 0; i < data.events.length; i++) {
+      var event = data.events[i] || {};
+      if (excludeEventId && String(event.id) === String(excludeEventId)) continue;
+      if (event.delete_dt) continue;
+      if (!Array.isArray(event.subcalendar_ids)) {
+        return { ok: false, error: 'Teamup 已批事件缺少子日曆資料，為免重複預約請聯絡管理員' };
+      }
+      var subIds = event.subcalendar_ids;
+      if (subIds.map(String).indexOf(approvedId) < 0) continue;
+      var eventStart = teamupEventDateMs_(event.start_dt, false);
+      var eventEnd = teamupEventDateMs_(event.end_dt, true);
+      if (!isFinite(eventStart) || !isFinite(eventEnd)) {
+        return { ok: false, error: 'Teamup 有已批事件時間無法辨認，為免重複預約請聯絡管理員' };
+      }
+      // 採半開區間：14:00–15:00 與 15:00–16:00 相連但不算重疊。
+      if (eventStart < endMs && eventEnd > startMs) return { ok: true, conflict: true };
+    }
+    return { ok: true, conflict: false };
+  } catch (e) {
+    return { ok: false, error: '暫時無法確認已批借用時段，請稍後再試' };
+  }
 }
 
 /** 申請人填表 → 喺「申請中」子日曆建事件 */

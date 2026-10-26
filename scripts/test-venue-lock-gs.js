@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.25.3）
+ * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.25.4）
  *
  * 涵蓋：
  *  1. 跨區自動探測（api.sciener.com 10003 → 自動切換 euapi.ttlock.com + 852 電話帳號相容）
@@ -98,7 +98,7 @@ const ttlockState = {
   changedPwds: [],
 };
 const teamupEvents = {};
-const teamupState = { failNextCreate: false, failNextOverlap: false, failNextUpdate: false, failNextDelete: false, failDeleteCount: 0, throwNextDelete: false };
+const teamupState = { failNextCreate: false, failNextOverlap: false, failNextUpdate: false, failNextDelete: false, failDeleteCount: 0, throwNextDelete: false, failNextApprovedList: false };
 let nextPwdId = 700100;
 let nextTeamupId = 5001;
 
@@ -246,6 +246,21 @@ const ctx = {
       }
 
       // 2) 模擬 Teamup API（嚴格拒絕 .000Z，只接受 YYYY-MM-DDTHH:mm:ss+08:00，還原真實 Teamup 行為）
+      const tupList = url.match(/^https:\/\/api\.teamup\.com\/([^/]+)\/events\?(.*)$/);
+      if (tupList && String(opt.method || 'get').toLowerCase() === 'get') {
+        const params = new URLSearchParams(tupList[2]);
+        assert.strictEqual(params.get('subcalendarId[]'), '102', '已批查詢只可讀紅色子日曆');
+        assert.strictEqual(params.get('tz'), 'Asia/Hong_Kong');
+        if (teamupState.failNextApprovedList) {
+          teamupState.failNextApprovedList = false;
+          return reply(503, { error: 'Teamup unavailable' });
+        }
+        return reply(200, {
+          events: Object.values(teamupEvents).filter(event =>
+            Array.isArray(event.subcalendar_ids) && event.subcalendar_ids.map(String).includes('102')
+          ),
+        });
+      }
       const validTeamupIso = (s) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/.test(String(s || ''));
       const tupCreate = url.match(/^https:\/\/api\.teamup\.com\/([^/]+)\/events$/);
       if (tupCreate && String(opt.method || 'get').toLowerCase() === 'post') {
@@ -350,7 +365,7 @@ function callPost(action, body = {}) {
   return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action, apiKey, ...body }) } }));
 }
 
-console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.25.3)');
+console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.25.4)');
 
 // 1. 登入超管／DC 並檢查初始健康狀態
 const loginRes = callPost('login', { email: ctx.MASTER_EMAIL, password: props.PORTAL_MASTER_PASSWORD });
@@ -359,10 +374,10 @@ const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.25.3');
+assert.strictEqual(h0.data.version, '4.25.4');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
-console.log('  ✓ getHealthCheck 回傳版本 4.25.3 及電子鎖初始狀態');
+console.log('  ✓ getHealthCheck 回傳版本 4.25.4 及電子鎖初始狀態');
 
 // 2. 模擬舊版 Sheet：刻意移除 VenueBookings 的 pwdRef / passcode 欄及 Venues 的 scienerLockId 欄
 sheets.VenueBookings._data[0] = [
@@ -477,6 +492,62 @@ assert.strictEqual(overlapSubmit.ok, false);
 assert.strictEqual(overlapSubmit.error, '該時段已有人使用或已有行事曆安排，請選擇其他時段後再申請。');
 assert.strictEqual(sheets.VenueBookings._data.length, venueRowsBeforeFailure, '撞期失敗不得留下 pending 記錄');
 
+// 6b. 同日紅色已批時段必須攔截；藍色申請中不納入衝突判斷。
+const redApprovedFixtureId = 'red-approved-fixture';
+teamupEvents[redApprovedFixtureId] = {
+  id: redApprovedFixtureId,
+  subcalendar_ids: [102],
+  title: '已批准借用',
+  start_dt: '2027-05-16T14:00:00+08:00',
+  end_dt: '2027-05-16T15:00:00+08:00',
+};
+const rowsBeforeRedConflict = sheets.VenueBookings._data.length;
+const redConflictSubmit = callPost('submitVenueRequest', {
+  venueId: 'HQ-1704', name: '紅色已批衝突測試', position: '領袖', phone: '91234567',
+  activityName: '紅色已批衝突測試', attendeeCount: 5, agreeRules: true,
+  startDate: '2027-05-16T14:30', endDate: '2027-05-16T15:00',
+});
+assert.strictEqual(redConflictSubmit.ok, false);
+assert.strictEqual(redConflictSubmit.error, '該時段已有已批借用，請選擇其他時段後再申請。');
+assert.strictEqual(sheets.VenueBookings._data.length, rowsBeforeRedConflict, '紅色已批衝突不可留下 pending 表格列');
+const adjacentApprovedCheck = ctx.checkApprovedTeamupOverlap_('2027-05-16T15:00', '2027-05-16T16:00');
+assert.strictEqual(adjacentApprovedCheck.ok, true);
+assert.strictEqual(adjacentApprovedCheck.conflict, false, '紅色時段 14:00–15:00 與新申請 15:00–16:00 相連但不重疊');
+delete teamupEvents[redApprovedFixtureId];
+
+const pendingBeforeApprovalConflict = callPost('submitVenueRequest', {
+  venueId: 'HQ-1704', name: '後批核衝突測試', position: '領袖', phone: '91234569',
+  activityName: '後批核衝突測試', attendeeCount: 3, agreeRules: true,
+  startDate: '2027-05-18T14:30', endDate: '2027-05-18T15:00',
+});
+assert.strictEqual(pendingBeforeApprovalConflict.ok, true);
+teamupEvents['red-approved-after-submit'] = {
+  id: 'red-approved-after-submit', subcalendar_ids: [102],
+  start_dt: '2027-05-18T14:00:00+08:00', end_dt: '2027-05-18T15:00:00+08:00',
+};
+const approvalConflict = callPost('confirmVenueBooking', { token, id: pendingBeforeApprovalConflict.data.id });
+assert.strictEqual(approvalConflict.ok, false, '審批前再次檢查已批紅色日曆');
+assert.ok(approvalConflict.error.includes('另一筆已批借用'));
+const venueHeadersForConflict = sheets.VenueBookings._data[0];
+const pendingConflictRow = sheets.VenueBookings._data.find(row => row[venueHeadersForConflict.indexOf('id')] === pendingBeforeApprovalConflict.data.id);
+assert.strictEqual(pendingConflictRow[venueHeadersForConflict.indexOf('status')], 'pending', '審批衝突時狀態需維持 pending');
+assert.ok(teamupEvents[pendingBeforeApprovalConflict.data.teamupEventId], '審批衝突時藍色申請事件需保留');
+delete teamupEvents['red-approved-after-submit'];
+
+teamupState.failNextApprovedList = true;
+const listFailureRowsBefore = sheets.VenueBookings._data.length;
+const listFailureEventsBefore = Object.keys(teamupEvents).length;
+const approvedListFailure = callPost('submitVenueRequest', {
+  venueId: 'HQ-1704', name: '已批清單讀取失敗測試', phone: '91234567',
+  activityName: '已批清單讀取失敗測試', attendeeCount: 5, agreeRules: true,
+  startDate: '2027-05-17T14:30', endDate: '2027-05-17T15:00',
+});
+assert.strictEqual(approvedListFailure.ok, false, '讀取紅色已批事件失敗時必須 fail closed');
+assert.ok(approvedListFailure.error.includes('無法確認已批借用'));
+assert.strictEqual(sheets.VenueBookings._data.length, listFailureRowsBefore, '紅色清單失敗不可建立 pending 表格列');
+assert.strictEqual(Object.keys(teamupEvents).length, listFailureEventsBefore, '紅色清單失敗時不可建立藍色事件');
+console.log('  ✓ 只攔截紅色已批重疊；紅色查詢異常 fail-closed，均不留 pending');
+
 // 7. 申請人提交借場（電話帶前導 0：05129876，時段為未來香港時間）
 const submit1 = callPost('submitVenueRequest', {
   venueId: 'HQ-1704',
@@ -507,6 +578,17 @@ const bookingRow = sheets.VenueBookings._data.find(row => row[bookingHeaders.ind
 assert.strictEqual(bookingRow[bookingHeaders.indexOf('activityName')], '團長會議');
 assert.strictEqual(bookingRow[bookingHeaders.indexOf('attendeeCount')], 12);
 
+const pendingRowsBeforeBlueOverlap = sheets.VenueBookings._data.length;
+const secondPendingOverlap = callPost('submitVenueRequest', {
+  venueId: 'HQ-1704', name: '同時段另一申請', position: '副團長', phone: '91234568',
+  activityName: '同時段另一申請', attendeeCount: 4, agreeRules: true,
+  startDate: '2027-05-15T20:30', endDate: '2027-05-15T21:00',
+});
+assert.strictEqual(secondPendingOverlap.ok, true, '藍色申請中與另一藍色申請重疊時仍可提交');
+assert.strictEqual(sheets.VenueBookings._data.length, pendingRowsBeforeBlueOverlap + 1);
+assert.deepStrictEqual(teamupEvents[secondPendingOverlap.data.teamupEventId].subcalendar_ids, [101]);
+console.log('  ✓ 藍色申請中相撞仍可並存；紅色已批先由後台判斷');
+
 // 8. 模擬 Gateway 離線（-2012）：一鍵批准必須明確報錯，唔可以靜默假批核或寄假密碼
 ttlockState.gatewayOffline = true;
 const failApprove = callPost('approveVenueBooking', { token, id: booking1Id });
@@ -536,8 +618,10 @@ assert.strictEqual(lastLockCall.endDate, Date.parse('2027-05-15T21:45:00+08:00')
 const vbHeaders = sheets.VenueBookings._data[0];
 const passcodeCol = vbHeaders.indexOf('passcode') + 1;
 const pwdRefCol = vbHeaders.indexOf('pwdRef') + 1;
-assert.strictEqual(sheets.VenueBookings._formats[`2:${passcodeCol}`], '@', 'passcode 儲存格必須設為純文字 @');
-assert.strictEqual(sheets.VenueBookings._formats[`2:${pwdRefCol}`], '@', 'pwdRef 儲存格必須設為純文字 @');
+const booking1SheetRow = sheets.VenueBookings._data.findIndex(row => row[vbHeaders.indexOf('id')] === booking1Id) + 1;
+assert.ok(booking1SheetRow > 1, '應找到 booking1 對應的 Sheet 列');
+assert.strictEqual(sheets.VenueBookings._formats[`${booking1SheetRow}:${passcodeCol}`], '@', 'passcode 儲存格必須設為純文字 @');
+assert.strictEqual(sheets.VenueBookings._formats[`${booking1SheetRow}:${pwdRefCol}`], '@', 'pwdRef 儲存格必須設為純文字 @');
 
 const afterOkList = callGet('getVenueBookings', { token });
 const row1 = afterOkList.data.find(x => x.id === booking1Id);
@@ -568,8 +652,8 @@ const submit2 = callPost('submitVenueRequest', {
   email: 'lee@example.com',
   troop: '港島第 1888 旅',
   purpose: '訓練籌備',
-  startDate: '2027-05-15T20:00',
-  endDate: '2027-05-15T22:00',
+  startDate: '2027-05-16T20:00',
+  endDate: '2027-05-16T22:00',
   agreeRules: 'TRUE',
 });
 const booking2Id = submit2.data.id;
