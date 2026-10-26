@@ -128,7 +128,7 @@
 > 角色 → 預設支部：`VISIT_ROLE_SECTION`（ADC_GH/ADC_CUBS/ADC_SCOUT），前端仲會用 localStorage `skw.visit.section` 記住揀擇。
 > 純邏輯喺 `lib/visits.ts`（`troopStats`／`coverage`／`visitorStats`／`rangePresets`／`parseUnitPaste`）。
 > ⚠️ vm 測試提醒：`v instanceof Date` 跨 realm 會 false，所以 `visitDate_` 改用 `Object.prototype.toString.call(v)`。
-> 🧪 本機預覽用 `node scripts/mock-gs-server.js`（in-repo，sandbox 重置都唔會冇；apiKey 固定 `dev`，登入 sheep/LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE，純假資料）。
+> 🧪 本機預覽用 `node scripts/mock-gs-server.js`（in-repo，sandbox 重置都唔會冇；apiKey 固定 `dev`，登入 sheep/LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE；mock 啟動時列出配套 Vercel 假環境變數，純假資料）。
 > 🛑 **委任系統／旅團管理系統暫時 hold**：用戶話委任資料難搞；旅團管理佢自己另有一套系統，日後先接，仲要處理私隱。
 > ⏭ **用戶未來想要**：全區領袖「委任年期 list」——有新委任就登記入去，令「無 → GSA（服務滿 7 年）」呢級真正計得準。
 > 而家係靠 `Awards.serviceStart` 逐個人填；下一步可以考慮同 Staff／成員系統委任資料對接，或者做一張 `Appointments` 表。
@@ -159,7 +159,7 @@
 > 登入 `getAnnouncements`（加 `expired`／`scheduled`／`live`）、`saveAnnouncement`／`deleteAnnouncement`／`setAnnouncementPinned`／`setAnnouncementActive`。
 > 權限用**新 helper `requireCardEdit_(token, cardId)`**（直接讀 Perms 矩陣，唔再加 `canXxx` 欄；level 0 超管永遠可）——之後新卡片照跟呢個做法。
 > 前端：卡片 `news`（order 4，opsEdit）、`app/news/page.tsx`（發佈／編輯／置頂／下架／刪除＋成員端預覽）、`components/NewsBanner.tsx`（主控台頂部，同成員睇到同一份資料）、`lib/types.ts` `Announcement`、`lib/api.ts` 6 個 wrapper、`app/globals.css` `.news-*`。
-> 測試：`node scripts/test-news-gs.js`（vm stub Apps Script，唔使開 GAS）。本機預覽：`scripts/mock-gs-server.js`（載入真 Code.gs + 記憶體 Sheet + 假資料）＋ `PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec npx next dev`，登入 `sheep` / `LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE`（只限本機 mock）。
+> 測試：`node scripts/test-news-gs.js`（vm stub Apps Script，唔使開 GAS）。本機預覽：`scripts/mock-gs-server.js`（載入真 Code.gs + 記憶體 Sheet + 假資料）＋ `PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec npx next dev`；需一併設定 mock 啟動輸出的 `PORTAL_SKW_MASTER_PASSWORD` 與 `PORTAL_SKW_MASTER_BRIDGE_SECRET`（只限本機）。
 > member-portal 嗰邊後來自己實作咗（`bb44fe6`），原本嘅 patch 已刪（見第六輪）。
 >
 > 2026-09-07（第三輪）v4.5.0：**外部資料全部由 Vercel `app/api/external/route.ts` 代抓**（sandbox 對外連線被封，只能用 fixture 測；`PORTAL_DEV_EXTERNAL_BASE` 指向 mock `/upstream?u=`）。解析器 `lib/externalParsers.ts`（職員表／總監架構／諮議會／各署／預算 CSV，純函數）、`lib/ics.ts`（ICS + RRULE 展開，香港時間）、`lib/roomsDirectory.ts`（11 間房日曆 ID、打通關係 `combo`）、`lib/orgDirectory.ts`（架構靜態備援）、`lib/externalSources.ts`（來源網址）。頁面：`/budget`（`api.extBudget`，Config `BUDGET_SHEET_URL` 覆蓋 Sheet）、`/rooms`（逐間房逐日／今日總覽／原版 iframe）、`/orgchart`（地域＋總會）、`/contacts` 港島地域只剩 `staff` 組並即時同步，`rc/dc/hq/ahq` 組已刪（搬去 orgchart 備援）。後台 Code.gs 4.5.0：Cards +`rooms`／`orgchart`（ALL_VIEW）、`budget` done、Config `BUDGET_SHEET_URL`、`getConfig` 回 `budgetSheetUrl`；**刪 `annual` 週年會議文件卡**（`removeIds` 內，`app/annual-docs` 已刪；刪 route 後記得 `rm -rf .next/types/app/annual-docs` 先過 tsc）。mock：`/tmp/mockgs/gas-emu.js`（Apps Script 模擬器）+ `server.js`（GS `/exec` + 上游 fixture `/upstream`）+ `test45.js`（33 assertions，包括 v4.4.0→4.5.0 升級路徑）——sandbox 重置會冇咗，要用時照 README 描述重寫。
@@ -174,18 +174,18 @@
 
 > 更新：2026-10-26
 > 用家語言：香港中文  
-> 狀態：**GS v4.26.1 認證修補已由 PR #45 合併 MAIN；正式 Apps Script 未由助手部署，須由用家自行更新。** Node／mock 測試不等同 Apps Script、Sheet ACL 或外部服務驗證。
+> 狀態：**GS v4.26.1 認證修補已由 PR #45 合併 MAIN；v4.27.0 Vercel-only sheep 密碼流程待程式 PR 合併。正式 Apps Script 未由助手部署，須由用家自行更新。** Node／mock 測試不等同 Apps Script、Sheet ACL 或外部服務驗證。
 > 本檔唔寫、唔問、唔貼任何 Secret（Client Secret、鎖密碼、Lock 密碼、API Key 明文）。
 
 ---
 
 ## 用家更新正式 GS 時
 
-1. 確認安全修補已合併 MAIN，再下載 `public/downloads/Code.gs.txt`（與 `gs/Code.gs` v4.26.1 一致）。先讀 [`docs/gs-upgrade-no-data-loss.md`](gs-upgrade-no-data-loss.md)，備份原 Sheet／Apps Script 並沿用原有專案及 Sheet。
+1. 確認安全修補已合併 MAIN，再下載 `public/downloads/Code.gs.txt`（與 `gs/Code.gs` v4.27.0 一致）。先讀 [`docs/gs-upgrade-no-data-loss.md`](gs-upgrade-no-data-loss.md)，備份原 Sheet／Apps Script 並沿用原有專案及 Sheet。
 2. Apps Script **全部覆蓋貼上** → 儲存；執行選單 `setupSheets()`。此操作只追加缺項及新增卡片／權限，不改既有資料。只有真正全新空白試算表才建立隨機未知的臨時初始帳戶；既有系統不自動補帳戶。
 3. 確認 Script Properties 有有效 `PORTAL_TOKEN_SECRET`（setup 會在缺少有效值時自動建立）；有既有 `API_KEY_HASH` 先保留，空白 hash 必須明確重新生成並同步兩個前端 API Key。
 4. **已有區只編輯原有 Web App**（執行身分：我自己；存取：任何人），選新版本；不要換 `/exec`。由用家自行部署。
-5. 部署後健康檢查須見 `version: "4.26.1"`、`apiKeySet: true`、`tokenSecretSet: true`。部署前不可視為已上線；真實 Sheet、Apps Script、Teamup、TTLock、郵件及 YMIS 仍須區方按指引驗證。
+5. 部署後健康檢查須見 `version: "4.27.0"`、`apiKeySet: true`、`tokenSecretSet: true`。部署前不可視為已上線；真實 Sheet、Apps Script、Teamup、TTLock、郵件及 YMIS 仍須區方按指引驗證。
 
 `setupSheets()` 只追加升級，不會修改已存在的儲存格、Cards／Perms 舊格或 Sheet 保護；空白 `API_KEY_HASH` fail-closed，須明確輪換及同步後才可使用。詳情以 [`docs/gs-upgrade-no-data-loss.md`](gs-upgrade-no-data-loss.md) 為準。
 
@@ -261,7 +261,7 @@
 | 項目 | 說明 |
 |---|---|
 | `savePerms_` | 儲存權限矩陣仍 `clear()` Perms 表（管理員手動儲存先會，唔係 setup） |
-| `PORTAL_TOKEN_SECRET` / `PORTAL_MASTER_PASSWORD` | 由區方在 Apps Script Script Properties 私密設定；token secret 未設時登入會拒絕；**唔好寫入 Git／chat** |
+| `PORTAL_TOKEN_SECRET` / `PORTAL_MASTER_PROXY_SECRET` | Apps Script Script Properties；橋接密鑰另複製到 Vercel `PORTAL_{區碼}_MASTER_BRIDGE_SECRET`。維護密碼只放 Vercel `PORTAL_{區碼}_MASTER_PASSWORD`；`setupSheets()` 會移除舊 `PORTAL_MASTER_PASSWORD` Script Property。絕不寫入 Git／chat |
 | Rebase | 複製 `Code.gs.txt` 一定要喺 `Code.gs` **無衝突標記之後** `cp` |
 | 密碼 | 用家堅持 **phone4** 得；唔好改 random 6 位做預設 |
 | 開戶角色 | 唔好開放 DC / DDC / ADC / STAFF 批量開戶 |

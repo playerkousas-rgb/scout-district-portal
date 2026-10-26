@@ -11,7 +11,7 @@
  *
  * 前端點指去呢度：
  *   PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec PORTAL_SKW_APIKEY=dev npx next dev -H 0.0.0.0
- * 登入：sheep / LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE（僅本機超級管理員）
+ * 登入：sheep / LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE（僅本機；Vercel proxy 需配對以下假橋接值）
  */
 const fs = require('fs');
 const path = require('path');
@@ -90,8 +90,9 @@ const ss = {
 // 僅供本機 mock；正式 GAS 必須由區方自行於 Script Properties 設獨立長亂碼。
 const props = {
   PORTAL_TOKEN_SECRET: 'FAKE_LOCAL_MOCK_PRIVATE_TOKEN_SECRET_0123456789',
-  PORTAL_MASTER_PASSWORD: 'LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE',
+  PORTAL_MASTER_PROXY_SECRET: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
 };
+const mockCache = new Map();
 const ctx = {
   console,
   SpreadsheetApp: {
@@ -113,11 +114,12 @@ const ctx = {
       if (fmt === "yyyy-MM-dd'T'HH:mm:ss") return iso.slice(0, 19);
       return iso;
     },
-    getUuid: () => 'uuid-' + Math.random().toString(36).slice(2),
+    getUuid: () => crypto.randomUUID(),
     base64EncodeWebSafe: (s) => Buffer.from(String(s), 'utf8').toString('base64url'),
     base64DecodeWebSafe: (s) => Buffer.from(String(s), 'base64url'),
     newBlob: (b) => ({ getDataAsString: () => Buffer.from(b).toString('utf8') }),
     computeDigest: (algo, s) => Array.from(crypto.createHash(algo || 'sha256').update(String(s), 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
+    computeHmacSha256Signature: (message, key) => Array.from(crypto.createHmac('sha256', String(key)).update(String(message)).digest()).map(b => b > 127 ? b - 256 : b),
     DigestAlgorithm: { SHA_256: 'sha256', MD5: 'md5' }, Charset: { UTF_8: 'utf8' },
     sleep: () => {},
   },
@@ -253,7 +255,7 @@ const ctx = {
       getProperties: () => ({ ...props }),
     }),
   },
-  CacheService: { getScriptCache: () => ({ get: () => null, put: () => {}, remove: () => {} }) },
+  CacheService: { getScriptCache: () => ({ get: (k) => mockCache.get(k) || null, put: (k, v) => mockCache.set(k, v), remove: (k) => mockCache.delete(k) }) },
   CalendarApp: { getCalendarById: () => null },
   HtmlService: {
     createHtmlOutput: () => ({ setWidth: () => ({ setHeight: () => ({}) }), setTitle: () => ({}) }),
@@ -328,5 +330,7 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n🧪 mock Apps Script 後台：http://127.0.0.1:${PORT}/exec`);
   console.log('   登入（僅本機）：sheep / LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE');
+console.log('   Vercel env（僅本機）：PORTAL_SKW_MASTER_PASSWORD=LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE');
+console.log('   Vercel env（僅本機）：PORTAL_SKW_MASTER_BRIDGE_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
   console.log('   前端：PORTAL_DEV_APIBASE=http://127.0.0.1:' + PORT + '/exec PORTAL_SKW_APIKEY=dev npx next dev -H 0.0.0.0\n');
 });

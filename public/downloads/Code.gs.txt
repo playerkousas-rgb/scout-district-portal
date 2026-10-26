@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.26.1
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.27.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -184,7 +184,7 @@ var SHEET = {
 // ===================== 安全設定（★ 部署前必改）=====================
 
 var TOKEN_SECRET_PROPERTY = 'PORTAL_TOKEN_SECRET';
-var MASTER_PASSWORD_PROPERTY = 'PORTAL_MASTER_PASSWORD';
+var MASTER_PROXY_SECRET_PROPERTY = 'PORTAL_MASTER_PROXY_SECRET';
 var TOKEN_TTL_HOURS = 12;
 
 /** 只從 Script Properties 讀取私密簽署密鑰；絕不回退到原始碼常數。 */
@@ -203,11 +203,33 @@ function ensureTokenSecret_() {
   PropertiesService.getScriptProperties().setProperty(TOKEN_SECRET_PROPERTY, value);
   return true;
 }
-function getMasterPassword_() {
+/** Vercel → Apps Script 專用高熵橋接密鑰；不是人類登入密碼。 */
+function getMasterProxySecret_() {
   try {
-    var value = String(PropertiesService.getScriptProperties().getProperty(MASTER_PASSWORD_PROPERTY) || '');
-    return value.length >= 12 ? value : '';
+    var value = String(PropertiesService.getScriptProperties().getProperty(MASTER_PROXY_SECRET_PROPERTY) || '');
+    return /^[a-f0-9]{64,}$/i.test(value) ? value : '';
   } catch (e) { return ''; }
+}
+/** 首次 setup 自動建立機器橋接密鑰；由管理員從私密選單顯示並貼入 Vercel。 */
+function ensureMasterProxySecret_() {
+  if (getMasterProxySecret_()) return false;
+  var value = '';
+  for (var i = 0; i < 4; i++) value += Utilities.getUuid().replace(/-/g, '');
+  if (value.length < 64) throw new Error('無法安全建立維護登入橋接密鑰');
+  PropertiesService.getScriptProperties().setProperty(MASTER_PROXY_SECRET_PROPERTY, value);
+  return true;
+}
+function hmacSha256Hex_(message, secret) {
+  return Utilities.computeHmacSha256Signature(String(message), String(secret)).map(function (b) {
+    return ('0' + ((Number(b) + 256) % 256).toString(16)).slice(-2);
+  }).join('');
+}
+function constantTimeEqual_(a, b) {
+  a = String(a || ''); b = String(b || '');
+  if (a.length !== b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 function isLegacySharedPassword_(password) {
   var value = String(password || '');
@@ -288,8 +310,8 @@ function normalizeCreatableRole_(raw) {
   return u;
 }
 
-// 維護用最高存取（★ 改成只有你知道嘅值；勿沿用示範值）
-var MASTER_EMAIL = 'sheep'; // 公開帳號識別名稱；維護密碼只讀 PORTAL_MASTER_PASSWORD Script Property
+// 核心維護帳戶：密碼只存在 Vercel；Apps Script 只驗證伺服器簽署的短效授權。
+var MASTER_EMAIL = 'sheep';
 /** Script 維護超管刻意不存在於 Users 表；只接受已簽名 token 內的 MASTER 身份及 SYSADMIN 角色。 */
 function isMaintenanceSuper_(email, role) {
   return String(email || '').trim().toLowerCase() === String(MASTER_EMAIL || '').trim().toLowerCase()
@@ -357,13 +379,14 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.26.1',
+      version: '4.27.0',
       feedbackReady: feedbackReady_(),
       dcFeedbackReady: dcFeedbackReady_(),
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
       tokenSecretSet: !!getTokenSecret_(),
+      masterProxyBridgeSet: !!getMasterProxySecret_(),
       teamupReady: teamupReady_(),
       teamupPendingSet: !!(teamupCfg_().pendingSub),
       teamupApprovedSet: !!(teamupCfg_().approvedSub),
@@ -461,6 +484,7 @@ function doPost(e) {
       case 'submitDistrictFeedback': return json(submitDistrictFeedback_(b));
 
       // ---------- 登入 ----------
+      case 'proxyMasterLogin':     return json(proxyMasterLogin_(b.assertion, b.signature));
       case 'login':                return json(login_(b.email, b.password, b.remember));
       case 'staffLogin':           return json(staffLogin_(b.email, b.password));
       case 'changePassword':       return json(changePassword_(b.token, b.oldPassword, b.newPassword));
@@ -843,7 +867,7 @@ function makeToken_(email, role, ttlHours, accountStore) {
   if (!secret) throw new Error('登入安全設定未完成：PORTAL_TOKEN_SECRET');
   var hours = Number(ttlHours) > 0 ? Math.min(Number(ttlHours), TOKEN_TTL_REMEMBER_HOURS) : TOKEN_TTL_HOURS;
   var exp = Date.now() + hours * 3600 * 1000;
-  var source = accountStore === 'staff' ? 'staff' : 'users';
+  var source = accountStore === 'staff' ? 'staff' : accountStore === 'proxy' ? 'proxy' : 'users';
   var payload = email + '|' + role + '|' + exp + '|' + source;
   return Utilities.base64EncodeWebSafe(payload + '|' + sha256_(payload + secret).slice(0, 32));
 }
@@ -854,14 +878,15 @@ function checkToken_(token) {
     if (!secret) return { valid: false };
     var raw = Utilities.newBlob(Utilities.base64DecodeWebSafe(token)).getDataAsString();
     var p = raw.split('|'), email = p[0], role = p[1], exp = Number(p[2]), source = p[3], sig = p[4];
-    if (!email || !role || (source !== 'users' && source !== 'staff') || !isFinite(exp) || exp < Date.now() || exp > Date.now() + (TOKEN_TTL_REMEMBER_HOURS + 1) * 3600 * 1000) return { valid: false };
+    if (!email || !role || (source !== 'users' && source !== 'staff' && source !== 'proxy') || !isFinite(exp) || exp < Date.now() || exp > Date.now() + (TOKEN_TTL_REMEMBER_HOURS + 1) * 3600 * 1000) return { valid: false };
     var payload = email + '|' + role + '|' + exp + '|' + source;
     if (sig !== sha256_(payload + secret).slice(0, 32)) return { valid: false };
-    // Session 身份必須仍存在、啟用且角色未變；維護帳號只在密碼屬性仍啟用時有效。
+    // 維護帳戶只接受新代理流程簽發的 proxy source token；舊 master token 一律失效。
     if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase()) {
-      if (!getMasterPassword_()) return { valid: false };
+      if (source !== 'proxy' || role !== SYSADMIN_ROLE) return { valid: false };
       return { valid: true, email: email, role: role, source: source };
     }
+    if (source === 'proxy') return { valid: false };
     var store = source === 'users' ? SHEET.USERS : SHEET.STAFF;
     var account = readSheet_(store).filter(function (u) {
       return String(u.email || '').trim().toLowerCase() === email.toLowerCase();
@@ -885,22 +910,53 @@ function passwordChangeGate_(action, token) {
 
 // ===================== 登入（雙軌） =====================
 
-/** 管理系統：Users 表（角色制） */
+/**
+ * 僅供 Vercel server-to-server 使用。授權內容由橋接密鑰 HMAC 簽署、30 秒到期、nonce 一次性。
+ * API Key 單獨不足以呼叫本入口；sheep 密碼不會傳到或儲存在 Apps Script。
+ */
+function proxyMasterLogin_(assertion, signature) {
+  var secret = getMasterProxySecret_();
+  if (!secret || !assertion || String(assertion).length > 2048) return err('維護登入橋接未設定');
+  var raw = String(assertion), expected = hmacSha256Hex_(raw, secret);
+  if (!constantTimeEqual_(String(signature || '').toLowerCase(), expected)) return err('維護登入授權無效');
+  var grant;
+  try { grant = JSON.parse(raw); } catch (e) { return err('維護登入授權格式錯誤'); }
+  var now = Date.now();
+  if (!grant || String(grant.email || '').trim().toLowerCase() !== String(MASTER_EMAIL).toLowerCase()
+      || !/^[a-f0-9]{32}$/i.test(String(grant.nonce || ''))
+      || !isFinite(Number(grant.exp)) || Number(grant.exp) < now || Number(grant.exp) > now + 60000) {
+    return err('維護登入授權已過期或格式錯誤');
+  }
+  var nonceLock;
+  try {
+    nonceLock = LockService.getScriptLock();
+    if (!nonceLock.tryLock(5000)) return err('維護登入防重放檢查忙碌，請稍後重試');
+    var cache = CacheService.getScriptCache();
+    var nonceKey = 'master_proxy_nonce_' + sha256_(String(grant.nonce));
+    if (cache.get(nonceKey)) return err('維護登入授權已使用');
+    cache.put(nonceKey, '1', 120);
+  } catch (e) { return err('維護登入防重放檢查失敗'); }
+  finally { try { if (nonceLock) nonceLock.releaseLock(); } catch (ignored) {} }
+  if (!getTokenSecret_()) return err('系統登入安全設定未完成，請管理員執行 setupSheets()');
+  var email = String(MASTER_EMAIL);
+  // 高權限維護 session 不提供「記住我」延長，密碼變更後舊 session 最遲 12 小時到期。
+  var ttl = TOKEN_TTL_HOURS;
+  return ok({
+    email: email, displayName: '系統維護', role: SYSADMIN_ROLE, roleLabel: '超管',
+    isAdmin: true, isDC: true, canManageAccounts: true, scopes: ['all'],
+    token: makeToken_(email, SYSADMIN_ROLE, ttl, 'proxy'),
+    level: LEVEL_SUPER, levelLabel: levelLabel_(LEVEL_SUPER), isSuper: true, mustChangePassword: false,
+  });
+}
+
+/** 管理系統：Users 表（角色制）；sheep 必須走 Vercel proxyMasterLogin。 */
 function login_(email, password, remember) {
   if (!email || !password) return err('請輸入帳號及密碼');
   if (!getTokenSecret_()) return err('系統登入安全設定未完成，請管理員執行 setupSheets()');
   email = String(email).trim();
   var ttl = isTrue_(remember) ? TOKEN_TTL_REMEMBER_HOURS : TOKEN_TTL_HOURS;
-  var masterPassword = getMasterPassword_();
-
-  // 維護用最高存取（鎖定時仍可進）：必須另設私密 Script Property，否則完全停用。
-  if (masterPassword && email.toLowerCase() === String(MASTER_EMAIL).toLowerCase() && String(password) === masterPassword) {
-    return ok({
-      email: email, displayName: '系統維護', role: SYSADMIN_ROLE, roleLabel: '超管',
-      isAdmin: true, isDC: true, canManageAccounts: true, scopes: ['all'], token: makeToken_(email, SYSADMIN_ROLE, ttl),
-      level: LEVEL_SUPER, levelLabel: levelLabel_(LEVEL_SUPER), isSuper: true, mustChangePassword: false,
-    });
-  }
+  // sheep 只能由 Vercel proxy 驗證密碼後，透過短效 HMAC 授權登入。
+  if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase()) return err('維護帳號只可透過平台登入');
 
   if (isLegacySharedPassword_(password)) return err('共用初始密碼已停用，請用「忘記密碼」重設，或聯絡管理員。');
   if (getSystemState_().locked) return err('系統維護中，暫停登入。');
@@ -933,7 +989,7 @@ function sessionPayload_(user, token) {
 
 function verify_(token) {
   var t = checkToken_(token);
-  if (!t.valid || t.source !== 'users') return err('token 無效或已過期');
+  if (!t.valid || (t.source !== 'users' && t.source !== 'proxy')) return err('token 無效或已過期');
   if (String(t.email).toLowerCase() === String(MASTER_EMAIL).toLowerCase()) {
     return ok({ email: t.email, role: t.role, level: LEVEL_SUPER, isSuper: true, mustChangePassword: false });
   }
@@ -1011,15 +1067,7 @@ function staffLogin_(email, password) {
   if (!email || !password) return err('請輸入帳號及密碼');
   if (!getTokenSecret_()) return err('系統登入安全設定未完成，請管理員執行 setupSheets()');
   email = String(email).trim();
-  var masterPassword = getMasterPassword_();
-
-  // 維護帳號亦可用呢邊登入；未設私密 Script Property 就停用。
-  if (masterPassword && email.toLowerCase() === String(MASTER_EMAIL).toLowerCase() && String(password) === masterPassword) {
-    return ok({
-      email: email, name: '系統維護', role: DC_ROLE, token: makeToken_(email, DC_ROLE, TOKEN_TTL_HOURS, 'staff'),
-      canVenue: true, canStock: true, canCourse: true, canStaff: true,
-    });
-  }
+  if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase()) return err('維護帳號只可透過平台登入');
 
   if (isLegacySharedPassword_(password)) return err('共用初始密碼已停用，請用「忘記密碼」重設，或聯絡管理員。');
   if (getSystemState_().locked) return err('系統維護中，暫停登入。');
@@ -1080,7 +1128,7 @@ function permSheetRoles_() {
 
 /** 實時讀取某帳號嘅權限：Staff 表優先，否則跟 Perms 矩陣（venueReg / stockReg / training），最後先用預設角色推導 */
 function staffPerms_(email, role, source) {
-  if (String(email).toLowerCase() === String(MASTER_EMAIL).toLowerCase() && getMasterPassword_()) {
+  if (isMaintenanceSuper_(email, role)) {
     return { canVenue: true, canStock: true, canCourse: true, canStaff: true };
   }
   var s = readSheet_(SHEET.STAFF).filter(function (x) {
@@ -1127,20 +1175,20 @@ function staffPerms_(email, role, source) {
 /** 只需登入 */
 function requireLogin_(token) {
   var t = checkToken_(token);
-  if (!t.valid || t.source !== 'users') return { error: '登入已過期' };
+  if (!t.valid || (t.source !== 'users' && !isMaintenanceSuper_(t.email, t.role))) return { error: '登入已過期' };
   return t;
 }
 /** 需要管理員（DC / SYSADMIN） */
 function requireAdmin_(token) {
   var t = checkToken_(token);
-  if (!t.valid || t.source !== 'users') return { error: '登入已過期' };
+  if (!t.valid || (t.source !== 'users' && !isMaintenanceSuper_(t.email, t.role))) return { error: '登入已過期' };
   if (!isAdminRole_(t.role) && levelOfUser_(t.email, t.role) > LEVEL_DC) return { error: '沒有權限' };
   return t;
 }
 /** 開戶：DDC 或以上 */
 function requireAccountManager_(token) {
   var t = checkToken_(token);
-  if (!t.valid || t.source !== 'users') return { error: '登入已過期' };
+  if (!t.valid || (t.source !== 'users' && !isMaintenanceSuper_(t.email, t.role))) return { error: '登入已過期' };
   if (!isAccountManager_(t.role)) return { error: '只有副區總監或以上可以管理帳戶' };
   return t;
 }
@@ -1918,7 +1966,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.26.1',
+    version: '4.27.0',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -6375,7 +6423,7 @@ function normalizeCard_(c) {
 function getCards_(token) {
   var t = checkToken_(token);
   if (!t.valid) return err('登入已過期，請重新登入');
-  if (t.source !== 'users') return ok([]); // 舊 Staff session 不進入管理平台
+  if (t.source !== 'users' && !isMaintenanceSuper_(t.email, t.role)) return ok([]); // 舊 Staff session 不進入管理平台
   var perms = readPerms_();
   var u = readSheet_(SHEET.USERS).filter(function (x) {
     return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
@@ -6946,28 +6994,36 @@ function uiPrompt_(title, message) {
   var r = ui.prompt(title, message, ui.ButtonSet.OK_CANCEL);
   return r.getSelectedButton() === ui.Button.OK ? r.getResponseText() : null;
 }
+function escapeHtml_(value) {
+  return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 function showKeyDialog_(title, key, note) {
   var ui = safeUi_();
+  var isApiKey = String(title || '').indexOf('API Key') >= 0;
+  var prompt = isApiKey ? '請即刻複製下面嘅 API Key：' : '請複製下面嘅橋接密鑰（可再次從選單顯示）：';
+  var footer = isApiKey
+    ? '同一個 Key 要設定去兩個 Vercel 環境變數：PORTAL_{區碼}_APIKEY 同 MEMBER_{區碼}_APIKEY。'
+    : '此為機器橋接密鑰，不是 sheep 登入密碼；只需保存在 Vercel 環境變數。';
   if (!ui) {
     var msg = '\n╔══════════════════════════════════════╗\n'
       + '  ' + title + '\n'
       + '╚══════════════════════════════════════╝\n'
-      + '  API KEY ↓↓↓ 只顯示一次，請即刻複製 ↓↓↓\n\n'
+      + '  ' + prompt + '\n\n'
       + '  ' + key + '\n\n'
-      + '  ↑↑↑ 只取上面一行文字，唔好帶空格 ↑↑↑\n'
-      + (note ? '  ' + note + '\n' : '');
+      + (note ? '  ' + note + '\n' : '') + '  ' + footer + '\n';
     Logger.log(msg); console.log(msg);
     return;
   }
-  var safeKey = String(key).replace(/</g, '&lt;');
+  var safeKey = escapeHtml_(key);
+  var safeNote = escapeHtml_(note || '');
   var html = HtmlService.createHtmlOutput(
     '<div style="font-family:system-ui,-apple-system,\'Noto Sans TC\',sans-serif;padding:8px 4px">'
-    + '<p style="margin:0 0 8px">請即刻複製下面嘅 API Key（<b>只顯示一次</b>）：</p>'
+    + '<p style="margin:0 0 8px">' + escapeHtml_(prompt) + '</p>'
     + '<input id="k" value="' + safeKey + '" readonly style="width:100%;padding:10px;font-size:15px;'
     + 'font-family:ui-monospace,Menlo,Consolas,monospace;border:2px solid #1565c0;border-radius:6px" />'
-    + '<p style="margin:10px 0 0;color:#b00">' + (note || '') + '</p>'
-    + '<p style="margin:8px 0 0;color:#666;font-size:12px">同一個 Key 要設定去兩個 Vercel 環境變數：'
-    + 'PORTAL_{區碼}_APIKEY 同 MEMBER_{區碼}_APIKEY。</p>'
+    + '<p style="margin:10px 0 0;color:#b00">' + safeNote + '</p>'
+    + '<p style="margin:8px 0 0;color:#666;font-size:12px">' + escapeHtml_(footer) + '</p>'
     + '<script>var i=document.getElementById("k");i.focus();i.select();<\/script>'
     + '</div>'
   ).setWidth(560).setHeight(250);
@@ -7087,7 +7143,7 @@ function getHealthCheck_() {
     r.districtCode = districtCode_();
     r.apiKeySet = !!getConfigValue_('API_KEY_HASH');
     r.tokenSecretSet = !!getTokenSecret_();
-    r.maintenanceLoginEnabled = !!getMasterPassword_();
+    r.masterProxyBridgeSet = !!getMasterProxySecret_();
     r.feedbackReady = feedbackReady_();
     r.dcFeedbackReady = dcFeedbackReady_();
     r.sheetId = ss.getId();
@@ -7104,6 +7160,7 @@ function healthCheckMenu() {
     + '區碼：' + (h.districtCode || '（未填）') + '\n'
     + 'API Key：' + (h.apiKeySet ? '已設定 ✅' : '未設定 ❌') + '\n'
     + 'Token 簽署密鑰：' + (h.tokenSecretSet ? '已設定 ✅' : '未設定 ❌') + '\n'
+    + '維護登入橋接密鑰：' + (h.masterProxyBridgeSet ? '已設定 ✅' : '未設定 ❌') + '\n'
     + '一般意見箱：' + (h.feedbackReady ? '就緒 ✅' : '未就緒 ❌') + '\n'
     + 'DC 保密意見分頁：' + (h.dcFeedbackReady ? '就緒 ✅' : '未就緒 ❌') + '\n'
     + '缺少的工作表：' + (missing.length ? missing.join('、') : '無 ✅')
@@ -7112,11 +7169,24 @@ function healthCheckMenu() {
 
 // ===================== 選單 =====================
 
+function showMasterProxySecretMenu() {
+  var secret = getMasterProxySecret_();
+  if (!secret) {
+    ensureMasterProxySecret_();
+    secret = getMasterProxySecret_();
+  }
+  if (!secret) { uiAlert_('錯誤', '無法讀取維護登入橋接密鑰，請先執行 setupSheets()。'); return; }
+  var code = districtCode_() || '區碼';
+  showKeyDialog_('🔐 Vercel 維護登入橋接密鑰', secret,
+    '請將此機器密鑰設為 Vercel 環境變數 PORTAL_' + code + '_MASTER_BRIDGE_SECRET；此值不是 sheep 密碼。');
+}
+
 function onOpen() {
   var ui = safeUi_();
   if (!ui) return;
   ui.createMenu('🧭 區統一後台')
     .addItem('🔑 重新生成 API Key', 'regenerateApiKeyMenu')
+    .addItem('🔐 顯示 Vercel 維護橋接密鑰', 'showMasterProxySecretMenu')
     .addItem('🩺 健康檢查', 'healthCheckMenu')
     .addSeparator()
     .addItem('🧱 補建缺失表（不清空資料）', 'setupSheets')
@@ -7424,7 +7494,10 @@ function setupSheets() {
   var apiKeyHashExisted = !!(originalConfig && originalConfig.getDataRange().getValues().some(function (row) {
     return String(row[0] || '').trim() === 'API_KEY_HASH';
   }));
+  // 舊密碼不再存於 Apps Script；每次 setup 均清除遺留 property（若有）。
+  try { PropertiesService.getScriptProperties().deleteProperty('PORTAL_MASTER_PASSWORD'); } catch (ignored) {}
   var tokenSecretCreated = ensureTokenSecret_();
+  var masterProxySecretCreated = ensureMasterProxySecret_();
 
   blueprint_().forEach(function (bp) {
     var sh = ss.getSheetByName(bp.name);
@@ -7469,6 +7542,7 @@ function setupSheets() {
     + '補上欄位：' + (patched.length ? patched.join('、') : '無') + '\n'
     + 'API Key：' + (key ? '已新生成（下一個視窗顯示）' : '原有設定保持不變') + '\n'
     + 'Token 簽署密鑰：' + (tokenSecretCreated ? '已安全建立（舊登入 Token 失效，請重新登入）' : '原有密鑰保留') + '\n'
+    + '維護登入橋接密鑰：' + (masterProxySecretCreated ? '已自動建立，請由選單顯示並設定到 Vercel' : '原有密鑰保留') + '\n'
     + '一般意見箱：' + (feedbackReady_() ? '就緒 ✅' : '未就緒 ❌') + '\n'
     + 'DC 保密意見分頁：' + (dcFeedbackStoreReady ? '就緒 ✅' : '未就緒 ❌') + '\n\n'
     + '下一步：\n'
@@ -7477,7 +7551,8 @@ function setupSheets() {
     + '3. 借場一條龍：Config 填 TEAMUP_*（Teamup）同 ttlock*（通通鎖）金鑰\n'
     + '4. 部署為 Web App（存取：任何人）→ 複製 /exec\n'
     + '5. 同一個 API Key 設定去兩個 Vercel 環境變數：\n'
-    + '   PORTAL_{區碼}_APIKEY 同 MEMBER_{區碼}_APIKEY');
+    + '   PORTAL_{區碼}_APIKEY 同 MEMBER_{區碼}_APIKEY\n'
+    + '6. 維護登入：Vercel 設 PORTAL_{區碼}_MASTER_PASSWORD；執行「顯示 Vercel 維護橋接密鑰」複製 PORTAL_{區碼}_MASTER_BRIDGE_SECRET。密碼長度由你選擇；短密碼較易被猜中。');
 
   if (key) showKeyDialog_('🔑 你的 API Key（只顯示一次）', key,
     '⚠️ 兩個前端都用呢一個 Key。而家就複製。');
