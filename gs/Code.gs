@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.25.1
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.25.2
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -318,7 +318,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.25.1',
+      version: '4.25.2',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -1814,7 +1814,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.25.1',
+    version: '4.25.2',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -5544,15 +5544,12 @@ function listTtlockKeyboardPwds_(conn, lockId) {
   return rows;
 }
 
-/** 同一鍵盤碼是否與申請時段重疊；缺少有效期資料時保守視為仍佔用。 */
+/** 未真正到期的鍵碼視為仍被預約，避免改寫另一筆未來申請正在使用的同一 keyboardPwdId。 */
 function ttlockPwdOverlaps_(record, startMs, endMs) {
   var oldEnd = Number(record && record.endDate);
-  var oldStart = Number(record && record.startDate);
   if (!oldEnd) return true;
-  if (oldEnd <= Date.now()) return false;
-  if (oldStart && oldStart >= endMs) return false;
-  if (oldEnd <= startMs) return false;
-  return true;
+  // 即使舊時段與新時段不重疊，只要舊密碼現在仍未到期，就不可改寫同一條 key。
+  return oldEnd > Date.now();
 }
 
 /** 重用既有 keyboardPwdId，只更新密碼名稱及有效期，不另開一條 key。 */
@@ -5823,6 +5820,22 @@ function applyTeamupApproved_(booking, extraNotes) {
   }
   return out;
 }
+/** 將 Teamup 衝突回應轉為申請人可理解的提示。 */
+function teamupEventErrorMessage_(code, text) {
+  var data = {};
+  try { data = JSON.parse(String(text || '{}')); } catch (ignore) {}
+  var detail = data.error || data;
+  var errorId = String((detail && detail.id) || data.type || '').toLowerCase();
+  var message = String((detail && (detail.message || detail.detail || detail.title)) || '').toLowerCase();
+  if (errorId === 'event_overlapping' || /event.overlapping|schedule conflict|排程衝突|時段.*重疊/.test(errorId + ' ' + message)) {
+    return '該時段已有人使用或已有行事曆安排，請選擇其他時段後再申請。';
+  }
+  if (Number(code) === 403 || errorId === 'no_permission') {
+    return 'Teamup 權限不足，申請未能提交；請聯絡管理員檢查日曆寫入權限。';
+  }
+  return 'Teamup 建立事件失敗 HTTP ' + code + '：' + String((detail && (detail.message || detail.detail)) || text || '未知錯誤');
+}
+
 /** 建立 Teamup 事件到指定子日曆 */
 function createTeamupEvent_(subId, title, notes, startDt, endDt, customFields, who) {
   if (!teamupReady_() || !subId) return { ok: false, error: 'Teamup 尚未設定' };
@@ -5837,7 +5850,7 @@ function createTeamupEvent_(subId, title, notes, startDt, endDt, customFields, w
   if (who) eventBody.who = who;
   var body = JSON.stringify(eventBody);
   var r = teamupFetch_('https://api.teamup.com/' + teamupCfg_().calendarId + '/events', { method: 'post', payload: body });
-  if (r.code < 200 || r.code >= 300) return { ok: false, error: 'Teamup 建立事件失敗 HTTP ' + r.code + '：' + r.text };
+  if (r.code < 200 || r.code >= 300) return { ok: false, error: teamupEventErrorMessage_(r.code, r.text) };
   try { var data = JSON.parse(r.text); return { ok: true, eventId: data && data.event ? data.event.id : '' }; }
   catch (e) { return { ok: true, eventId: '' }; }
 }
@@ -5864,6 +5877,7 @@ function teamupMoveToApproved_(eventId, booking, extraNotes) {
   var startDt = ev.start_dt || (booking ? toTeamupDt_(booking.startDate, false) : '');
   var endDt = ev.end_dt || (booking ? toTeamupDt_(booking.endDate || booking.startDate, true) : startDt);
   var body = {
+    id: String(eventId),
     subcalendar_ids: [Number(c.approvedSub)],
     title: title,
     notes: notes,
@@ -5908,6 +5922,7 @@ function teamupOnReject_(req, status) {
     var fields = teamupCustomFields_(req);
     if (!fields.error) Object.keys(fields.custom).forEach(function (key) { customFields[key] = fields.custom[key]; });
     var body = {
+      id: String(req.teamupEventId),
       subcalendar_ids: c.rejectedSub ? [Number(c.rejectedSub)] : (ev.subcalendar_ids || []),
       title: title,
       notes: notes,

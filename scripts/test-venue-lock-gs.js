@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.25.1）
+ * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.25.2）
  *
  * 涵蓋：
  *  1. 跨區自動探測（api.sciener.com 10003 → 自動切換 euapi.ttlock.com + 852 電話帳號相容）
@@ -96,7 +96,7 @@ const ttlockState = {
   changedPwds: [],
 };
 const teamupEvents = {};
-const teamupState = { failNextCreate: false, failNextUpdate: false };
+const teamupState = { failNextCreate: false, failNextOverlap: false, failNextUpdate: false };
 let nextPwdId = 700100;
 let nextTeamupId = 5001;
 
@@ -242,6 +242,10 @@ const ctx = {
           teamupState.failNextCreate = false;
           return reply(503, { error: 'Teamup unavailable' });
         }
+        if (teamupState.failNextOverlap) {
+          teamupState.failNextOverlap = false;
+          return reply(400, { error: { id: 'event_overlapping', message: 'Event overlaps an existing reservation' } });
+        }
         const body = JSON.parse(opt.payload);
         assert.ok(body.custom && body.custom['1'] && body.who, 'Teamup 事件必須提供參加人數 custom[1] 及內建 who 欄位');
         if (!validTeamupIso(body.start_dt) || !validTeamupIso(body.end_dt)) {
@@ -264,6 +268,9 @@ const ctx = {
             return reply(403, { error: { id: 'no_permission', message: 'no permission' } });
           }
           const body = JSON.parse(opt.payload);
+          if (body.subcalendar_ids && body.subcalendar_ids.includes(102)) {
+            assert.strictEqual(String(body.id), String(id), 'Teamup 更新既有事件需在 body 帶上 event id');
+          }
           if (!validTeamupIso(body.start_dt) || !validTeamupIso(body.end_dt)) {
             return reply(400, { error: { id: 'event_invalid_datetime_string', message: `Invalid datetime string: "${body.start_dt}"` } });
           }
@@ -315,7 +322,7 @@ function callPost(action, body = {}) {
   return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action, apiKey, ...body }) } }));
 }
 
-console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.25.1)');
+console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.25.2)');
 
 // 1. 登入超管／DC 並檢查初始健康狀態
 const loginRes = callPost('login', { email: ctx.MASTER_EMAIL, password: props.PORTAL_MASTER_PASSWORD });
@@ -324,10 +331,10 @@ const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.25.1');
+assert.strictEqual(h0.data.version, '4.25.2');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
-console.log('  ✓ getHealthCheck 回傳版本 4.25.1 及電子鎖初始狀態');
+console.log('  ✓ getHealthCheck 回傳版本 4.25.2 及電子鎖初始狀態');
 
 // 2. 模擬舊版 Sheet：刻意移除 VenueBookings 的 pwdRef / passcode 欄及 Venues 的 scienerLockId 欄
 sheets.VenueBookings._data[0] = [
@@ -432,6 +439,15 @@ const failedSubmit = callPost('submitVenueRequest', {
 assert.strictEqual(failedSubmit.ok, false, 'Teamup 建立失敗不可回報申請成功');
 assert.ok(failedSubmit.error.includes('Teamup'), '應回報 Teamup 錯誤原因');
 assert.strictEqual(sheets.VenueBookings._data.length, venueRowsBeforeFailure, 'Teamup 建立失敗時不得新增孤立的 pending 表格記錄');
+teamupState.failNextOverlap = true;
+const overlapSubmit = callPost('submitVenueRequest', {
+  venueId: 'HQ-1704', name: '撞期測試', phone: '91234567', activityName: '撞期測試',
+  attendeeCount: 5, agreeRules: true,
+  startDate: '2027-05-15T19:00', endDate: '2027-05-15T20:00',
+});
+assert.strictEqual(overlapSubmit.ok, false);
+assert.strictEqual(overlapSubmit.error, '該時段已有人使用或已有行事曆安排，請選擇其他時段後再申請。');
+assert.strictEqual(sheets.VenueBookings._data.length, venueRowsBeforeFailure, '撞期失敗不得留下 pending 記錄');
 
 // 7. 申請人提交借場（電話帶前導 0：05129876，時段為未來香港時間）
 const submit1 = callPost('submitVenueRequest', {
@@ -589,12 +605,8 @@ assert.strictEqual(reusedExpired.reused, true);
 assert.strictEqual(ttlockState.addedPwds.length, addedBeforeReuse, '重用過期碼不得呼叫 add 新增 key');
 assert.strictEqual(ttlockState.changedPwds.length, changedBeforeReuse + 1, '應呼叫 change 更新舊 key 時段');
 
-// 頭4位 6107 現在仍在申請時段內，必須嘗試尾4位 0452，而不是 6108。
-ttlockState.existingPwds.push({
-  keyboardPwdId: 909002, lockId: 170488, keyboardPwd: '6107',
-  startDate: Date.parse('2027-06-01T00:00:00+08:00'),
-  endDate: Date.parse('2027-08-01T00:00:00+08:00'), keyboardPwdName: '目前有效',
-});
+// 舊 key 的時段雖早於新申請，但它此刻尚未到期；不可改寫原 key，應改用尾4 0452。
+// 這覆蓋「前一位用戶下午時段仍有效，後一位申請晚些時段」的實際情況。
 const tailFirst = ctx.createTtlockPasscode_(
   '61070452', '2027-07-10T19:00', '2027-07-10T20:00', '尾4測試', '170488'
 );
