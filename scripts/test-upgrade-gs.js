@@ -683,12 +683,24 @@ check('舊 UnitSections 自訂欄位及既有集會資料升級保留，重跑�
   } finally { sheets.UnitSections = previous; }
 });
 
+check('升級追加獨立旅團資料卡及固定權限，原 Cards／Perms 儲存格不變', () => {
+  assert.strictEqual(sheets.Cards._data.filter(r => r[0] === 'troopDirectory').length, 1);
+  assert.strictEqual(sheets.Perms._data.filter(r => r[0] === 'troopDirectory').length, 1);
+  const card = ctx.getCards_(ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12)).data.find(c => c.cardId === 'troopDirectory');
+  assert.ok(card);
+  assert.strictEqual(card.url, '/troop-directory');
+  assert.strictEqual(card.access, 'edit');
+  assert.strictEqual(ctx.requireCardEdit_(ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12), 'visit').error != null, true);
+  assert.strictEqual(ctx.requireCardEdit_(ctx.makeToken_('staff@x.org', 'STAFF', 12), 'troopDirectory').error != null, true);
+});
+
 check('現行發布快照與開發源一致，原 v4.29.0 凍結快照保留', () => {
-  const current = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.30.0.gs'), 'utf8');
+  const current = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.31.0.gs'), 'utf8');
   assert.strictEqual(current, code);
+  assert.ok(fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.30.0.gs'), 'utf8').includes("version: '4.30.0'"));
   const frozen = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.29.0.gs'), 'utf8');
   assert.ok(frozen.includes("version: '4.29.0'"));
-  assert.ok(code.includes("version: '4.30.0'"));
+  assert.ok(code.includes("version: '4.31.0'"));
 });
 
 check('前端可下載的完整 Code.gs 與後台原始檔完全一致', () => {

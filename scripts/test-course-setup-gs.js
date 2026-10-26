@@ -337,9 +337,9 @@ check('saveCourseLink 照存 sheetId／setupJson；undefined＝保留', () => {
   assert.strictEqual(got.hasSetup, true);
 });
 
-check('健康檢查版本 4.30.0', () => {
+check('健康檢查版本 4.31.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.30.0');
+  assert.strictEqual(parsed.data.version, '4.31.0');
 });
 
 

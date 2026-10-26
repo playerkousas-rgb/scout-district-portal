@@ -2,13 +2,13 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
-import type { UnitSection, VisitBoard, VisitSection } from '@/lib/types';
-import { SECTIONS, SECTION_LABEL } from '@/lib/visits';
+import type { UnitSection, TroopDirectoryBoard, VisitSection } from '@/lib/types';
+import { activeSections, SECTION_LABEL } from '@/lib/visits';
 import { blankUnitSection, unitSectionDrafts } from '@/lib/unitSectionDrafts';
 
 /** 按旅維護，各支部一張編輯卡；儲存只影響所選旅。 */
 export default function UnitSectionsEditor({ board, canEdit, token, reload, flash, setError }: {
-  board: VisitBoard; canEdit: boolean; token: string; reload: () => Promise<void>;
+  board: TroopDirectoryBoard; canEdit: boolean; token: string; reload: () => Promise<void>;
   flash: (s: string) => void; setError: (s: string) => void;
 }) {
   const router = useRouter();
@@ -18,6 +18,8 @@ export default function UnitSectionsEditor({ board, canEdit, token, reload, flas
   const [rows, setRows] = useState(() => unitSectionDrafts(initial, board.unitSections || []));
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const selected = board.units.find(u => u.troop === troop);
+  const openSections = selected ? activeSections(selected) : [];
   const ready = board.unitSectionsReady === true && board.unitSectionsScopedSave === true;
   const disabled = !canEdit || saving;
   function patch(i: number, value: Partial<UnitSection>) {
@@ -53,12 +55,14 @@ export default function UnitSectionsEditor({ board, canEdit, token, reload, flas
     <label>選擇旅團 <select value={troop} disabled={saving} onChange={e => selectTroop(e.target.value)}>
       {board.units.map(u => <option key={u.troop} value={u.troop}>{u.troop} · {u.label}</option>)}
     </select></label>
+    <div className="vs-card-sections">{openSections.map(section => <span className="vs-chip on" key={section}>{SECTION_LABEL[section]}</span>)}</div>
+    {!openSections.length && <p>此旅暫未設定已開設支部。</p>}
     <p className="fps-help">已按支部團數補出尚未設定的支部；空欄不會複製旅層的時間或社交平台。填寫後按下方「儲存此旅」才會寫入。</p>
     <div className="unit-editor-grid">
-      {rows.map((row, i) => <fieldset key={`${troop}-${i}`} className="unit-editor-card" disabled={disabled}>
+      {rows.map((row, i) => openSections.includes(row.section as VisitSection) ? <fieldset key={`${troop}-${i}`} className="unit-editor-card" disabled={disabled}>
         <legend>{row.section ? SECTION_LABEL[row.section] : '新增支部'}{row.unitCode ? ` · ${row.unitCode}` : ''}</legend>
         <label>支部<select value={row.section} onChange={e => patch(i, { section: e.target.value as VisitSection | '' })}>
-          <option value="">請選擇支部</option>{SECTIONS.map(s => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
+          <option value="">請選擇支部</option>{openSections.map(s => <option key={s} value={s}>{SECTION_LABEL[s]}</option>)}
         </select></label>
         <label>團代號<input value={row.unitCode} maxLength={3} placeholder="單團留空；多團填 1／2，空團 A1、海團 S1" onChange={e => patch(i, { unitCode: e.target.value.toUpperCase() })} /></label>
         <label>集會時間<input value={row.meetingTime} maxLength={200} placeholder="例如：星期六 14:00–17:00" onChange={e => patch(i, { meetingTime: e.target.value })} /></label>
@@ -69,10 +73,10 @@ export default function UnitSectionsEditor({ board, canEdit, token, reload, flas
         <label><input type="checkbox" checked={row.active !== false} onChange={e => patch(i, { active: e.target.checked })} /> 支部啟用</label>
         <label><input type="checkbox" checked={row.publicVisible !== false} onChange={e => patch(i, { publicVisible: e.target.checked })} /> 在成員名錄公開</label>
         {canEdit && <button type="button" className="mini-btn" onClick={() => { setRows(prev => prev.filter((_, index) => index !== i)); setDirty(true); }}>移除此團設定</button>}
-      </fieldset>)}
+      </fieldset> : null)}
     </div>
     {canEdit && <div className="unit-editor-actions">
-      <button type="button" className="mini-btn" disabled={saving || !troop} onClick={() => { setRows(prev => [...prev, blankUnitSection(troop)]); setDirty(true); }}>＋ 新增支部／團</button>
+      <button type="button" className="mini-btn" disabled={saving || !troop || !openSections.length} onClick={() => { setRows(prev => [...prev, blankUnitSection(troop, openSections[0])]); setDirty(true); }}>＋ 新增支部／團</button>
       <button type="button" className="btn-sm" disabled={saving || !troop} onClick={save}>{saving ? '儲存中…' : `儲存第 ${troop} 旅（只影響此旅）`}</button>
       <span role="status">{dirty ? '尚未儲存' : '切換旅團可查看其他旅的資料'}</span>
     </div>}

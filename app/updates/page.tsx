@@ -5,10 +5,17 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。Apps Script 只有在區方完成備份、設定及驗收後才由區方自行部署。</p>
       <div className="info-card">
+        <h3>v4.31.0 — 旅團資料／探訪獨立權限・只顯示已開設支部</h3>
+        <p>旅團資料改用獨立卡片及頁面：區幹部均可看，ADC 或以上可修改。旅團探訪所有已登入用戶可新增，只有 DDC 或以上可修改／刪除已存紀錄，包括自己的。</p>
+        <p>後台即時核對 Users；舊 Perms 的錯誤 edit 權限不能放寬限制。1745 僅童軍支部便只顯示一個標籤；已關閉支部的歷史設定保留但不顯示。</p>
+        <p>先備份、更新 GS、執行 setupSheets() 追加獨立卡片及權限行，再更新原有 Web App 部署；舊個人卡片位置自動遷移。</p>
+        <a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">下載完整 Code.gs v4.31.0</a>
+      </div>
+      <div className="info-card">
         <h3>v4.30.0 — 恢復 YMIS 帳密入口・個人排序・按旅分支部設定</h3>
         <p>YMIS 沿用已完成的帳密內頁，不再直接跳網站；SYSADMIN 亦可進入。所有卡片均可選擇排第幾位，位置只存於瀏覽器。</p>
         <p>旅團資料先選旅，再逐支部設定時間、地點及社交平台；儲存只影響該旅。請先備份並更新 GS、執行 setupSheets() 及更新原有部署，才能啟用安全的按旅儲存。</p>
-        <a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">下載完整 Code.gs v4.30.0</a>
+        <a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">下載最新版完整 Code.gs</a>
       </div>
       <div className="info-card">
         <h3>v4.29.1 — 🧭 區內旅團升級做旅→團階層名錄（對齊港島總會官網）</h3>

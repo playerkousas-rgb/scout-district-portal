@@ -75,7 +75,7 @@ export default function CardItem({
       <div className="desc">{card.description}</div>
       <div className="card-foot">
         <span className={`access ${isView ? 'view' : 'edit'}`}>
-          {isView ? '👁 可看' : '✏️ 可管理'}{card.embed && card.type !== 'builtin' ? ' · 無感' : ''}
+          {card.cardId === 'visit' ? (isView ? '👁 可看 · ＋ 可新增' : '✏️ 可改／刪 · ＋ 可新增') : isView ? '👁 可看' : '✏️ 可管理'}{card.embed && card.type !== 'builtin' ? ' · 無感' : ''}
         </span>
         {canReorder && (
           <span className="card-move" onClick={(e) => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>

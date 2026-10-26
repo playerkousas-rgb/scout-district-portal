@@ -48,7 +48,9 @@ export default function AdminPage() {
   function cellVal(c: string, r: string): AccessLevel {
     return (matrix[c] && matrix[c][r]) || '';
   }
+  const isFixedFeature = (id: string) => id === 'visit' || id === 'troopDirectory';
   function toggle(c: string, r: string) {
+    if (isFixedFeature(c)) return;
     setMsg('');
     setMatrix(prev => {
       const cur = (prev[c] && prev[c][r]) || '';
@@ -57,6 +59,7 @@ export default function AdminPage() {
     });
   }
   function setRow(c: string, v: AccessLevel) {
+    if (isFixedFeature(c)) return;
     if (!bundle) return;
     setMsg('');
     setMatrix(prev => {
@@ -191,6 +194,7 @@ export default function AdminPage() {
 
           {/* 權限矩陣 */}
           <p className="fps-help" style={{ marginBottom: 10 }}>💡 點擊任何格子自由切換：<b>—</b> 不可見 → <b>👁</b> 可看（唯讀） → <b>✏️</b> 可管理（新增／修改／批核），改完記得按「💾 儲存權限」。</p>
+          <p className="fps-help">旅團資料及旅團探訪採固定、獨立權限，不可在此矩陣轉授：資料 ADC+ 可修改；探訪人人可新增、DDC+ 才可修改／刪除。探訪的 👁 表示仍可新增。</p>
           <div className="toolbar">
             <button className="btn-sm" onClick={save} disabled={saving}>{saving ? '儲存中…' : '💾 儲存權限'}</button>
             {msg && <span className="ok-msg">{msg}</span>}
@@ -214,12 +218,12 @@ export default function AdminPage() {
                     </td>
                     {bundle.roles.map(r => {
                       const v = cellVal(c.cardId, r.role);
-                      return <td key={r.role} className={`pcell ${CELL[v].cls}`} onClick={() => toggle(c.cardId, r.role)}>{CELL[v].txt}</td>;
+                      return <td key={r.role} title={isFixedFeature(c.cardId) ? '固定角色政策（探訪唯讀者仍可新增）' : undefined} className={`pcell ${CELL[v].cls}`} onClick={() => toggle(c.cardId, r.role)}>{CELL[v].txt}</td>;
                     })}
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      <button className="mini-btn" onClick={() => setRow(c.cardId, 'view')}>👁</button>{' '}
-                      <button className="mini-btn" onClick={() => setRow(c.cardId, 'edit')}>✏️</button>{' '}
-                      <button className="mini-btn danger" onClick={() => setRow(c.cardId, '')}>✕</button>
+                      <button className="mini-btn" disabled={isFixedFeature(c.cardId)} onClick={() => setRow(c.cardId, 'view')}>👁</button>{' '}
+                      <button className="mini-btn" disabled={isFixedFeature(c.cardId)} onClick={() => setRow(c.cardId, 'edit')}>✏️</button>{' '}
+                      <button className="mini-btn danger" disabled={isFixedFeature(c.cardId)} onClick={() => setRow(c.cardId, '')}>✕</button>
                     </td>
                     <td>
                       <button

@@ -768,7 +768,18 @@ export interface Visit {
   updatedAt?: string;
 }
 
+export interface TroopDirectoryBoard {
+  units: ScoutUnit[];
+  unitSections?: UnitSection[];
+  publicTroopFieldsReady?: boolean;
+  unitSectionsReady?: boolean;
+  unitSectionsScopedSave?: boolean;
+  canEdit: boolean;
+  permissionsVersion: number;
+}
+
 export interface VisitBoard {
+  permissions?: { version: number; canRegister: boolean; canEditRecords: boolean };
   from: string;
   to: string;
   today: string;

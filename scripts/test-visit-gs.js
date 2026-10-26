@@ -148,9 +148,12 @@ check('日期／季度：Date 物件、2026/3/8 都讀到，季度自動計', ()
   assert.strictEqual(ctx.visitQuarter_('2026-12-31'), 4);
 });
 
-check('冇 visit edit 權限唔可以登記', () => {
+check('visit 只有 view 的用戶也可新增，但不能修改／刪除自己的紀錄', () => {
   const r = ctx.saveVisit_(alToken, { troop: '206', visitDate: `${thisYear}-03-01` });
-  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(ctx.saveVisit_(alToken, { id: r.data.id, troop: '206', note: '試圖改自己' }).ok, false);
+  assert.strictEqual(ctx.deleteVisit_(alToken, r.data.id).ok, false);
+  assert.strictEqual(ctx.deleteVisit_(dcToken, r.data.id).ok, true);
 });
 
 check('登記探訪：預設今日、探訪幹部自動填登入者、季度自動計', () => {
@@ -389,9 +392,111 @@ check('DC 保密留言卡清楚標示區總監及系統超管存取範圍', () =
   assert.strictEqual(card.description, '只限區總監查閱（系統超級管理員亦可）');
 });
 
-check('健康檢查版本 4.30.0', () => {
+check('健康檢查版本 4.31.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.30.0');
+  assert.strictEqual(parsed.data.version, '4.31.0');
+});
+
+
+check('旅團資料獨立 API：ADC 可修改資料，但探訪只有新增權；AL 唯讀資料', () => {
+  const directory = ctx.getTroopDirectoryBoard_(ghToken);
+  assert.strictEqual(directory.ok, true);
+  assert.strictEqual(directory.data.canEdit, true);
+  assert.strictEqual(directory.data.permissionsVersion, 1);
+  assert.ok(!('visits' in directory.data), '獨立名錄不得混入探訪紀錄');
+  assert.strictEqual(ctx.getTroopDirectoryBoard_(alToken).data.canEdit, false);
+  const permissions = ctx.getVisitBoard_(ghToken).data.permissions;
+  assert.strictEqual(permissions.canRegister, true);
+  assert.strictEqual(permissions.canEditRecords, false, '舊 Perms ADC edit 不得放寬固定門檻');
+  assert.strictEqual(ctx.saveUnits_(ghToken, [{ troop: '1745', sections: { scout: '1', cub: '0' } }]).ok, true);
+  assert.strictEqual(ctx.saveUnitSections_(alToken, []).ok, false);
+  sheets.UnitSections = makeSheet('UnitSections', ctx.blueprint_().find(x => x.name === 'UnitSections').rows);
+  assert.strictEqual(ctx.saveUnitSections_(ghToken, [], '1745').ok, true);
+  const g = JSON.parse(ctx.doGet({ parameter: { action: 'getTroopDirectoryBoard', token: ghToken, apiKey: testApiKey } }));
+  assert.strictEqual(g.ok, true);
+  assert.strictEqual(g.data.canEdit, true);
+});
+
+check('各種 ADC／DDC、DC、SYSADMIN、STAFF／領袖的固定權限與卡片互不繼承', () => {
+  const cardsBefore = sheets.Cards;
+  const permsBefore = sheets.Perms;
+  const bp = ctx.blueprint_().find(x => x.name === 'Cards');
+  sheets.Cards = makeSheet('Cards', bp.rows.filter((row, i) => i === 0 || ['visit', 'troopDirectory'].includes(row[0])));
+  sheets.Users._data[0].push('cards');
+  const roles = ['DDC_ADMIN', 'DDC_TRAINING', 'ADC_GH', 'ADC_CUBS', 'ADC_SCOUT', 'ADC_VENTURE', 'ADC_ROVER', 'STAFF', 'LEADER', 'SYSADMIN', 'DC'];
+  try {
+    roles.forEach((role, i) => {
+      const email = `split-${i}@x.org`;
+      sheets.Users.appendRow([email, role, 'TRUE', role, 'contacts']); // 舊個人範圍不能誤封兩個全員功能
+      sheets.Roles.appendRow([role, role, 'TRUE', role === 'SYSADMIN' ? 0 : role === 'DC' ? 1 : role.startsWith('DDC') ? 2 : role.startsWith('ADC') ? 3 : 5]);
+      const token = ctx.makeToken_(email, role, 12);
+      const visitEdit = ['SYSADMIN', 'DC', 'DDC_ADMIN', 'DDC_TRAINING'].includes(role);
+      const directoryEdit = visitEdit || role.startsWith('ADC');
+      // 即使 Perms 完全沒有此角色或此卡，固定政策仍然一致。
+      const actual = ctx.getCards_(token).data;
+      assert.strictEqual(actual.find(x => x.cardId === 'visit').access, visitEdit ? 'edit' : 'view', role);
+      assert.strictEqual(actual.find(x => x.cardId === 'troopDirectory').access, directoryEdit ? 'edit' : 'view', role);
+      assert.strictEqual(ctx.getTroopDirectoryBoard_(token).data.canEdit, directoryEdit, role);
+      const created = ctx.saveVisit_(token, { troop: '1745', visitDate: `${thisYear}-10-26`, visitorEmail: 'forged@x.org', visitorName: '冒認他人' });
+      assert.strictEqual(created.ok, true, role + ' 可新增');
+      const saved = ctx.getVisitBoard_(token).data.visits.find(x => x.id === created.data.id);
+      if (!visitEdit) { assert.strictEqual(saved.visitorEmail, email); assert.strictEqual(saved.visitorName, role); }
+      const before = JSON.stringify(sheets.Visits._data);
+      const updated = ctx.saveVisit_(token, { id: created.data.id, troop: '1745', visitDate: `${thisYear}-10-26`, note: '修改' });
+      assert.strictEqual(updated.ok, visitEdit, role + ' 修改自己');
+      if (!visitEdit) assert.strictEqual(JSON.stringify(sheets.Visits._data), before);
+      assert.strictEqual(ctx.deleteVisit_(token, created.data.id).ok, visitEdit, role + ' 刪除自己');
+      if (!visitEdit) assert.strictEqual(ctx.deleteVisit_(dcToken, created.data.id).ok, true);
+    });
+    sheets.Perms = makeSheet('Perms', [['cardId', 'STAFF', 'ADC_SCOUT'], ['visit', 'edit', 'edit'], ['troopDirectory', 'edit', 'edit']]);
+    const staffToken = ctx.makeToken_('split-7@x.org', 'STAFF', 12);
+    assert.strictEqual(ctx.requireCardEdit_(staffToken, 'troopDirectory').error != null, true);
+    assert.strictEqual(ctx.requireCardEdit_(staffToken, 'visit').error != null, true);
+    assert.strictEqual(ctx.saveUnits_(staffToken, [{ troop: '1745', sections: { scout: '1' } }]).ok, false);
+    assert.strictEqual(ctx.saveUnitSections_(staffToken, [], '1745').ok, false);
+    assert.strictEqual(ctx.savePerms_(dcToken, { visit: { ADC_SCOUT: 'edit' }, troopDirectory: { STAFF: 'edit' } }).ok, true);
+    const matrix = ctx.readPerms_();
+    assert.strictEqual(matrix.visit.ADC_SCOUT, 'view');
+    assert.strictEqual(matrix.troopDirectory.STAFF, 'view');
+  } finally {
+    if (cardsBefore) sheets.Cards = cardsBefore; else delete sheets.Cards;
+    sheets.Perms = permsBefore;
+  }
+});
+
+check('即時停用／降職／刪帳戶，舊 token 不得保留新增或修改權；匿名及舊 Staff 來源不得進入', () => {
+  const user = ['live@x.org', 'DDC_ADMIN', 'TRUE', '副總監'];
+  sheets.Users._data.push(user);
+  const token = ctx.makeToken_(user[0], 'DDC_ADMIN', 12);
+  assert.strictEqual(ctx.requireCardEdit_(token, 'visit').ok, true);
+  user[1] = 'ADC_SCOUT';
+  assert.ok(ctx.requireCardEdit_(token, 'visit').error);
+  user[2] = 'FALSE';
+  assert.strictEqual(ctx.saveVisit_(token, { troop: '1745' }).ok, false);
+  assert.strictEqual(ctx.getTroopDirectoryBoard_(token).ok, false);
+  sheets.Users._data.pop();
+  assert.strictEqual(ctx.getVisitBoard_(token).ok, false);
+  assert.strictEqual(ctx.getTroopDirectoryBoard_('').ok, false);
+  assert.strictEqual(ctx.saveVisit_('', { troop: '1745' }).ok, false);
+  assert.strictEqual(ctx.cardAccessOf_({ email: 'dc@x.org', role: 'DC', source: 'staff' }, 'visit'), '');
+  assert.strictEqual(ctx.cardAccessOf_({ email: 'dc@x.org', role: 'DC', source: 'staff' }, 'troopDirectory'), '');
+});
+
+check('1745 只公開童軍標籤，0 團或已關閉的舊維護列不顯示，原資料仍保留', () => {
+  const before = sheets.UnitSections;
+  sheets.UnitSections = makeSheet('UnitSections', [['troop', 'section', 'unitCode', 'active', 'publicVisible'],
+    ['1745', 'scout', '', 'TRUE', 'TRUE'], ['1745', 'venture', '', 'TRUE', 'TRUE']]);
+  try {
+    const payload = ctx.listDistrictTroops_().data.troops.find(x => x.troop === '1745');
+    assert.deepStrictEqual(Object.keys(payload.sectionCounts), ['scout']);
+    assert.strictEqual(payload.units.length, 1);
+    assert.strictEqual(payload.units[0].section, 'scout');
+    assert.strictEqual(ctx.getTroopDirectoryBoard_(ghToken).data.unitSections.length, 2, '管理端保留隱藏列，儲存不丟資料');
+    sheets.UnitSections._data.splice(1, 1); // 只餘已關閉深資的歷史列
+    const scaffold = ctx.listDistrictTroops_().data.troops.find(x => x.troop === '1745');
+    assert.strictEqual(scaffold.units.length, 1, '已關閉支部不阻擋現有童軍支部生成骨架');
+    assert.strictEqual(scaffold.units[0].section, 'scout');
+  } finally { sheets.UnitSections = before; }
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

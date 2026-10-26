@@ -1,0 +1,13 @@
+--- a/app/troops/page.tsx
++++ b/app/troops/page.tsx
+@@ -132,7 +132,9 @@
+                         {SECTION_META.map((meta) => {
+                           const count = troop.sectionCounts?.[meta.key as TroopSectionKey]
+                             || String(derivedCounts[meta.key] || '');
+-                          const active = Boolean(count);
++                          const active = String(count).toUpperCase().split(/[^A-Z0-9]+/)
++                            .some(token => /^[AS]\d{1,2}$/.test(token) || (/^\d{1,2}$/.test(token) && Number(token) > 0));
++                          if (!active) return null;
+                           return (
+                             <span
+                               key={meta.key}

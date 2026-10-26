@@ -56,6 +56,7 @@ export const DEMO_TOKEN = 'demo-session-token';
 // ───────────────────────── 卡片（照後台 Cards 表，冇 news） ─────────────────────────
 
 export const DEMO_CARDS: Record<string, any>[] = [
+  { cardId: 'troopDirectory', title: '旅團資料', icon: '🧭', type: 'builtin', url: '/troop-directory', description: '各旅已開設支部資料 · ADC 或以上可修改', order: 1.1, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'visit', title: '旅團探訪', icon: '🏕', type: 'builtin', url: '/visit', description: '一撳登記探訪 · 未探旅團紅燈 · 季度報告', order: 1, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'contacts', title: '聯絡簿', icon: '📇', type: 'builtin', url: '/contacts', description: '聯絡電話：旅團 · 港島地域 · 總會（職員姓名區方可改）', order: 2, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'awards', title: '獎勵提名', icon: '🎖', type: 'builtin', url: '/awards', description: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', order: 3, enabled: true, embed: false, source: 'core', category: 'done' },
@@ -108,7 +109,8 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
       else if (c.cardId === 'venueReg') m[c.cardId][role] = lv <= 2 || role === 'STAFF' ? 'edit' : '';
       else if (c.cardId === 'rooms') m[c.cardId][role] = 'view';
       else if (c.cardId === 'ymis') m[c.cardId][role] = 'view';
-      else if (c.cardId === 'visit') m[c.cardId][role] = lv <= 3 ? 'edit' : 'view';
+      else if (c.cardId === 'troopDirectory') m[c.cardId][role] = lv <= 3 ? 'edit' : 'view';
+      else if (c.cardId === 'visit') m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
       else if (c.cardId === 'circulars') m[c.cardId][role] = lv <= 4 ? 'edit' : 'view';
       else m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
     });
@@ -173,7 +175,7 @@ export const DEMO_UNITS: Record<string, any>[] = [
   { troop: '206', label: '港島第206旅', org: '番禺會所學校（香港）', sections: { gh: '1', cub: '2', scout: '2', venture: '1', rover: '' } },
   { troop: '242', label: '港島第242旅', org: '東華三院香港華都扶輪社天翎平田長者地區中心', sections: { gh: '1', cub: '1', scout: '1', venture: '', rover: '' } },
   { troop: '1222', label: '港島第1222旅', org: '香港聖公會麥理浩夫人中心', sections: { gh: '', cub: '1', scout: '1', venture: '', rover: '' } },
-  { troop: '1745', label: '港島第1745旅', org: '明愛柴灣馬登基金中學', sections: { gh: '', cub: '', scout: '1', venture: '1', rover: '1' } },
+  { troop: '1745', label: '港島第1745旅', org: '港島民生書院', sections: { gh: '', cub: '', scout: '1', venture: '', rover: '' } },
 ];
 
 /** v4.29.0 旅→團階層示範：206 兩個公開團＋60 一個未公開團（展示停用／非公開過濾） */
@@ -537,7 +539,7 @@ export interface DemoDb {
 
 export function freshDemoDb(): DemoDb {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     config: {
       districtName: '筲箕灣區（示範）',
       theme: '',
