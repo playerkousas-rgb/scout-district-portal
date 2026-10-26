@@ -323,23 +323,29 @@ StockRequests 新增一行 status=pending
 { "ok": true, "refCode": "SR-20260818-1234", "data": { "refCode": "SR-20260818-1234", "refCodes": ["SR-…"] } }
 ```
 
-## 借場（而家測試：填表 → Teamup 登記 → 呢邊批核）
+## 借場（member-portal → GS → Teamup → 區管理系統批核）
 
 ```
-member-portal 填表
+member-portal 借場表提交
    POST action=submitVenueRequest（別名 addVenueRequest）
+   { venueId, name, position, phone, email, troop, purpose, activityName, attendeeCount,
+     startDate, endDate, agreeRules }
         │
-        ├─ VenueBookings 新增一行 status=pending
-        └─ Teamup「申請中」子日曆建【申請】事件，寫入 teamupEventId
-             （Teamup 失敗唔擋收表，warn 會回傳）
-        │
+        ├─ GS 驗證活動名稱（≤120 字）及參加人數（1–9999 正整數）
+        ├─ 先在 Teamup 藍色「申請中」建立事件：
+        │    who = 姓名＋職位（Teamup 內建欄位）
+        │    custom["1"] = 參加人數（Config key: TEAMUP_FIELD_ATTENDEE_KEY）
+        └─ 成功後才新增 VenueBookings（status=pending），記錄 activityName／attendeeCount／teamupEventId
+        │   Teamup 失敗會回錯誤，不會只收表或留下沒有 Teamup ID 的申請列
         ▼
 區職員 /venue-regs
-   DDC+ → approveVenueBooking（一鍵：鎖密碼 + Teamup 轉色 + 電郵；鎖失敗 fallback 密碼）
+   DDC+ → approveVenueBooking（一鍵：鎖密碼 + 同一 Teamup 事件轉紅 + 電郵）
    其他有權限 → confirmVenueBooking（狀態 + Teamup，唔掂鎖）
    拒絕 → rejectVenueBooking
-   編輯內容 → updateVenueBooking（而家只改 Sheet，未同步 Teamup 時段）
+   編輯內容 → updateVenueBooking
 ```
+
+**Teamup 欄位對照（依管理員提供的事件 JSON）：**領袖姓名／職位走內建 `who`；參加人數位於 `custom["1"]`，主 Sheet Config 的 `TEAMUP_FIELD_ATTENDEE_KEY` 填 `1`。成員系統不接觸 `TEAMUP_API_KEY`。
 
 **已接前端（4.2.3）**：DDC+「⚡ 一鍵批准」行 `approveVenueBooking`。鎖未通唔擋批核。
 
@@ -353,13 +359,16 @@ member-portal 填表
 | `startDate` | `start` / `from` / `date` + 可選 `startTime` | ✅ |
 | `endDate` | `end` / `to` + 可選 `endTime` | ✅ |
 | `email` | `mail` | 建議 |
-| `troop` / `position` / `purpose` / `agreeRules` | 同上 | |
-| `teamupEventId` | `eventId` | 有就沿用，唔再新建 |
+| `activityName` | `eventName` | ✅ 必填，最多 120 字 |
+| `attendeeCount` | `participants` / `participantsCount` | ✅ 必填，1–9999 正整數 |
+| `agreeRules` | `agree` / `accepted` | ✅ 必須為 `true` |
+| `troop` / `position` / `purpose` | 同上 | |
+| `teamupEventId` | `eventId` | 回傳欄位；成員端毋須提供 |
 
 成功：
 
 ```json
-{ "ok": true, "refCode": "VR-…", "teamupEventId": "1234567890", "warn": "", "data": { … } }
+{ "ok": true, "refCode": "VR-…", "teamupEventId": "1234567890", "data": { … } }
 ```
 
 ### Teamup Config（測試借場必填）
@@ -375,10 +384,10 @@ member-portal 填表
 健康檢查 `?action=getHealthCheck`（免 Key）會回：
 
 ```json
-{ "version": "4.16.0", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
+{ "version": "4.25.0", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
 ```
 
-`version` 要係 `4.16.0` 先代表呢版 GS 已貼上線。
+確認改動已部署後，health check 應回傳 `version: "4.25.0"`。
 
 ## 部署
 

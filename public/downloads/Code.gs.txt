@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.24.2
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.25.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -318,13 +318,14 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.24.2',
+      version: '4.25.0',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
       teamupReady: teamupReady_(),
       teamupPendingSet: !!(teamupCfg_().pendingSub),
       teamupApprovedSet: !!(teamupCfg_().approvedSub),
+      teamupAttendeeFieldSet: !!(teamupCfg_().attendeeFieldKey),
       ttlockConfigured: ttlockReady_(),
       lockIdSet: !!(lockCfg_().lockId),
       ttlockDisabled: ttlockDisabled_(),
@@ -1491,6 +1492,8 @@ function normalizeVenuePayload_(b) {
     troop: String(pick_(b, ['troop', 'unit', 'group'])).trim(),
     position: String(pick_(b, ['position', 'rank', 'title'])).trim(),
     purpose: String(pick_(b, ['purpose', 'reason', 'note', 'remarks'])).trim(),
+    activityName: String(pick_(b, ['activityName', 'eventName'])).trim(),
+    attendeeCount: Number(pick_(b, ['attendeeCount', 'participants', 'participantsCount'])),
     startDate: start,
     endDate: end,
     agreeRules: b.agreeRules || b.agree || b.accepted,
@@ -1503,6 +1506,11 @@ function submitVenueRequest_(b) {
   var g = guardLocked_(); if (g) return g;
   var req = normalizeVenuePayload_(b);
   if (!req.venueId || !req.name || !req.phone) return err('資料不完整（需要場地、姓名、電話）');
+  if (!req.activityName || req.activityName.length > 120) return err('請填寫活動名稱（最多 120 字）');
+  if (!isFinite(req.attendeeCount) || Math.floor(req.attendeeCount) !== req.attendeeCount || req.attendeeCount < 1 || req.attendeeCount > 9999) {
+    return err('參加人數必須是 1 至 9999 的正整數');
+  }
+  if (!isTrue_(req.agreeRules)) return err('請先同意借用守則');
   if (!req.startDate || !req.endDate) return err('請填寫借用時段');
   if (req.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(req.email))) return err('電郵格式不正確');
 
@@ -1524,8 +1532,9 @@ function submitVenueRequest_(b) {
     var created = createPendingTeamupEvent_({
       venueName: venue.name || req.venueId,
       venueId: String(venue.venueId).trim(),
-      name: req.name, phone: req.phone, email: req.email,
-      troop: req.troop, purpose: req.purpose, refCode: ref,
+      name: req.name, position: req.position, phone: req.phone, email: req.email,
+      troop: req.troop, purpose: req.purpose, activityName: req.activityName,
+      attendeeCount: req.attendeeCount, refCode: ref,
       startDate: req.startDate, endDate: req.endDate,
     });
     if (!created.ok || !created.eventId) {
@@ -1536,11 +1545,14 @@ function submitVenueRequest_(b) {
     return err('Teamup 建立藍色「申請中」事件失敗：' + e.message);
   }
 
+  ensureSheetColumn_(sh, 'activityName');
+  ensureSheetColumn_(sh, 'attendeeCount');
   appendRowObj_(sh, {
     id: rid, districtCode: districtCode_(), refCode: ref,
     submittedAt: now, createdAt: now,
     venueId: String(venue.venueId).trim(), venueName: venue.name || '',
-    purpose: req.purpose || '', startDate: req.startDate, endDate: req.endDate,
+    purpose: req.purpose || '', activityName: req.activityName, attendeeCount: req.attendeeCount,
+    startDate: req.startDate, endDate: req.endDate,
     name: req.name, phone: req.phone, email: req.email || '',
     troop: req.troop || '', position: req.position || '',
     agreeRules: isTrue_(req.agreeRules) ? 'TRUE' : '',
@@ -1802,7 +1814,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.24.2',
+    version: '4.25.0',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -1822,6 +1834,7 @@ function getVenueLockConfig_(token) {
     teamupPendingSub: tc.pendingSub || '',
     teamupApprovedSub: tc.approvedSub || '',
     teamupRejectedSub: tc.rejectedSub || '',
+    teamupAttendeeFieldSet: !!tc.attendeeFieldKey,
     teamupReady: !!(tc.apiKey && tc.calendarId && tc.approvedSub),
     notifyStaffEmail: getConfigValue_('NOTIFY_STAFF_EMAIL') || '',
     venueCount: activeVenues.length,
@@ -1917,7 +1930,17 @@ function updateVenueBooking_(token, id, patch) {
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
   var idx = rowIndexByCol_(sh, 'id', String(id).trim());
   if (idx < 0) return err('找不到該申請');
-  var allow = ['venueId', 'venueName', 'purpose', 'startDate', 'endDate', 'name', 'phone', 'email', 'troop', 'position'];
+  var allow = ['venueId', 'venueName', 'purpose', 'activityName', 'attendeeCount', 'startDate', 'endDate', 'name', 'phone', 'email', 'troop', 'position'];
+  if (patch.activityName !== undefined && (!String(patch.activityName || '').trim() || String(patch.activityName).trim().length > 120)) {
+    return err('活動名稱必填（最多 120 字）');
+  }
+  if (patch.attendeeCount !== undefined) {
+    var attendeeCount = Number(patch.attendeeCount);
+    if (!isFinite(attendeeCount) || Math.floor(attendeeCount) !== attendeeCount || attendeeCount < 1 || attendeeCount > 9999) {
+      return err('參加人數必須是 1 至 9999 的正整數');
+    }
+    patch.attendeeCount = attendeeCount;
+  }
   if (patch.venueId) {
     var venue = readSheet_(SHEET.VENUES).filter(function (v) {
       return String(v.venueId).trim() === String(patch.venueId).trim()
@@ -1928,7 +1951,7 @@ function updateVenueBooking_(token, id, patch) {
       patch.venueName = venue.name || patch.venueName;
     }
   }
-  var textCols = { startDate: true, endDate: true, phone: true };
+  var textCols = { startDate: true, endDate: true, phone: true, activityName: true };
   allow.forEach(function (k) {
     if (patch[k] !== undefined && patch[k] !== null) {
       if (textCols[k]) setTextCellByHeader_(sh, idx, k, patch[k]);
@@ -5574,6 +5597,7 @@ function teamupCfg_() {
     pendingSub: getConfigValue_('TEAMUP_PENDING_SUBCAL_ID') || '',
     approvedSub: getConfigValue_('TEAMUP_APPROVED_SUBCAL_ID') || getConfigValue_('teamupApprovedSubId'),
     rejectedSub: getConfigValue_('TEAMUP_REJECTED_SUBCAL_ID') || getConfigValue_('teamupRejectedSubId'),
+    attendeeFieldKey: getConfigValue_('TEAMUP_FIELD_ATTENDEE_KEY') || '',
   };
 }
 function teamupReady_() {
@@ -5597,9 +5621,33 @@ function teamupFetch_(url, options) {
 }
 /** 把申請資料寫成 Teamup 事件 notes */
 function buildTeamupNotes_(req) {
-  return '姓名：' + String(req.name || '') + '\n電話：' + String(req.phone || '')
-    + '\n電郵：' + String(req.email || '') + '\n旅團：' + String(req.troop || '')
-    + '\n申請編號：' + String(req.refCode || '') + '\n用途：' + String(req.purpose || '');
+  var leader = String(req.name || '') + (req.position ? '（' + String(req.position) + '）' : '');
+  return '活動名稱：' + String(req.activityName || '') + '\n負責領袖：' + leader
+    + '\n參加人數：' + String(req.attendeeCount || '')
+    + '\n姓名：' + String(req.name || '') + '\n職位：' + String(req.position || '')
+    + '\n電話：' + String(req.phone || '') + '\n電郵：' + String(req.email || '')
+    + '\n旅團：' + String(req.troop || '') + '\n申請編號：' + String(req.refCode || '')
+    + '\n用途：' + String(req.purpose || '');
+}
+
+/** Teamup 的領袖資料走內建 who 欄位；參加人數走 Config 指定的 custom field。 */
+function teamupLeader_(req) {
+  var leader = String(req && req.name || '').trim();
+  var position = String(req && req.position || '').trim();
+  return leader + (position ? ' ' + position : '');
+}
+function teamupCustomFields_(req) {
+  var c = teamupCfg_();
+  if (!c.attendeeFieldKey) {
+    return { error: '請先在 Config 設定 TEAMUP_FIELD_ATTENDEE_KEY（此日曆參加人數欄位 key 為 1）' };
+  }
+  var count = Number(req && req.attendeeCount);
+  if (!teamupLeader_(req) || !isFinite(count) || Math.floor(count) !== count || count < 1 || count > 9999) {
+    return { error: 'Teamup 事件資料不完整（負責領袖姓名／職位或參加人數）' };
+  }
+  var custom = {};
+  custom[c.attendeeFieldKey] = String(count);
+  return { custom: custom, who: teamupLeader_(req) };
 }
 /** 正規化成 Teamup 需要嘅 ISO 起訖時間（香港 +08:00，絕不帶 .000Z 毫秒以免 Teamup HTTP 400） */
 function toTeamupDt_(value, endOfDay) {
@@ -5638,9 +5686,11 @@ function createPendingTeamupEvent_(req) {
   var c = teamupCfg_();
   if (!teamupReady_()) return { ok: false, error: 'Teamup 尚未設定（TEAMUP_API_KEY / TEAMUP_CALENDAR_KEY）' };
   if (!c.pendingSub) return { ok: false, error: '未設定 TEAMUP_PENDING_SUBCAL_ID（申請中子日曆）' };
-  var title = '【申請】' + (req.venueName || req.venueId || '區總部') + (req.name ? ' · ' + req.name : '');
+  var fields = teamupCustomFields_(req);
+  if (fields.error) return { ok: false, error: fields.error };
+  var title = '【申請】' + (req.venueName || req.venueId || '區總部') + ' · ' + req.activityName;
   return createTeamupEvent_(c.pendingSub, title, buildTeamupNotes_(req),
-    toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true));
+    toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true), fields.custom, fields.who);
 }
 
 /** 批准：有 pending 事件就搬去確認子日曆；若原事件已刪除或冇 ID 就新建。回傳 {warn, eventId} */
@@ -5657,20 +5707,30 @@ function applyTeamupApproved_(booking, extraNotes) {
       var moved = teamupMoveToApproved_(out.eventId, booking, stamp);
       if (!moved) return out;
       // 原事件可能已喺 Teamup 手動刪除，自動改為新建確認事件並回傳新 eventId
+      var fields = teamupCustomFields_(booking);
+      if (fields.error) {
+        out.warn = fields.error;
+        return out;
+      }
       var fallbackEv = createTeamupEvent_(teamupCfg_().approvedSub,
         (booking.venueName || booking.venueId || '區總部') + '（已批准）',
         buildTeamupNotes_(booking) + stamp,
-        toTeamupDt_(booking.startDate, false), toTeamupDt_(booking.endDate || booking.startDate, true));
+        toTeamupDt_(booking.startDate, false), toTeamupDt_(booking.endDate || booking.startDate, true), fields.custom, fields.who);
       if (fallbackEv.ok) {
         out.eventId = fallbackEv.eventId || out.eventId;
         return out;
       }
       out.warn = moved;
     } else {
+      var fields = teamupCustomFields_(booking);
+      if (fields.error) {
+        out.warn = fields.error;
+        return out;
+      }
       var ev = createTeamupEvent_(teamupCfg_().approvedSub,
         (booking.venueName || booking.venueId || '區總部') + '（已批准）',
         buildTeamupNotes_(booking) + stamp,
-        toTeamupDt_(booking.startDate, false), toTeamupDt_(booking.endDate || booking.startDate, true));
+        toTeamupDt_(booking.startDate, false), toTeamupDt_(booking.endDate || booking.startDate, true), fields.custom, fields.who);
       if (!ev.ok) out.warn = ev.error || 'Teamup 建立確認事件失敗';
       else out.eventId = ev.eventId || '';
     }
@@ -5680,15 +5740,18 @@ function applyTeamupApproved_(booking, extraNotes) {
   return out;
 }
 /** 建立 Teamup 事件到指定子日曆 */
-function createTeamupEvent_(subId, title, notes, startDt, endDt) {
+function createTeamupEvent_(subId, title, notes, startDt, endDt, customFields, who) {
   if (!teamupReady_() || !subId) return { ok: false, error: 'Teamup 尚未設定' };
-  var body = JSON.stringify({
+  var eventBody = {
     subcalendar_ids: [parseInt(subId, 10)],
     title: title,
     notes: notes,
     start_dt: startDt,
     end_dt: endDt || startDt,
-  });
+  };
+  if (customFields) eventBody.custom = customFields;
+  if (who) eventBody.who = who;
+  var body = JSON.stringify(eventBody);
   var r = teamupFetch_('https://api.teamup.com/' + teamupCfg_().calendarId + '/events', { method: 'post', payload: body });
   if (r.code < 200 || r.code >= 300) return { ok: false, error: 'Teamup 建立事件失敗 HTTP ' + r.code + '：' + r.text };
   try { var data = JSON.parse(r.text); return { ok: true, eventId: data && data.event ? data.event.id : '' }; }
@@ -5702,6 +5765,11 @@ function teamupMoveToApproved_(eventId, booking, extraNotes) {
   var cur = teamupApi_('get', c.calendarId + '/events/' + eventId);
   if (!cur || !cur.event) return '找不到原 Teamup 事件（' + eventId + '）';
   var ev = cur.event;
+  var fields = teamupCustomFields_(booking || {});
+  if (fields.error) return fields.error;
+  var customFields = {};
+  Object.keys(ev.custom || {}).forEach(function (key) { customFields[key] = ev.custom[key]; });
+  Object.keys(fields.custom).forEach(function (key) { customFields[key] = fields.custom[key]; });
   var title = (booking && (booking.venueName || booking.venueId))
     ? String(booking.venueName || booking.venueId) + '（已批准）'
     : ((ev.title || '區總部').replace('【申請】', '').replace('（已批准）', '').trim() + '（已批准）');
@@ -5717,6 +5785,8 @@ function teamupMoveToApproved_(eventId, booking, extraNotes) {
     notes: notes,
     start_dt: startDt,
     end_dt: endDt,
+    who: fields.who,
+    custom: customFields,
   };
   var r = teamupApi_('put', c.calendarId + '/events/' + eventId, body);
   return (r && r.event) ? '' : 'TeamUp 更新失敗';
@@ -5731,19 +5801,27 @@ function teamupOnReject_(req, status) {
   if (req.teamupEventId) {
     var cur = teamupApi_('get', c.calendarId + '/events/' + req.teamupEventId);
     var ev = cur && cur.event ? cur.event : {};
+    var customFields = {};
+    Object.keys(ev.custom || {}).forEach(function (key) { customFields[key] = ev.custom[key]; });
+    var fields = teamupCustomFields_(req);
+    if (!fields.error) Object.keys(fields.custom).forEach(function (key) { customFields[key] = fields.custom[key]; });
     var body = {
       subcalendar_ids: c.rejectedSub ? [Number(c.rejectedSub)] : (ev.subcalendar_ids || []),
       title: title,
       notes: notes,
       start_dt: ev.start_dt,
       end_dt: ev.end_dt,
+      who: teamupLeader_(req) || ev.who || '',
+      custom: customFields,
     };
     teamupApi_('put', c.calendarId + '/events/' + req.teamupEventId, body);
     return;
   }
   if (!c.rejectedSub) return;
+  var custom = teamupCustomFields_(req);
+  if (custom.error) throw new Error(custom.error);
   createTeamupEvent_(c.rejectedSub, title, notes,
-    toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true));
+    toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true), custom.custom, custom.who);
 }
 
 // ---------- 電郵 ----------
@@ -6584,7 +6662,8 @@ function blueprint_() {
       ['TEAMUP_PENDING_SUBCAL_ID', '', '藍色（申請中）子日曆'],
       ['TEAMUP_APPROVED_SUBCAL_ID', '', '紅色（已批）子日曆（兼容舊 teamupApprovedSubId）'],
       ['TEAMUP_REJECTED_SUBCAL_ID', '', '(選填) 拒絕子日曆（兼容舊 teamupRejectedSubId）'],
-      ['TEAMUP_BOOKING_URL', '', '公開登記連結'],
+      ['TEAMUP_BOOKING_URL', '', '公開唯讀月曆連結'],
+      ['TEAMUP_FIELD_ATTENDEE_KEY', '', 'Teamup custom field key：參加人數（本日曆 API 回應顯示為 1）'],
       ['SCIENER_CLIENT_ID', '', 'Sciener 開放平台 app_id（兼容 ttlockClientId）'],
       ['SCIENER_CLIENT_SECRET', '', 'Sciener app_secret（兼容 ttlockClientSecret）'],
       ['SCIENER_USERNAME', '', '管鎖帳號（lock2.sciener.com / App，唔係開放平台帳）'],
@@ -6702,7 +6781,7 @@ function blueprint_() {
       ['venueId', 'districtCode', 'name', 'location', 'capacity', 'scienerLockId', 'note', 'active'],
     ] },
     { name: SHEET.VENUE_REQ, rows: [
-      ['id', 'districtCode', 'refCode', 'submittedAt', 'venueId', 'venueName', 'purpose',
+      ['id', 'districtCode', 'refCode', 'submittedAt', 'venueId', 'venueName', 'purpose', 'activityName', 'attendeeCount',
         'startDate', 'endDate', 'name', 'phone', 'email', 'troop', 'position', 'agreeRules',
         'status', 'teamupEventId', 'pwdRef', 'passcode', 'reviewer', 'reviewedAt', 'createdAt'],
     ] },
