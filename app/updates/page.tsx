@@ -5,6 +5,16 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.25.2 — 🗓 借場撞期提示、排程密碼不互相覆蓋</h3>
+        <p>根據正式使用回饋，修正 Teamup 撞期提示、事件搬色 payload，以及尚未到期鍵碼被其他申請重用的問題。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.25.2</a></p>
+        <ul>
+          <li>⏰ Teamup 回報 event_overlapping 時，申請人會看到「該時段已有人使用或已有行事曆安排，請選擇其他時段後再申請」。失敗不會留下 pending 表格列。</li>
+          <li>🔑 只有真正已到期的鍵碼可供重用；未到期的舊時段即使與新時段不重疊，也不會改寫它，避免兩筆申請共用同一 keyboardPwdId。撞碼順序仍為頭4 → 尾4 → 確認兩者都撞碼後才 +1。</li>
+          <li>🔵→🔴 更新原 Teamup 事件時在 payload 明確包含 event id；更新錯誤只回報，不新增紅色重複事件。</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.25.1 — 🔑 重用過期 TTLock 密碼並修正批核搬色</h3>
         <p>處理借場上線後發現的鎖匙重複、密碼撞碼及 Teamup 重複事件問題。</p>
         <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.25.1</a></p>
