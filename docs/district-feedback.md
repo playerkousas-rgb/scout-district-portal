@@ -1,4 +1,4 @@
-# v4.26.0「你講我聽」意見箱後端
+# v4.26.1「你講我聽」意見箱後端
 
 ## 成員端合約
 
@@ -27,9 +27,9 @@
 
 ## 設定與升級
 
-1. 先備份現有主試算表及 Apps Script，並確認 v4.26.0 所需的 Script Properties／token 遷移已完成；不要直接覆蓋未遷移的正式後端。
+1. 先備份現有主試算表及 Apps Script；本分支 v4.26.1 尚未合併／部署，Node mock 通過不代表正式 Apps Script、Sheet ACL 或外部服務已驗證。按[只追加升級步驟](gs-upgrade-no-data-loss.md)完成 token／API Key 檢查，不要直接覆蓋未備份的正式後端。
 2. 將 `gs/Code.gs` 貼入區方 Apps Script 專案，執行 `setupSheets()`。它會在主試算表補建 `DistrictFeedback` 和 `DCConfidential`（已存在的分頁及資料保留）。
 3. 在 `Users` 確認 DC 帳戶的 `email` 正確、`role` 為 `DC` 且帳戶啟用。卡片預設只授權 DC／SYSADMIN；需按區方需要確認 `Perms`。
 4. 可選擇在 Config 設定 `DC_NOTIFY_EMAIL`。留空時不寄通知，但留言仍會正常儲存；通知電郵只含參考編號，不含留言內容或聯絡資料。
-5. 驗證 `getHealthCheck` 回傳 `version: "4.26.0"`、`feedbackReady: true`、`dcFeedbackReady: true`。測試一般及 DC 留言分別寫入兩個分頁；以非 DC 帳戶呼叫 `getDCFeedback`，應回覆無權限。注意，這項 API 測試不會限制主試算表檢視者直接閱讀分頁。
+5. 驗證 `getHealthCheck` 回傳 `version: "4.26.1"`、`feedbackReady: true`、`dcFeedbackReady: true`。測試一般及 DC 留言分別寫入兩個分頁；以非 DC 帳戶呼叫 `getDCFeedback`，應回覆無權限。注意，這項 API 測試不會限制主試算表檢視者直接閱讀分頁。
 6. **正式部署由區方自行執行。** 助手不會代部署或覆蓋正式 Apps Script。

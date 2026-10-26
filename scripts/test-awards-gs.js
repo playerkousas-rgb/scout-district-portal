@@ -88,6 +88,8 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(code, ctx, { filename: 'Code.gs' });
+const testApiKey = 'awards-test-api-key';
+sheets.Config.appendRow(['API_KEY_HASH', ctx.sha256_(testApiKey), 'test only']);
 
 const dcToken = ctx.makeToken_('dc@x.org', 'DC', 12);
 const alToken = ctx.makeToken_('al@x.org', 'AL', 12);
@@ -300,11 +302,13 @@ check('冇 edit 權限唔可以改年期設定', () => {
 });
 
 check('doGet / doPost 路由通', () => {
-  const g = JSON.parse(ctx.doGet({ parameter: { action: 'getAwardsBoard', token: dcToken } }));
+  const denied = JSON.parse(ctx.doGet({ parameter: { action: 'getAwardsBoard', token: dcToken } }));
+  assert.strictEqual(denied.ok, false, 'missing API key must fail closed');
+  const g = JSON.parse(ctx.doGet({ parameter: { action: 'getAwardsBoard', token: dcToken, apiKey: testApiKey } }));
   assert.strictEqual(g.ok, true);
   const p = JSON.parse(ctx.doPost({
     parameter: {},
-    postData: { contents: JSON.stringify({ action: 'saveAwardMember', token: dcToken, member: { name: '路由測試' } }) },
+    postData: { contents: JSON.stringify({ action: 'saveAwardMember', token: dcToken, apiKey: testApiKey, member: { name: '路由測試' } }) },
   }));
   assert.strictEqual(p.ok, true);
 });
@@ -316,9 +320,9 @@ check('getAwardsBoard 有回內建建議年期（畀「套用建議」用）', (
   assert.strictEqual(d.filter(t => t.code === 'BRL')[0].minYears, null);
 });
 
-check('健康檢查版本 4.19.1', () => {
+check('健康檢查版本 4.26.1', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.19.1');
+  assert.strictEqual(parsed.data.version, '4.26.1');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

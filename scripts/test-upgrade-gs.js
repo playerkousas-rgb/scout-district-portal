@@ -312,7 +312,7 @@ check('舊 Sheet 升級新增 YMIS 卡；預設只限 DC／DDC／ADC／職員，
   assert.ok(!ids(leader).includes('ymis'));
   assert.ok(!ids(sysadmin).includes('ymis'), '超管不屬於區總監／副總監／助總監／職員，不能直接讀 YMIS');
   sheets.Staff.appendRow(['only-old-staff@x.org', '舊職員', '', '', 'STAFF', 'FALSE', 'TRUE', '', '', 'TRUE']);
-  assert.ok(!ids(ctx.makeToken_('only-old-staff@x.org', 'STAFF', 12)).includes('ymis'), 'Staff 舊表帳戶無初始密碼檢查，不可查看 YMIS');
+  assert.ok(!ids(ctx.makeToken_('only-old-staff@x.org', 'STAFF', 12, 'staff')).includes('ymis'), 'Staff 舊表帳戶無初始密碼檢查，不可查看 YMIS');
 
   // 故意把舊 Perms 對 LEADER 設為 view，清空帳戶 cards 限制；硬門禁仍不容顯示。
   const user = sheets.Users, leaderRow = user._data.findIndex(r => r[0] === 'leader@x.org');
@@ -416,14 +416,15 @@ check('管理員儲存權限矩陣時會剔走非總監級 YMIS 權限，並維�
 
 check('YMIS 憑據只可由 POST action 取得；GET 即使有效 token 也不回傳', () => {
   const orig = ctx.getConfigValue_;
-  // 測試路由時臨時略過假 API Key，正式後台仍會驗證 API Key。
-  ctx.getConfigValue_ = k => k === 'API_KEY_HASH' ? '' : orig(k);
+  // 路由 mock 使用測試專用 API Key，保持正式 fail-closed 驗證。
+  const testApiKey = 'upgrade-test-api-key';
+  ctx.getConfigValue_ = k => k === 'API_KEY_HASH' ? ctx.sha256_(testApiKey) : orig(k);
   try {
     const adc = ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12);
     const leader = ctx.makeToken_('leader@x.org', 'LEADER', 12);
     const get = JSON.parse(ctx.doGet({ parameter: { action: 'getYmisCredentials', token: adc } }));
     assert.strictEqual(get.ok, false);
-    const req = token => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action: 'getYmisCredentials', token }) } }));
+    const req = token => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action: 'getYmisCredentials', token, apiKey: testApiKey }) } }));
     assert.strictEqual(req(leader).ok, false);
     const granted = req(adc);
     assert.ok(granted.ok && granted.data.username === 'fake-test-account');
@@ -433,14 +434,13 @@ check('YMIS 憑據只可由 POST action 取得；GET 即使有效 token 也不�
   }
 });
 
-check('已停用用戶嘅舊 token（包括超管）不可再睇房間卡或讀區總部時段', () => {
+check('已停用用戶嘅舊 token（包括超管）不可再查看卡片或 YMIS 資料', () => {
   const user = sheets.Users, activeCol = user._data[0].indexOf('active');
   for (const [email, role] of [['leader@x.org', 'LEADER'], ['sysadmin@x.org', 'SYSADMIN']]) {
     const idx = user._data.findIndex(r => r[0] === email);
     const token = ctx.makeToken_(email, role, 12);
     user.getRange(idx + 1, activeCol + 1).setValue('FALSE');
     assert.strictEqual(ctx.getCards_(token).ok, false);
-    assert.strictEqual(ctx.getDistrictHqBookings_(token, '2026-10-20', 1).ok, false);
     const before = propertyReads;
     assert.strictEqual(ctx.getYmisCredentials_(token).ok, false);
     assert.strictEqual(propertyReads, before);
@@ -456,7 +456,7 @@ check('待批走馬燈不向無審批卡者透露借場申請資料', () => {
   assert.strictEqual(ctx.getPendingInbox_(dc).data.venue.length, 1);
 });
 
-check('Cards：舊 news／contacts／rooms 設定原樣；新名稱只在 API 顯示，不寫 Cards', () => {
+check('Cards：保留舊 news／contacts／rooms 名稱及設定', () => {
   const rows = ctx.readSheet_('Cards');
   const news = rows.find(r => r.cardId === 'news');
   assert.ok(news && news.enabled === 'TRUE', '舊卡啟用狀態必須保留');
@@ -472,8 +472,8 @@ check('Cards：舊 news／contacts／rooms 設定原樣；新名稱只在 API �
   assert.strictEqual(rooms.title, '地域房間使用情況', '原 Sheet 舊名稱不改');
   assert.strictEqual(rooms.description, '17／18／19 樓逐間房睇用途時段 · 今日總覽');
   const displayed = ctx.getCards_(ctx.makeToken_('staff@x.org', 'STAFF', 12)).data;
-  assert.strictEqual(displayed.find(c => c.cardId === 'rooms').title, '地域房間及區總部使用情況');
-  assert.strictEqual(displayed.find(c => c.cardId === 'rooms').description, '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆');
+  assert.strictEqual(displayed.find(c => c.cardId === 'rooms').title, '地域房間使用情況');
+  assert.strictEqual(displayed.find(c => c.cardId === 'rooms').description, '17／18／19 樓逐間房睇用途時段 · 今日總覽');
   assert.ok(displayed.some(c => c.cardId === 'news'), '舊 news 入口不自動隱藏，由區方自行決定');
 });
 

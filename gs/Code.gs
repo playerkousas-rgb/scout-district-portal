@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.26.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.26.1
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -37,7 +37,7 @@
  * 管理系統 setStockRequestStatus：批准先扣庫存；拒絕／取消／歸還回補。
  * 提交欄位兼容 qty/quantity、borrowDate/startDate、items[] 多件。
  *
- * ──「你講我聽」區務意見箱（v4.26.0）────────────────────
+ * ──「你講我聽」區務意見箱（v4.26.1）────────────────────
  * member-portal POST submitDistrictFeedback（匿名／支援／DC 保密直達）。
  * DistrictFeedback 與 DCConfidential 均為主 Sheet 分頁；DCConfidential 卡只授予 DC／超管，
  * 後端列表 API 亦重複驗證角色。主 Sheet 的直接檢視者仍可直接讀取該分頁（不做分頁級閱讀隔離）。
@@ -56,7 +56,7 @@
  * ── 帳戶層級 / 授權 / 隱藏卡片（v4.4.0）──────────────────
  * 層級 level：0 超管（隱藏、最高）／1 DC／2 DDC／3 ADC／4 STAFF／5 區長等。
  * Users 表新增 level / mustChangePassword / delegatedBy 欄；預設 9 個 @skwscout.org.hk
- * 預設帳戶（密碼 1234，首次登入必須改密碼）。
+ * 預設帳戶只補角色資料；密碼每次新建時隨機產生且不顯示，共用初始密碼禁止登入。
  *   requestPasswordReset（公開）→ 寄一次性重設連結（token 24h）去該帳戶電郵
  *   resetPassword（公開，帶 resetToken）／ changePassword（登入後）
  *   delegatePerms：上級把自己「現有」卡片權限授予下級（Perms 表寫 edit/view）
@@ -183,12 +183,49 @@ var SHEET = {
 
 // ===================== 安全設定（★ 部署前必改）=====================
 
-var TOKEN_SECRET = 'CHANGE_ME_DISTRICT_SECRET_' + '請改成長亂碼';
+var TOKEN_SECRET_PROPERTY = 'PORTAL_TOKEN_SECRET';
+var MASTER_PASSWORD_PROPERTY = 'PORTAL_MASTER_PASSWORD';
 var TOKEN_TTL_HOURS = 12;
+
+/** 只從 Script Properties 讀取私密簽署密鑰；絕不回退到原始碼常數。 */
+function getTokenSecret_() {
+  try {
+    var value = String(PropertiesService.getScriptProperties().getProperty(TOKEN_SECRET_PROPERTY) || '');
+    return value.length >= 32 ? value : '';
+  } catch (e) { return ''; }
+}
+/** 首次 setup 時每個 Apps Script 專案自動建立獨立高熵密鑰；已有有效值不改。 */
+function ensureTokenSecret_() {
+  if (getTokenSecret_()) return false;
+  var value = '';
+  for (var i = 0; i < 6; i++) value += Utilities.getUuid().replace(/-/g, '');
+  if (value.length < 64) throw new Error('無法安全建立 Token 簽署密鑰');
+  PropertiesService.getScriptProperties().setProperty(TOKEN_SECRET_PROPERTY, value);
+  return true;
+}
+function getMasterPassword_() {
+  try {
+    var value = String(PropertiesService.getScriptProperties().getProperty(MASTER_PASSWORD_PROPERTY) || '');
+    return value.length >= 12 ? value : '';
+  } catch (e) { return ''; }
+}
+function isLegacySharedPassword_(password) {
+  var value = String(password || '');
+  return value === '1234' || value === 'scout1234';
+}
+function temporaryPassword_() {
+  return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').slice(0, 24);
+}
 
 var DC_ROLE = 'DC';
 var SYSADMIN_ROLE = 'SYSADMIN';
 function isAdminRole_(role) { return role === DC_ROLE || role === SYSADMIN_ROLE; }
+function canViewYmisRole_(role) {
+  role = String(role || '').trim().toUpperCase();
+  return role === DC_ROLE || role === 'DDC_ADMIN' || role === 'DDC_TRAINING'
+    || role === 'ADC_SCOUT' || role === 'ADC_CUBS' || role === 'ADC_GH'
+    || role === 'ADC_ROVER' || role === 'ADC_VENTURE' || role === 'STAFF';
+}
 
 // DEBIT NOTE 屬區會財務文件：超管擁有最高權限，另開放 DC、行政 DDC 及區職員。
 // 其他 DDC、ADC、領袖或自訂角色不能靠誤改 Perms 擴大此卡權限。
@@ -252,8 +289,7 @@ function normalizeCreatableRole_(raw) {
 }
 
 // 維護用最高存取（★ 改成只有你知道嘅值；勿沿用示範值）
-var MASTER_EMAIL = 'sheep';
-var MASTER_PW    = '0728';
+var MASTER_EMAIL = 'sheep'; // 公開帳號識別名稱；維護密碼只讀 PORTAL_MASTER_PASSWORD Script Property
 /** Script 維護超管刻意不存在於 Users 表；只接受已簽名 token 內的 MASTER 身份及 SYSADMIN 角色。 */
 function isMaintenanceSuper_(email, role) {
   return String(email || '').trim().toLowerCase() === String(MASTER_EMAIL || '').trim().toLowerCase()
@@ -263,11 +299,7 @@ function isMaintenanceSuper_(email, role) {
 // 外掛清單（轉駁器）
 var REGISTRY_URL = 'https://YOUR-HUB.vercel.app/api/registry.json';
 
-// 初始化預設密碼（舊版示範帳戶）
-var DEFAULT_PASSWORD = 'scout1234';
-
-// ★ 預設帳戶（v4.4.0）：密碼一律 1234，首次登入必須改密碼；setupSheets 只補缺、唔會改已有帳戶
-var DEFAULT_PRESET_PASSWORD = '1234';
+// 舊版共享初始密碼只作拒絕登入／拒絕重設的相容檢查。
 var PRESET_USERS = [
   // email, role, displayName, scopes, level
   ['sysadmin@skwscout.org.hk',     'SYSADMIN',     '系統管理員（超管）',   'all',      0],
@@ -325,12 +357,13 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.26.0',
+      version: '4.26.1',
       feedbackReady: feedbackReady_(),
       dcFeedbackReady: dcFeedbackReady_(),
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
+      tokenSecretSet: !!getTokenSecret_(),
       teamupReady: teamupReady_(),
       teamupPendingSet: !!(teamupCfg_().pendingSub),
       teamupApprovedSet: !!(teamupCfg_().approvedSub),
@@ -343,9 +376,11 @@ function doGet(e) {
 
   // ★ API Key 認證
   var hash = getConfigValue_('API_KEY_HASH');
-  if (hash && sha256_(String(p.apiKey || '').trim()) !== hash) {
-    return json(err('Unauthorized: invalid or missing apiKey'));
+  if (!hash || sha256_(String(p.apiKey || '').trim()) !== hash) {
+    return json(err('Unauthorized: API key is not configured or is invalid'));
   }
+  var passwordGate = passwordChangeGate_(action, p.token);
+  if (passwordGate) return json(err(passwordGate));
 
   try {
     switch (action) {
@@ -405,9 +440,11 @@ function doPost(e) {
 
   // ★ API Key 認證
   var hash = getConfigValue_('API_KEY_HASH');
-  if (hash && sha256_(String(b.apiKey || '').trim()) !== hash) {
-    return json(err('Unauthorized: invalid or missing apiKey'));
+  if (!hash || sha256_(String(b.apiKey || '').trim()) !== hash) {
+    return json(err('Unauthorized: API key is not configured or is invalid'));
   }
+  var passwordGate = passwordChangeGate_(action, b.token);
+  if (passwordGate) return json(err(passwordGate));
 
   try {
     switch (action) {
@@ -801,20 +838,49 @@ function guardLocked_() {
 // ===================== Token（兩套登入共用） =====================
 
 var TOKEN_TTL_REMEMBER_HOURS = 24 * 30; // 「記住我」：30 日
-function makeToken_(email, role, ttlHours) {
-  var exp = Date.now() + (Number(ttlHours) > 0 ? Number(ttlHours) : TOKEN_TTL_HOURS) * 3600 * 1000;
-  var payload = email + '|' + role + '|' + exp;
-  return Utilities.base64EncodeWebSafe(payload + '|' + sha256_(payload + TOKEN_SECRET).slice(0, 16));
+function makeToken_(email, role, ttlHours, accountStore) {
+  var secret = getTokenSecret_();
+  if (!secret) throw new Error('登入安全設定未完成：PORTAL_TOKEN_SECRET');
+  var hours = Number(ttlHours) > 0 ? Math.min(Number(ttlHours), TOKEN_TTL_REMEMBER_HOURS) : TOKEN_TTL_HOURS;
+  var exp = Date.now() + hours * 3600 * 1000;
+  var source = accountStore === 'staff' ? 'staff' : 'users';
+  var payload = email + '|' + role + '|' + exp + '|' + source;
+  return Utilities.base64EncodeWebSafe(payload + '|' + sha256_(payload + secret).slice(0, 32));
 }
 function checkToken_(token) {
   if (!token) return { valid: false };
   try {
+    var secret = getTokenSecret_();
+    if (!secret) return { valid: false };
     var raw = Utilities.newBlob(Utilities.base64DecodeWebSafe(token)).getDataAsString();
-    var p = raw.split('|'), email = p[0], role = p[1], exp = Number(p[2]), sig = p[3];
-    if (Date.now() > exp) return { valid: false };
-    if (sig !== sha256_(email + '|' + role + '|' + exp + TOKEN_SECRET).slice(0, 16)) return { valid: false };
-    return { valid: true, email: email, role: role };
+    var p = raw.split('|'), email = p[0], role = p[1], exp = Number(p[2]), source = p[3], sig = p[4];
+    if (!email || !role || (source !== 'users' && source !== 'staff') || !isFinite(exp) || exp < Date.now() || exp > Date.now() + (TOKEN_TTL_REMEMBER_HOURS + 1) * 3600 * 1000) return { valid: false };
+    var payload = email + '|' + role + '|' + exp + '|' + source;
+    if (sig !== sha256_(payload + secret).slice(0, 32)) return { valid: false };
+    // Session 身份必須仍存在、啟用且角色未變；維護帳號只在密碼屬性仍啟用時有效。
+    if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase()) {
+      if (!getMasterPassword_()) return { valid: false };
+      return { valid: true, email: email, role: role, source: source };
+    }
+    var store = source === 'users' ? SHEET.USERS : SHEET.STAFF;
+    var account = readSheet_(store).filter(function (u) {
+      return String(u.email || '').trim().toLowerCase() === email.toLowerCase();
+    })[0];
+    var currentRole = store === SHEET.STAFF ? String((account && account.role) || 'STAFF').trim() : String((account && account.role) || '').trim();
+    if (!account || String(account.active || '').toUpperCase() === 'FALSE' || currentRole !== role) return { valid: false };
+    return { valid: true, email: email, role: role, source: source };
   } catch (e) { return { valid: false }; }
+}
+/** 首次／臨時密碼未更換前，HTTP API 只准驗證、讀取卡片清單及改密碼。 */
+function passwordChangeGate_(action, token) {
+  if (!token || action === 'verify' || action === 'getCards' || action === 'changePassword') return '';
+  var t = checkToken_(token);
+  if (!t.valid || isMaintenanceSuper_(t.email, t.role)) return '';
+  var user = readSheet_(SHEET.USERS).filter(function (u) {
+    return String(u.email || '').trim().toLowerCase() === String(t.email || '').trim().toLowerCase();
+  })[0];
+  return user && String(user.active || '').toUpperCase() !== 'FALSE' && isTrue_(user.mustChangePassword)
+    ? '請先更換初始／臨時密碼，完成後才可使用其他功能。' : '';
 }
 
 // ===================== 登入（雙軌） =====================
@@ -822,11 +888,13 @@ function checkToken_(token) {
 /** 管理系統：Users 表（角色制） */
 function login_(email, password, remember) {
   if (!email || !password) return err('請輸入帳號及密碼');
+  if (!getTokenSecret_()) return err('系統登入安全設定未完成，請管理員執行 setupSheets()');
   email = String(email).trim();
   var ttl = isTrue_(remember) ? TOKEN_TTL_REMEMBER_HOURS : TOKEN_TTL_HOURS;
+  var masterPassword = getMasterPassword_();
 
-  // 維護用最高存取（鎖定時仍可進）：層級 0 超管
-  if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase() && String(password) === MASTER_PW) {
+  // 維護用最高存取（鎖定時仍可進）：必須另設私密 Script Property，否則完全停用。
+  if (masterPassword && email.toLowerCase() === String(MASTER_EMAIL).toLowerCase() && String(password) === masterPassword) {
     return ok({
       email: email, displayName: '系統維護', role: SYSADMIN_ROLE, roleLabel: '超管',
       isAdmin: true, isDC: true, canManageAccounts: true, scopes: ['all'], token: makeToken_(email, SYSADMIN_ROLE, ttl),
@@ -834,6 +902,7 @@ function login_(email, password, remember) {
     });
   }
 
+  if (isLegacySharedPassword_(password)) return err('共用初始密碼已停用，請用「忘記密碼」重設，或聯絡管理員。');
   if (getSystemState_().locked) return err('系統維護中，暫停登入。');
 
   email = email.toLowerCase();
@@ -864,7 +933,7 @@ function sessionPayload_(user, token) {
 
 function verify_(token) {
   var t = checkToken_(token);
-  if (!t.valid) return err('token 無效或已過期');
+  if (!t.valid || t.source !== 'users') return err('token 無效或已過期');
   if (String(t.email).toLowerCase() === String(MASTER_EMAIL).toLowerCase()) {
     return ok({ email: t.email, role: t.role, level: LEVEL_SUPER, isSuper: true, mustChangePassword: false });
   }
@@ -886,7 +955,7 @@ function setPassword_(sh, row, newPassword) {
 function validateNewPassword_(pw) {
   pw = String(pw || '');
   if (pw.length < 8) return '新密碼最少 8 個字元';
-  if (pw === DEFAULT_PRESET_PASSWORD || pw === DEFAULT_PASSWORD) return '新密碼不可沿用預設密碼';
+  if (isLegacySharedPassword_(pw)) return '新密碼不可使用共用初始密碼';
   return '';
 }
 
@@ -901,7 +970,9 @@ function requestPasswordReset_(email, resetUrlBase) {
   if (!user || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return generic;
   var exp = Date.now() + 24 * 3600 * 1000;
   var payload = 'reset|' + email + '|' + exp;
-  var token = Utilities.base64EncodeWebSafe(payload + '|' + sha256_(payload + TOKEN_SECRET + String(user.passwordHash)).slice(0, 20));
+  var secret = getTokenSecret_();
+  if (!secret) return err('系統登入安全設定未完成');
+  var token = Utilities.base64EncodeWebSafe(payload + '|' + sha256_(payload + secret + String(user.passwordHash)).slice(0, 40));
   var districtName = getConfigValue_('districtName') || '童軍區';
   var base = String(resetUrlBase || '').trim();
   var link = base ? (base + (base.indexOf('?') >= 0 ? '&' : '?') + 'reset=' + encodeURIComponent(token)) : '';
@@ -928,7 +999,8 @@ function resetPassword_(resetToken, newPassword) {
   })[0];
   if (!user) return err('帳戶不存在');
   var payload = 'reset|' + email + '|' + exp;
-  if (sig !== sha256_(payload + TOKEN_SECRET + String(user.passwordHash)).slice(0, 20)) return err('重設代碼無效或已使用');
+  var secret = getTokenSecret_();
+  if (!secret || sig !== sha256_(payload + secret + String(user.passwordHash)).slice(0, 40)) return err('重設代碼無效或已使用');
   var row = userRowIndex_(email); if (row < 0) return err('帳戶不存在');
   setPassword_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS), row, newPassword);
   return ok({ reset: true, email: email });
@@ -937,16 +1009,19 @@ function resetPassword_(resetToken, newPassword) {
 /** 成員系統 /staff 舊介面：Staff 表（canVenue/canStock/…） */
 function staffLogin_(email, password) {
   if (!email || !password) return err('請輸入帳號及密碼');
+  if (!getTokenSecret_()) return err('系統登入安全設定未完成，請管理員執行 setupSheets()');
   email = String(email).trim();
+  var masterPassword = getMasterPassword_();
 
-  // 維護帳號亦可用呢邊登入
-  if (email.toLowerCase() === String(MASTER_EMAIL).toLowerCase() && String(password) === MASTER_PW) {
+  // 維護帳號亦可用呢邊登入；未設私密 Script Property 就停用。
+  if (masterPassword && email.toLowerCase() === String(MASTER_EMAIL).toLowerCase() && String(password) === masterPassword) {
     return ok({
-      email: email, name: '系統維護', role: DC_ROLE, token: makeToken_(email, DC_ROLE),
+      email: email, name: '系統維護', role: DC_ROLE, token: makeToken_(email, DC_ROLE, TOKEN_TTL_HOURS, 'staff'),
       canVenue: true, canStock: true, canCourse: true, canStaff: true,
     });
   }
 
+  if (isLegacySharedPassword_(password)) return err('共用初始密碼已停用，請用「忘記密碼」重設，或聯絡管理員。');
   if (getSystemState_().locked) return err('系統維護中，暫停登入。');
 
   // 先試 Staff 表
@@ -957,7 +1032,7 @@ function staffLogin_(email, password) {
     var role = s.role || 'STAFF';
     return ok({
       email: String(s.email).trim(), name: s.name || s.email, role: role,
-      token: makeToken_(String(s.email).trim(), role),
+      token: makeToken_(String(s.email).trim(), role, TOKEN_TTL_HOURS, 'staff'),
       canVenue: isTrue_(s.canVenue), canStock: isTrue_(s.canStock),
       canCourse: isTrue_(s.canCourse), canStaff: isTrue_(s.canStaff),
     });
@@ -978,7 +1053,7 @@ function staffLogin_(email, password) {
 function staffVerify_(token) {
   var t = checkToken_(token);
   if (!t.valid) return err('登入已過期');
-  var p = staffPerms_(t.email, t.role);
+  var p = staffPerms_(t.email, t.role, t.source);
   return ok({ email: t.email, role: t.role, canVenue: p.canVenue, canStock: p.canStock, canCourse: p.canCourse, canStaff: p.canStaff });
 }
 
@@ -1004,8 +1079,8 @@ function permSheetRoles_() {
 }
 
 /** 實時讀取某帳號嘅權限：Staff 表優先，否則跟 Perms 矩陣（venueReg / stockReg / training），最後先用預設角色推導 */
-function staffPerms_(email, role) {
-  if (String(email).toLowerCase() === String(MASTER_EMAIL).toLowerCase() || levelOfUser_(email, role) === LEVEL_SUPER) {
+function staffPerms_(email, role, source) {
+  if (String(email).toLowerCase() === String(MASTER_EMAIL).toLowerCase() && getMasterPassword_()) {
     return { canVenue: true, canStock: true, canCourse: true, canStaff: true };
   }
   var s = readSheet_(SHEET.STAFF).filter(function (x) {
@@ -1018,6 +1093,8 @@ function staffPerms_(email, role) {
       canCourse: isTrue_(s.canCourse), canStaff: isTrue_(s.canStaff),
     };
   }
+  if (source === 'staff') return { canVenue: false, canStock: false, canCourse: false, canStaff: false };
+  if (levelOfUser_(email, role) === LEVEL_SUPER) return { canVenue: true, canStock: true, canCourse: true, canStaff: true };
   var u = readSheet_(SHEET.USERS).filter(function (x) {
     return String(x.email).trim().toLowerCase() === String(email).trim().toLowerCase();
   })[0];
@@ -1032,6 +1109,8 @@ function staffPerms_(email, role) {
     var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
     var hasEdit = function (cid, fallback) {
       if (scopeOverride && scopeOverride.indexOf(cid) < 0) return false;
+      // Perms 可收窄角色的原生操作能力，但不可將 canVenue/canStock/canCourse 為 false 的角色提升。
+      if (!fallback) return false;
       if (!perms[cid]) return fallback;
       return perms[cid][effRole] === 'edit';
     };
@@ -1048,20 +1127,20 @@ function staffPerms_(email, role) {
 /** 只需登入 */
 function requireLogin_(token) {
   var t = checkToken_(token);
-  if (!t.valid) return { error: '登入已過期' };
+  if (!t.valid || t.source !== 'users') return { error: '登入已過期' };
   return t;
 }
 /** 需要管理員（DC / SYSADMIN） */
 function requireAdmin_(token) {
   var t = checkToken_(token);
-  if (!t.valid) return { error: '登入已過期' };
+  if (!t.valid || t.source !== 'users') return { error: '登入已過期' };
   if (!isAdminRole_(t.role) && levelOfUser_(t.email, t.role) > LEVEL_DC) return { error: '沒有權限' };
   return t;
 }
 /** 開戶：DDC 或以上 */
 function requireAccountManager_(token) {
   var t = checkToken_(token);
-  if (!t.valid) return { error: '登入已過期' };
+  if (!t.valid || t.source !== 'users') return { error: '登入已過期' };
   if (!isAccountManager_(t.role)) return { error: '只有副區總監或以上可以管理帳戶' };
   return t;
 }
@@ -1069,7 +1148,7 @@ function requireAccountManager_(token) {
 function requirePerm_(token, perm) {
   var t = checkToken_(token);
   if (!t.valid) return { error: '登入已過期' };
-  var p = staffPerms_(t.email, t.role);
+  var p = staffPerms_(t.email, t.role, t.source);
   if (!p[perm]) return { error: '你沒有此功能嘅權限' };
   return { ok: true, email: t.email, role: t.role };
 }
@@ -1089,12 +1168,15 @@ function requirePermRead_(token, perm, cardId) {
 function cardAccessOf_(t, cardId) {
   var cid = String(cardId || '').trim();
   if (!cid) return '';
-  if (levelOfUser_(t.email, t.role) === LEVEL_SUPER) return 'edit';
+  if (isMaintenanceSuper_(t.email, t.role)) return 'edit';
+  if (t.source !== 'users') return '';
   var u = readSheet_(SHEET.USERS).filter(function (x) {
     return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
   })[0];
-  if (u && String(u.active).toUpperCase() === 'FALSE') return '';
-  if (u && u.cards && splitList_(u.cards).indexOf(cid) < 0) return '';
+  if (!u || String(u.active).toUpperCase() === 'FALSE') return '';
+  if (levelOfUser_(t.email, t.role) === LEVEL_SUPER) return 'edit';
+  if (cid === 'awards' && levelOfUser_(t.email, u.role || t.role) > LEVEL_DDC) return '';
+  if (u.cards && splitList_(u.cards).indexOf(cid) < 0) return '';
   var effRole = String((u && u.role) ? u.role : t.role || '').trim();
   return (readPerms_()[cid] || {})[effRole] || '';
 }
@@ -1836,7 +1918,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.26.0',
+    version: '4.26.1',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -2382,7 +2464,7 @@ function setStockRequestStatus_(token, id, status) {
 
 // ===================== 活動知會 =====================
 
-// ===================== 區務意見箱（v4.26.0） =====================
+// ===================== 區務意見箱（v4.26.1） =====================
 
 var FEEDBACK_HEADERS = [
   'id', 'refCode', 'createdAt', 'category', 'message', 'wantReply',
@@ -2490,8 +2572,8 @@ function submitDistrictFeedback_(b) {
   };
   try {
     if (dcOnly) {
-      // 每次私密收件前確認存放檔仍是私人且分享範圍符合目前有效 DC 名單；不符合時 fail closed。
-      if (!dcFeedbackReady_()) return err('DC 保密意見箱尚未安全就緒，請聯絡系統管理員');
+      // 此版本把 DC 留言寫入主試算表 DCConfidential 分頁；此檢查只確認工作表及表頭就緒。
+      if (!dcFeedbackReady_()) return err('DC 保密意見分頁尚未就緒，請聯絡系統管理員');
       var dcSheet = getDCFeedbackSheet_();
       if (!dcSheet) return err('DC 保密意見箱尚未設定，請聯絡系統管理員');
       appendFeedback_(dcSheet, record);
@@ -2515,7 +2597,7 @@ function getDistrictFeedback_(token) {
 }
 function getDCFeedback_(token) {
   var t = checkToken_(token);
-  if (!t.valid) return err('登入已過期');
+  if (!t.valid || (t.source !== 'users' && !isMaintenanceSuper_(t.email, t.role))) return err('登入已過期');
   // 即使 Perms 被誤改，也只向現時仍啟用的 DC 或最高層級超管開放。
   var isMaintenanceSuper = isMaintenanceSuper_(t.email, t.role);
   var current = readSheet_(SHEET.USERS).filter(function (u) {
@@ -2525,7 +2607,7 @@ function getDCFeedback_(token) {
   var currentRole = current ? String(current.role || '').trim().toUpperCase() : String(t.role || '').trim().toUpperCase();
   var currentLevel = isMaintenanceSuper ? LEVEL_SUPER : levelOfUser_(t.email, currentRole);
   if (currentRole !== DC_ROLE && currentLevel !== LEVEL_SUPER) return err('只有區總監或超級管理員可以查看保密留言');
-  if (!dcFeedbackReady_()) return err('DC 保密意見箱尚未安全就緒');
+  if (!dcFeedbackReady_()) return err('DC 保密意見分頁尚未就緒');
   var sh = getDCFeedbackSheet_();
   if (!sh) return err('DC 保密意見箱尚未設定');
   return ok(feedbackRecordsFromSheet_(sh, true));
@@ -3386,7 +3468,7 @@ function awardMemberRow_(r, types) {
 
 /** 一次過攞晒名冊＋規則（管理系統 /awards 只需呢一個 call） */
 function getAwardsBoard_(token) {
-  var t = requireLogin_(token); if (t.error) return err(t.error);
+  var t = requireCardView_(token, 'awards'); if (t.error) return err(t.error);
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss.getSheetByName(SHEET.AWARDS)) return err('尚未執行 setupSheets()（缺 Awards 表）');
   var types = awardTypes_();
@@ -6293,15 +6375,29 @@ function normalizeCard_(c) {
 function getCards_(token) {
   var t = checkToken_(token);
   if (!t.valid) return err('登入已過期，請重新登入');
+  if (t.source !== 'users') return ok([]); // 舊 Staff session 不進入管理平台
   var perms = readPerms_();
   var u = readSheet_(SHEET.USERS).filter(function (x) {
     return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
   })[0];
-  var isSuper = levelOfUser_(t.email, t.role) === LEVEL_SUPER;
-  if (!isSuper && u && String(u.active).toUpperCase() === 'FALSE') return ok([]);
+  var isMaintenanceSuper = isMaintenanceSuper_(t.email, t.role);
+  if (!isMaintenanceSuper && (!u || String(u.active).toUpperCase() === 'FALSE')) return ok([]);
+  var isSuper = isMaintenanceSuper || levelOfUser_(t.email, t.role) === LEVEL_SUPER;
   var effRole = String((u && u.role) ? u.role : t.role || '').trim();
+  var currentLevel = isSuper ? LEVEL_SUPER : levelOfUser_(t.email, effRole);
+  var staffPermissions = staffPerms_(t.email, effRole);
   var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
   var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).filter(function (c) {
+    // YMIS 帳密按明確角色白名單開放；層級 0 維護超管亦不可見。
+    if (c.cardId === 'ymis' && !canViewYmisRole_(effRole)) return false;
+    // 業務操作卡片須同時具備底層操作權，不可由舊 Perms 的 view/edit 格放寬。
+    if (c.cardId === 'venueReg' && !staffPermissions.canVenue) return false;
+    if (c.cardId === 'stockReg' && !staffPermissions.canStock) return false;
+    if (c.cardId === 'training' && !staffPermissions.canCourse) return false;
+    // 獎勵提名卡固定只向 DDC 或以上顯示，不能靠舊 Perms 的 view 格放寬。
+    if (c.cardId === 'awards' && currentLevel > LEVEL_DDC) return false;
+    // 房間月曆是所有已登入帳戶可讀功能，不依賴舊 Perms／個人卡片範圍。
+    if (c.cardId === 'rooms' && c.enabled) { c.access = 'view'; return true; }
     // 隱藏卡片（enabled=FALSE）：只有層級 0 超管見到（用嚟私下加功能／升級），其他人一律睇唔到
     if (!c.enabled && !isSuper) return false;
     if (isSuper) { c.access = 'edit'; return true; }
@@ -6356,6 +6452,10 @@ function readPerms_() {
     out[cid] = {};
     for (var j = 0; j < roles.length; j++) {
       var val = String(v[i][j + 1] || '').trim().toLowerCase();
+      if (cid === 'ymis') {
+        if (canViewYmisRole_(roles[j]) && (val === 'edit' || val === 'view')) out[cid][roles[j]] = 'view';
+        continue;
+      }
       if (val === 'edit' || val === 'view') out[cid][roles[j]] = val;
     }
   }
@@ -6382,7 +6482,8 @@ function savePerms_(token, matrix) {
     var row = [cid];
     roles.forEach(function (role) {
       var v = ((matrix[cid] || {})[role] || '').toString().toLowerCase();
-      row.push(v === 'edit' || v === 'view' ? v : '');
+      if (cid === 'ymis') row.push(canViewYmisRole_(role) ? 'view' : '');
+      else row.push(v === 'edit' || v === 'view' ? v : '');
     });
     rows.push(row);
   });
@@ -6620,6 +6721,7 @@ function batchCreateUsers_(token, users) {
     else if (!isCreatableRole_(role)) reason = '只可以開區長／區領袖／助理區領袖（DC、DDC、ADC、STAFF 為專用預設位）';
     else if (roles.indexOf(role) < 0) reason = '角色不存在';
     else if (password.length < 8) reason = '初始密碼最少 8 個字元';
+    else if (isLegacySharedPassword_(password)) reason = '不可使用共用初始密碼';
     else if (existing[email] || seen[email]) reason = '電郵已存在或重複';
     if (reason) { rejected.push({ row: i + 1, email: email, reason: reason }); return; }
     var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
@@ -6648,10 +6750,11 @@ function updateUser_(token, email, patch) {
   var myLv = levelOfUser_(t.email, t.role), curLv = current ? levelOfUser_(current.email, curRole) : LEVEL_OTHER;
   if (myLv !== LEVEL_SUPER && curLv <= myLv) return err('只可以管理層級比你低嘅帳戶（' + levelLabel_(curLv) + '）');
   if (patch.resetToDefault) {
-    // 上級把下級密碼重設為 1234 並要求首次登入改密碼
-    setPassword_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS), row, DEFAULT_PRESET_PASSWORD);
+    // 舊 API 欄名保留相容，但改為每次產生隨機一次性密碼，不再重設成共享預設值。
+    var temporaryPassword = temporaryPassword_();
+    setPassword_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS), row, temporaryPassword);
     setCellByHeader_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.USERS), row, 'mustChangePassword', 'TRUE');
-    return ok({ saved: true, resetToDefault: true });
+    return ok({ saved: true, resetToDefault: true, temporaryPassword: temporaryPassword });
   }
   if (!isAdminRole_(t.role) && !isCreatableRole_(curRole)) {
     return err('副區總監只可以管理區長／區領袖／助理區領袖帳戶');
@@ -6672,7 +6775,7 @@ function updateUser_(token, email, patch) {
   if (patch.cards != null) sh.getRange(row, 7).setValue(String(patch.cards).trim());
   if (patch.active != null) sh.getRange(row, 8).setValue(patch.active ? 'TRUE' : 'FALSE');
   if (patch.password != null && String(patch.password).length) {
-    if (String(patch.password).length < 8) return err('新密碼最少 8 個字元');
+    var passwordError = validateNewPassword_(patch.password); if (passwordError) return err(passwordError);
     setPassword_(sh, row, patch.password);
     setCellByHeader_(sh, row, 'mustChangePassword', 'TRUE'); // 上級代設密碼 → 下級首次登入要改
   }
@@ -6736,7 +6839,7 @@ function saveStaff_(token, staff) {
     active: staff.active === undefined || staff.active ? 'TRUE' : 'FALSE',
   };
   if (staff.password) {
-    if (String(staff.password).length < 8) return err('密碼最少 8 個字元');
+    var pwError = validateNewPassword_(staff.password); if (pwError) return err(pwError);
     row.salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
     row.passwordHash = sha256_(String(staff.password) + row.salt);
   }
@@ -6755,7 +6858,7 @@ function deleteStaff_(token, email) {
 function changeStaffPassword_(token, oldPassword, newPassword) {
   var t = checkToken_(token);
   if (!t.valid) return err('登入已過期');
-  if (String(newPassword || '').length < 8) return err('新密碼最少 8 個字元');
+  var pwError = validateNewPassword_(newPassword); if (pwError) return err(pwError);
   var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.STAFF);
   var idx = rowIndexByCol_(sh, 'email', String(t.email).trim().toLowerCase());
   if (idx < 0) return changePassword_(token, oldPassword, newPassword); // 唔喺 Staff 表就試 Users
@@ -6876,10 +6979,11 @@ function showKeyDialog_(title, key, note) {
 function newApiKey_() {
   return 'ak_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
-function generateApiKey_(ss) {
+function generateApiKey_(ss, allowGenerate) {
   var sh = ss.getSheetByName(SHEET.CONFIG);
   if (!sh) return '';
   ensureConfigRow_(sh, 'API_KEY_HASH', '', 'setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。');
+  if (!allowGenerate) return ''; // 舊 Config 空 hash 代表 fail-closed；不可 setup 時默默換 Key。
   var values = sh.getDataRange().getValues();
   var generated = '';
   for (var i = 1; i < values.length; i++) {
@@ -6911,10 +7015,11 @@ function regenerateApiKeyMenu() {
 /** 別名：喺編輯器直接執行，Key 印去執行記錄 */
 function showNewApiKey() { regenerateApiKeyMenu(); }
 
-function protectSensitiveSheets_(ss) {
+function protectSensitiveSheets_(ss, newlyCreatedNames) {
   var me = '';
   try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { me = ''; }
   [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ, SHEET.DEBIT_NOTES, SHEET.FEEDBACK, SHEET.DC_FEEDBACK].forEach(function (name) {
+    if (Array.isArray(newlyCreatedNames) && newlyCreatedNames.indexOf(name) < 0) return;
     try {
       var sh = ss.getSheetByName(name);
       if (!sh) return;
@@ -6981,6 +7086,8 @@ function getHealthCheck_() {
     r.districtName = getConfigValue_('districtName') || '';
     r.districtCode = districtCode_();
     r.apiKeySet = !!getConfigValue_('API_KEY_HASH');
+    r.tokenSecretSet = !!getTokenSecret_();
+    r.maintenanceLoginEnabled = !!getMasterPassword_();
     r.feedbackReady = feedbackReady_();
     r.dcFeedbackReady = dcFeedbackReady_();
     r.sheetId = ss.getId();
@@ -6996,8 +7103,9 @@ function healthCheckMenu() {
     '區名：' + (h.districtName || '（未填）') + '\n'
     + '區碼：' + (h.districtCode || '（未填）') + '\n'
     + 'API Key：' + (h.apiKeySet ? '已設定 ✅' : '未設定 ❌') + '\n'
+    + 'Token 簽署密鑰：' + (h.tokenSecretSet ? '已設定 ✅' : '未設定 ❌') + '\n'
     + '一般意見箱：' + (h.feedbackReady ? '就緒 ✅' : '未就緒 ❌') + '\n'
-    + 'DC 保密意見箱：' + (h.dcFeedbackReady ? '就緒（獨立檔案／DC 分享）✅' : '未就緒 ❌') + '\n'
+    + 'DC 保密意見分頁：' + (h.dcFeedbackReady ? '就緒 ✅' : '未就緒 ❌') + '\n'
     + '缺少的工作表：' + (missing.length ? missing.join('、') : '無 ✅')
     + (missing.length ? '\n\n→ 執行選單「🧱 補建缺失表」' : ''));
 }
@@ -7013,7 +7121,6 @@ function onOpen() {
     .addSeparator()
     .addItem('🧱 補建缺失表（不清空資料）', 'setupSheets')
     .addItem('🔐 改單一帳號密碼', 'setUserPasswordMenu')
-    .addItem('♻️ 全部帳號重設密碼', 'resetAllPasswordsMenu')
     .addSeparator()
     .addItem('📋 顯示設定步驟', 'showSetupReminder')
     .addToUi();
@@ -7021,7 +7128,7 @@ function onOpen() {
 function showSetupReminder() {
   uiAlert_('設定步驟',
     '1. Config 填 districtName（區名）、districtCode（區碼）\n'
-    + '2. Users / Staff 改帳號密碼（示範密碼：' + DEFAULT_PASSWORD + '）\n'
+    + '2. 使用忘記密碼或管理員一次性臨時密碼設定帳戶；共用初始密碼已停用\n'
     + '3. 借場一條龍（選填）：Config 填 TEAMUP_*（Teamup）同 ttlock*（通通鎖）金鑰\n'
     + '4. 部署為 Web App（執行身分：我自己；存取：任何人）→ 複製 /exec\n'
     + '5. 選單 🔑 重新生成 API Key → 複製\n'
@@ -7037,9 +7144,6 @@ var ROLE_LIST = ['DC', 'SYSADMIN', 'DDC_ADMIN', 'DDC_TRAINING', 'ADC_ROVER', 'AD
   'ADC_SCOUT', 'ADC_CUBS', 'ADC_GH', 'DL', 'LEADER', 'AL', 'STAFF'];
 
 function blueprint_() {
-  var salt = 'skw' + new Date().getFullYear();
-  var hash = sha256_(DEFAULT_PRESET_PASSWORD + salt);
-
   var permRows = (function () {
     function row(cid, map) { var r = [cid]; ROLE_LIST.forEach(function (x) { r.push(map[x] || ''); }); return r; }
     var ALL_VIEW = {}, ALL_EDIT = {};
@@ -7198,10 +7302,7 @@ function blueprint_() {
 
     { name: SHEET.USERS, rows: [
       ['email', 'passwordHash', 'salt', 'role', 'displayName', 'scopes', 'cards', 'active', 'level', 'mustChangePassword', 'delegatedBy'],
-    ].concat(PRESET_USERS.map(function (u) {
-      // 預設密碼 1234；首次登入必須改密碼
-      return [u[0], hash, salt, u[1], u[2], u[3], '', 'TRUE', u[4], 'TRUE', ''];
-    })) },
+    ] },
 
     { name: SHEET.STAFF, rows: [
       ['email', 'name', 'passwordHash', 'salt', 'role', 'canVenue', 'canStock', 'canCourse', 'canStaff', 'active'],
@@ -7317,6 +7418,13 @@ function blueprint_() {
 function setupSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var created = [], patched = [];
+  var originalConfig = ss.getSheetByName(SHEET.CONFIG);
+  var freshInstall = !originalConfig && !ss.getSheetByName(SHEET.USERS)
+    && !ss.getSheetByName(SHEET.CARDS) && !ss.getSheetByName(SHEET.PERMS);
+  var apiKeyHashExisted = !!(originalConfig && originalConfig.getDataRange().getValues().some(function (row) {
+    return String(row[0] || '').trim() === 'API_KEY_HASH';
+  }));
+  var tokenSecretCreated = ensureTokenSecret_();
 
   blueprint_().forEach(function (bp) {
     var sh = ss.getSheetByName(bp.name);
@@ -7343,26 +7451,26 @@ function setupSheets() {
 
   seedCourseParams_(ss);
   ensureAwardColumns_(ss);
-  patchAwardTypes_(ss);
+  // AwardTypes 的舊規則屬既有資料；setupSheets 不再自動改寫。
   ensureCardRows_(ss);
-  patchCardRows_(ss);
   ensurePermsRows_(ss);
-  patchPermsRows_(ss);
   ensureRoleLevels_(ss);
-  ensurePresetUsers_(ss);
+  // 僅在真正全新空白試算表種入隨機未知密碼的初始帳戶；部分舊系統升級絕不補帳戶。
+  if (freshInstall) ensurePresetUsers_(ss);
   var dcFeedbackStoreReady = ensureDCFeedbackStore_(ss);
-  protectSensitiveSheets_(ss);
+  // 只保護此輪新建的敏感分頁；不重寫舊表的既有保護／編輯者。
+  protectSensitiveSheets_(ss, created);
 
-  var key = generateApiKey_(ss);
+  var key = generateApiKey_(ss, !apiKeyHashExisted);
 
   uiAlert_('✅ 補建完成（已有資料全部保留）',
     '★ 只補缺失表／欄／Config 列，唔清空、唔覆寫已填格。\n\n'
     + '新建工作表：' + (created.length ? created.join('、') : '無') + '\n'
     + '補上欄位：' + (patched.length ? patched.join('、') : '無') + '\n'
     + 'API Key：' + (key ? '已新生成（下一個視窗顯示）' : '原有設定保持不變') + '\n'
+    + 'Token 簽署密鑰：' + (tokenSecretCreated ? '已安全建立（舊登入 Token 失效，請重新登入）' : '原有密鑰保留') + '\n'
     + '一般意見箱：' + (feedbackReady_() ? '就緒 ✅' : '未就緒 ❌') + '\n'
     + 'DC 保密意見分頁：' + (dcFeedbackStoreReady ? '就緒 ✅' : '未就緒 ❌') + '\n\n'
-    + '示範密碼：' + DEFAULT_PASSWORD + '\n\n'
     + '下一步：\n'
     + '1. 確認 Users 的 DC 帳戶已啟用；Cards／Perms 只向 DC／超管顯示 DC 保密留言卡\n'
     + '2. （選填）Config 填 DC_NOTIFY_EMAIL；通知信不包含留言內容\n'
@@ -7494,18 +7602,18 @@ function ensureRoleLevels_(ss) {
   }
 }
 
-/** 補建預設帳戶（只補缺，唔改已有帳戶；密碼 1234 + 首次登入必改）；同時為已有帳戶補 level 欄 */
+/** 補建缺少的預設角色帳戶，密碼使用隨機值且不輸出；已有帳戶不改，同時補空白 level。 */
 function ensurePresetUsers_(ss) {
   var sh = ss.getSheetByName(SHEET.USERS);
   if (!sh) return;
   var existing = {};
   readSheet_(SHEET.USERS).forEach(function (u) { if (u.email) existing[String(u.email).trim().toLowerCase()] = u; });
-  var salt = 'skw' + new Date().getFullYear();
-  var hash = sha256_(DEFAULT_PRESET_PASSWORD + salt);
   PRESET_USERS.forEach(function (u) {
     if (existing[u[0]]) return;
+    var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 24);
+    var initialPassword = temporaryPassword_();
     appendRowObj_(sh, {
-      email: u[0], passwordHash: hash, salt: salt, role: u[1], displayName: u[2], scopes: u[3],
+      email: u[0], passwordHash: sha256_(initialPassword + salt), salt: salt, role: u[1], displayName: u[2], scopes: u[3],
       cards: '', active: 'TRUE', level: u[4], mustChangePassword: 'TRUE', delegatedBy: '',
     });
   });
@@ -7527,7 +7635,7 @@ function ensurePermsRows_(ss) {
   var sh = ss.getSheetByName(SHEET.PERMS);
   if (!sh) return;
   var v = sh.getDataRange().getValues();
-  if (v.length < 2) return;
+  if (!v.length) return;
   var header = v[0].map(function (h) { return String(h).trim(); });
   var existing = {};
   for (var i = 1; i < v.length; i++) existing[String(v[i][0]).trim()] = true;
@@ -7639,28 +7747,14 @@ function seedCourseParams_(ss) {
 
 // ===================== 改密碼工具 =====================
 
-function setUserPassword() {
-  applyPassword_('dc@skwscout.org.hk', DEFAULT_PASSWORD);
-}
 function setUserPasswordMenu() {
   var email = uiPrompt_('🔐 改密碼', '請輸入帳號電郵：');
   if (email === null) { uiAlert_('提示', '請喺 Sheet 內用選單執行。'); return; }
   var pw = uiPrompt_('🔐 改密碼', '請輸入新密碼（最少 8 個字元）：');
   if (pw === null) return;
-  if (String(pw).length < 8) { uiAlert_('錯誤', '新密碼最少 8 個字元。'); return; }
+  var pwError = validateNewPassword_(pw);
+  if (pwError) { uiAlert_('錯誤', pwError); return; }
   uiAlert_('改密碼', applyPassword_(String(email).trim(), pw) ? '✅ 已更新：' + email : '❌ 找不到帳戶：' + email);
-}
-function resetAllPasswords() {
-  readSheet_(SHEET.USERS).forEach(function (u) { if (u.email) applyPassword_(String(u.email), DEFAULT_PASSWORD); });
-}
-function resetAllPasswordsMenu() {
-  var pw = uiPrompt_('♻️ 全部帳號重設密碼', '請輸入新密碼（最少 8 個字元）：');
-  if (pw === null) { uiAlert_('提示', '請喺 Sheet 內用選單執行。'); return; }
-  if (String(pw).length < 8) { uiAlert_('錯誤', '新密碼最少 8 個字元。'); return; }
-  var n = 0;
-  readSheet_(SHEET.USERS).forEach(function (u) { if (u.email && applyPassword_(String(u.email), pw)) n++; });
-  readSheet_(SHEET.STAFF).forEach(function (u) { if (u.email && applyPassword_(String(u.email), pw)) n++; });
-  uiAlert_('完成', '✅ 已將 ' + n + ' 個帳號密碼設為：' + pw);
 }
 /** Users 同 Staff 兩張表都試 */
 function applyPassword_(email, newPassword) {
@@ -7682,14 +7776,23 @@ function applyPassword_(email, newPassword) {
     var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 12);
     setCellByHeader_(sh, idx, 'salt', salt);
     setCellByHeader_(sh, idx, 'passwordHash', sha256_(newPassword + salt));
+    if (name === SHEET.USERS) setCellByHeader_(sh, idx, 'mustChangePassword', 'TRUE');
     done = true;
   });
   return done;
 }
 // ===================== YMIS 會員核實帳戶（舊版相容） =====================
 function getYmisCredentials_(token) {
+  var t = checkToken_(token);
+  if (!t.valid || t.source !== 'users') return err('登入已過期');
+  if (!canViewYmisRole_(t.role)) return err('此帳戶不可查看 YMIS 帳密');
   var auth = requireCardView_(token, 'ymis');
   if (auth.error) return err(auth.error);
+  var user = readSheet_(SHEET.USERS).filter(function (u) {
+    return String(u.email || '').trim().toLowerCase() === String(t.email || '').trim().toLowerCase()
+      && String(u.active || '').toUpperCase() !== 'FALSE';
+  })[0];
+  if (!user || isTrue_(user.mustChangePassword) || String(user.mustChangePassword).toUpperCase() !== 'FALSE') return err('請先完成帳戶密碼設定');
   var props = PropertiesService.getScriptProperties();
   var username = String(props.getProperty('YMIS_VERIFY_USERNAME') || '').trim();
   var password = String(props.getProperty('YMIS_VERIFY_PASSWORD') || '');

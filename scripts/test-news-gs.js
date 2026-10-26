@@ -42,8 +42,8 @@ const sheets = {
   Config: makeSheet('Config', [['key', 'value', '說明'], ['districtCode', 'SKW', ''], ['districtName', '筲箕灣區', '']]),
   Perms: makeSheet('Perms', [['cardId', 'DC', 'STAFF', 'AL'], ['news', 'edit', 'edit', 'view']]),
   Users: makeSheet('Users', [['email', 'role', 'active', 'level'],
-    ['dc@x.org', 'DC', 'TRUE', 1], ['staff@x.org', 'STAFF', 'TRUE', 4], ['al@x.org', 'AL', 'TRUE', 5]]),
-  Roles: makeSheet('Roles', [['role', 'label', 'protected', 'level'], ['DC', '區總監', 'TRUE', 1], ['STAFF', '區職員', 'TRUE', 4], ['AL', '助理區領袖', 'TRUE', 5]]),
+    ['dc@x.org', 'DC', 'TRUE', 1], ['adc@x.org', 'ADC_SCOUT', 'TRUE', 3], ['staff@x.org', 'STAFF', 'TRUE', 4], ['al@x.org', 'AL', 'TRUE', 5]]),
+  Roles: makeSheet('Roles', [['role', 'label', 'protected', 'level'], ['DC', '區總監', 'TRUE', 1], ['ADC_SCOUT', '助總監', 'TRUE', 3], ['STAFF', '區職員', 'TRUE', 4], ['AL', '助理區領袖', 'TRUE', 5]]),
   News: makeSheet('News', [['id', 'districtCode', 'title', 'body', 'date', 'pinned', 'level', 'link', 'linkLabel',
     'notify', 'active', 'expiresAt', 'publishedAt', 'publishedBy', 'updatedAt', 'createdAt',
     'deleted', 'deletedAt', 'deletedBy']]),
@@ -97,6 +97,8 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(code, ctx, { filename: 'Code.gs' });
+const testApiKey = 'news-test-api-key';
+sheets.Config.appendRow(['API_KEY_HASH', ctx.sha256_(testApiKey), 'test only']);
 
 // 直接扮 token：checkToken_ 用 TOKEN_SECRET 簽名，makeToken_ 可以照用
 function tokenFor(email, role) { return ctx.makeToken_(email, role, 12); }
@@ -207,7 +209,7 @@ check('下架 → 成員端即刻唔見，但管理系統仍見到（連軟刪�
 check('v4.9.0：ADC（層級 3）可以直接發佈；STAFF（層級 4）唔可以', () => {
   const adcToken = tokenFor('adc@x.org', 'ADC_SCOUT');
   const staffToken = tokenFor('staff@x.org', 'STAFF');
-  // harness Users 表冇 ADC 帳戶 → level 由 Roles 推斷；ADC_SCOUT → 層級 3
+  // 建立有效 ADC Users 帳戶，確認 level 3 可發佈；STAFF 僅可讀。
   const rAdc = ctx.saveAnnouncement_(adcToken, { title: 'ADC 發佈', body: '掂' });
   assert.ok(rAdc.ok, JSON.stringify(rAdc));
   assert.strictEqual(ctx.listAnnouncements_({}).filter(n => n.title === 'ADC 發佈').length, 1);
@@ -305,15 +307,15 @@ check('limit 上限 50、預設 20', () => {
 });
 
 check('doGet 公開路由 listAnnouncements 通', () => {
-  const out = ctx.doGet({ parameter: { action: 'listAnnouncements' } });
+  const out = ctx.doGet({ parameter: { action: 'listAnnouncements', apiKey: testApiKey } });
   const parsed = JSON.parse(out);
   assert.strictEqual(parsed.ok, true);
   assert.ok(parsed.data.length >= 0);
 });
 
-check('健康檢查版本 4.19.1', () => {
+check('健康檢查版本 4.26.1', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.19.1');
+  assert.strictEqual(parsed.data.version, '4.26.1');
 });
 
 // ───────────────────────────────────────────────────────────
@@ -415,7 +417,7 @@ check('單件 submitStockRequest 照舊work（冇 batchRef）', () => {
 
 check('doPost 路由 submitStockBatchRequest 通', () => {
   const out = JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({
-    action: 'submitStockBatchRequest', ...applicant, items: [{ itemId: 'LAMP', qty: 1 }],
+    action: 'submitStockBatchRequest', apiKey: testApiKey, ...applicant, items: [{ itemId: 'LAMP', qty: 1 }],
   }) } }));
   assert.strictEqual(out.ok, true);
   assert.ok(out.refCode);

@@ -3,7 +3,7 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
-> **正式 Apps Script 尚未部署 v4.26.0，仍以區方現行部署版本為準。** 本倉 v4.26.0 `gs/Code.gs` 要求先依下文完成 token secret 遷移；更新前必須備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，不可直接覆蓋未驗收的正式後台。此版本在主試算表新增 DC 留言分頁；助手只交付檔案與驗證結果，不會代區方部署。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
+> **正式 Apps Script 尚未部署本分支 v4.26.1；此修補尚未合併 MAIN，亦未在真實 Apps Script／Sheet／外部服務驗證。** 合併後仍須先備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，由區方自行更新原有 Apps Script；助手不會部署正式 GS。修補新增認證與角色門禁，並保留 DC 保密意見分頁設計；Sheet 分頁保護不是檢視隔離。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
 >
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
@@ -28,8 +28,8 @@
    - 自動建齊所有工作表（Config / Users / Venues / VenueBookings / CourseLinks …）。
    - ★ 係「**只追加**」：舊表只在最右加缺欄、在最底加缺行；舊借場／消息／帳戶／Cards／Perms／AwardTypes 的原有儲存格與工作表保護保持原樣。升級前仍要先備份。
    - **只有全新 Config 或舊 Config 缺少 `API_KEY_HASH` 整行**，才生成新 API Key（只顯示一次，請私下複製）；已有行連空白值都不覆寫。空白時須由區方另外明確生成 Key 並同步前端，未完成勿部署。
-4. **部署前必設** Apps Script → 專案設定 → Script Properties：`PORTAL_TOKEN_SECRET`（每區獨立隨機、至少 32 字元；未設定會拒絕登入／token）；如要開啟維護登入，另設 `PORTAL_MASTER_PASSWORD`（至少 12 字元，否則停用）。不可再使用／提交原始碼中的公開示範金鑰或密碼。切換 token 密鑰會令舊 session／重設密碼連結失效。
-5. **更換預設 Users／Staff 初始密碼**，不再使用的帳戶應停用；尤其啟用 YMIS 卡之前必須完成。`MASTER_EMAIL`（帳號名稱）可按區方需要另改，密碼不可寫入 Code.gs。
+4. `setupSheets()` 會在 Script Properties 缺少有效 `PORTAL_TOKEN_SECRET` 時自動建立每專案獨立的高熵密鑰（至少 32 字元）；亦可由區方先私下設定。確認 `getHealthCheck` 顯示 `tokenSecretSet: true`。首次建立／更換會令舊 session／重設連結失效。如需維護登入，另設私密 `PORTAL_MASTER_PASSWORD`（至少 12 字元）；不設定即停用。不可再使用／提交原始碼中的公開示範密鑰或密碼。
+5. 新版拒絕共享初始密碼 `1234`／`scout1234`。**既有系統不會自動補預設 Users／Staff 帳戶**；只有全新空白試算表才建立隨機未知的臨時密碼帳戶，須由管理員另行重設。停用不再使用的帳戶；啟用 YMIS 卡前確認合資格 Users 帳戶已啟用。`MASTER_EMAIL` 只是帳號名稱，密碼不可寫入 Code.gs。
 6. **全新區**：部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：**任何人**）→ 攞 `/exec` 網址。**已有區**：管理部署 → 編輯**原有** Web App → 新版本；沿用舊 `/exec`。
 
 ### 第 2 步：填 Config 金鑰（可直接喺 `/venue-regs`「電子鎖與日曆設定」儲存，或填「Config」工作表）
@@ -53,7 +53,7 @@
 
 領袖姓名及職位使用 Teamup 內建 `who` 欄位；參加人數使用 `custom` 內的欄位 key（目前日曆事件回應為 `"1"`，Config 填 `1`）。成員系統不需要 Teamup API Token。`setupSheets()` 只追加缺少欄位／Config key，不會清除既有資料。
 
-### v4.26.0「你講我聽」意見箱
+### v4.26.1「你講我聽」意見箱
 - 一般留言儲存在主試算表 `DistrictFeedback`；DC 留言新增同一主試算表的 `DCConfidential` 分頁（只需多開一個分頁）。
 - 管理平台的 `feedback` 卡由 Perms 授權 ops 角色；`dcFeedback` 卡只授權 DC／SYSADMIN。DC 列表 API 亦在後端驗證目前角色，避免只靠前端藏卡。
 - 這是管理平台／API 層面的讀取限制，不是 Google Sheet 分頁級閱讀權限：有主試算表檢視權的人仍可直接打開 `DCConfidential` 分頁。若需要阻止此情況，必須把私密資料放在獨立試算表或限制整份主試算表的分享。
@@ -68,7 +68,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.26.0"`，並確認 `feedbackReady`、`dcFeedbackReady` 均為 `true`，才代表意見箱後端已就緒。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.26.1"`，並確認 `feedbackReady`、`dcFeedbackReady` 均為 `true`，才代表意見箱後端已就緒。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -81,7 +81,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.26.0"`，且 `feedbackReady`、`dcFeedbackReady` 均為 `true`，即代表意見箱功能已就緒。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.26.1"`，且 `feedbackReady`、`dcFeedbackReady` 均為 `true`，即代表意見箱功能已就緒。
 
 ---
 
@@ -226,7 +226,7 @@
 - **地域房間**：17／18／19 樓公開 Google Calendar ICS，沿用原本逐間房／打通房計算及 3 分鐘快取。
 - **區總部**：只保留同地域房間並列的**原有月曆格仔、逐個地點的逐日時段及今日總覽**，不另開 Teamup 月曆窗。今日「有冇已 BOOK」由 Vercel 唯讀紅色「確認借用區總部」iCalendar 子日曆判斷，包括手動加入的確認事件，**不計藍色申請中**，亦唔靠借場表批准狀態。JSON 僅含匿名時段，唔回傳人名、備註、入場密碼或原始 Teamup ID；來源讀不到會顯示警告，**唔代表區總部空置**。
 
-**正式啟用（維持可登入的 GS v4.18.0）**：只部署此 Next.js/Vercel 改動；**唔使**更新 Apps Script、執行 `setupSheets()`、改 Sheet 或任何登入密碼。原有 `PORTAL_SKW_APIKEY` 照舊，網址優先讀共用 Config `TEAMUP_BOOKING_URL`（透過 `getPublicInfo.teamupBookingUrl`），留空先沿用成員系統公開後備網址；本倉唔硬編碼公開分享連結。已按用戶提供的現有 Config 數字確認**紅色 11188257**、藍色 11188256，直接讀紅色 feed；預設**唔使加 Vercel env**。日後 ID 變更才可選用 `TEAMUP_APPROVED_SUB_ID` 覆蓋，但會驗證來源屬紅色日曆。**不用 Teamup API Token**。不要將本倉 v4.26.0 GS 覆蓋正式 4.18.0（未設 `PORTAL_TOKEN_SECRET` 會阻擋登入；更新前先完成遷移及驗收）。詳細對照見 [`docs/venue-booking-flow.md`](docs/venue-booking-flow.md)。
+**正式啟用（維持可登入的 GS v4.18.0）**：只部署此 Next.js/Vercel 改動；**唔使**更新 Apps Script、執行 `setupSheets()`、改 Sheet 或任何登入密碼。原有 `PORTAL_SKW_APIKEY` 照舊，網址優先讀共用 Config `TEAMUP_BOOKING_URL`（透過 `getPublicInfo.teamupBookingUrl`），留空先沿用成員系統公開後備網址；本倉唔硬編碼公開分享連結。已按用戶提供的現有 Config 數字確認**紅色 11188257**、藍色 11188256，直接讀紅色 feed；預設**唔使加 Vercel env**。日後 ID 變更才可選用 `TEAMUP_APPROVED_SUB_ID` 覆蓋，但會驗證來源屬紅色日曆。**不用 Teamup API Token**。不要將本倉 v4.26.1 GS 覆蓋正式 4.18.0（未設 `PORTAL_TOKEN_SECRET` 會阻擋登入；更新前先完成遷移及驗收）。詳細對照見 [`docs/venue-booking-flow.md`](docs/venue-booking-flow.md)。
 
 本地示範 `?demo=1` 有匿名示範事件（不嵌入真日曆）；測試：`node --experimental-strip-types scripts/test-teamup-hq-ics.ts`、`node --experimental-strip-types scripts/test-room-card-compat.ts`、`node --experimental-strip-types scripts/test-district-hq-calendar.ts`、`node --experimental-strip-types scripts/test-demo-engine.ts`、`npm run build`。2026-10-20 已獨立取得用戶公開連結的**紅色單一子日曆 ICS**，確認類別及每月第一個星期五重複規則；測試加入相同格式的匿名樣本。**Vercel 預覽受登入保護，尚需部署後核對頁面真實回應**；不能把來源測試當成正式畫面已驗收。
 
@@ -259,7 +259,7 @@
 
 - **天氣決策**（`lib/weatherDecision.ts`、`components/WeatherDecisionPanel.tsx`、主控台 `WeatherDecisionBanner`）：瀏覽器直接拉天文台開放數據 `warnsum`（公開、可跨域），對照活動指引通告 04/2018 表一，戶內／戶外／海上各自一個結論（✅／⚠️／⛔）＋原因；可模擬；AQHI 天文台 API 冇提供，人手揀。
 - **聯結簿**（`app/contacts/page.tsx`、`lib/contactsDirectory.ts`）：旅團（待區方資料）／港島地域／總會三分頁，來源及日期寫喺檔頭。v4.5.0 起港島地域只放職員電話並自動同步，總監架構搬去 `/orgchart`。
-- **帳戶層級**：`level` 0 超管 → 1 DC → 2 DDC → 3 ADC → 4 STAFF → 5 其他。`Users` 表新增 `level` / `mustChangePassword` / `delegatedBy`；`Roles` 表新增 `level`。**只有整本全新空白試算表**才按藍圖種預設帳戶（初始密碼只供首次設定、登入即須更改）；已有 Users 表就算只得表頭，或者已有資料但缺 Users 表，都唔自動新增示範管理員，亦唔改舊密碼／層級；缺 Users 表時請由區方自行開戶。
+- **帳戶層級**：`level` 0 超管 → 1 DC → 2 DDC → 3 ADC → 4 STAFF → 5 其他。`Users` 表新增 `level` / `mustChangePassword` / `delegatedBy`；`Roles` 表新增 `level`。**只有整本全新空白試算表**才按藍圖種預設帳戶（隨機臨時密碼不會顯示，須由管理員重設後登入並立即更改）；已有 Users 表就算只得表頭，或者已有資料但缺 Users 表，都唔自動新增示範管理員，亦唔改舊密碼／層級；缺 Users 表時請由區方自行開戶。
 - **忘記密碼**：`requestPasswordReset`（公開，寄去帳戶電郵，前端帶 `resetUrlBase` 即 `/?d=區碼`，連結 `&reset=TOKEN`）→ `resetPassword`。Token 綁定舊密碼雜湊，24 小時有效、用一次即失效。
 - **授權／收回**（`/delegate`）：`getDelegation` / `delegatePerms` / `revokePerms`，直接寫 `Perms` 表；只可授出自己擁有嘅權限、只可授俾層級較低嘅角色。
 - **隱藏卡片**：`Cards.enabled=FALSE` → `getCards` 只回傳俾 level 0（超管）；主控台超管每張卡有開關。
@@ -352,7 +352,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 | 檔案 | 用途 |
 |---|---|
-| `gs/Code.gs` | 完整統一後台 v4.26.0（意見箱未正式部署；升級前依只追加指引備份） |
+| `gs/Code.gs` | 完整統一後台 v4.26.1（意見箱未正式部署；升級前依只追加指引備份） |
 | `public/downloads/Code.gs.txt` | 與 `gs/Code.gs` 同一份內容，供網站「更新／下載」直接下載 |
 | `gs/Code.gs.course.js` | 每個訓練班嘅收表 Script 模板 |
 | `app/api/proxy/route.ts` | 前端 → Apps Script 嘅代理（API Key 唔出前端） |

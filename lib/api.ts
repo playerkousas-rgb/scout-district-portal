@@ -154,7 +154,7 @@ export const api = {
   // 前端帳戶管理
   getUsers: (token: string): Promise<ApiResult<PortalUser[]>> => callGet('getUsers', { token }),
   batchCreateUsers: (token: string, users: BatchUserInput[]): Promise<ApiResult<{ created: number; skipped: number; rejected: { row: number; email: string; reason: string }[] }>> => callPost('batchCreateUsers', { token, users }),
-  updateUser: (token: string, email: string, patch: Partial<PortalUser> & { password?: string; resetToDefault?: boolean }): Promise<ApiResult<{ saved: boolean }>> => callPost('updateUser', { token, email, patch }),
+  updateUser: (token: string, email: string, patch: Partial<PortalUser> & { password?: string; resetToDefault?: boolean }): Promise<ApiResult<{ saved: boolean; temporaryPassword?: string }>> => callPost('updateUser', { token, email, patch }),
   deleteUser: (token: string, email: string): Promise<ApiResult<{ deleted: boolean }>> => callPost('deleteUser', { token, email }),
 
   // 系統鎖定

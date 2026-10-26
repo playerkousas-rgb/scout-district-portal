@@ -262,11 +262,15 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(code, ctx, { filename: 'Code.gs' });
-// 本機只使用上方假密碼登入維護超管，避免測試依賴正式 Code.gs 的維護密碼。
-ctx.MASTER_PW = props.PORTAL_MASTER_PASSWORD;
-
 // ───────── 建表 + 假資料 ─────────
 ctx.setupSheets();
+// 只供本機 mock／自動測試使用的虛構登入密碼；不會寫入正式程式或任何真實 Sheet。
+const mockUserPassword = 'LOCAL_MOCK_USER_PASSWORD_NOT_FOR_REAL_USE';
+['dc@skwscout.org.hk', 'ddc.admin@skwscout.org.hk', 'info@skwscout.org.hk',
+  'ddc.training@skwscout.org.hk', 'adc.scout@skwscout.org.hk', 'sysadmin@skwscout.org.hk'].forEach((email) => {
+  const row = ctx.userRowIndex_(email);
+  if (row > 0) ctx.setPassword_(sheets.Users, row, mockUserPassword);
+});
 const cfg = sheets.Config;
 const setCfg = (k, v) => {
   const rows = cfg._data;

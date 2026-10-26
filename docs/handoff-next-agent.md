@@ -172,23 +172,22 @@
 > 意外報告草稿只存 localStorage（key `portal_incident_draft_{區碼}`），按「確定提交」先 POST，唔好改做逐鍵 autosave。列印格式以總會 ACC-RPT (2019/07) 為準，唔好照抄 event repo 嘅 AR-1 mock。
 > 舊卡片 `incident` 由 todo 轉 done：`setupSheets()` 內 `patchCardRows_` 只改「仍係舊預設值」嘅行；如用家改過描述就要自己喺 Cards 表改 `category=done`。
 
-> 日期：2026-08-25  
+> 更新：2026-10-26
 > 用家語言：香港中文  
-> 狀態：**呢輪功能已合併 main**。用家會自己下載 GS、貼去 Apps Script、執行 `setupSheets()` 測試。**測試完先同新 agent 研究下一步。**  
+> 狀態：**GS v4.26.1 認證修補由此分支提供；是否已合併 MAIN 請以 GitHub 為準。正式 Apps Script 未由助手部署，須由用家自行更新。** Node／mock 測試不等同 Apps Script、Sheet ACL 或外部服務驗證。
 > 本檔唔寫、唔問、唔貼任何 Secret（Client Secret、鎖密碼、Lock 密碼、API Key 明文）。
 
 ---
 
-## 用家而家要做（測試）
+## 用家更新正式 GS 時
 
-1. 下載 `public/downloads/Code.gs.txt`（= `gs/Code.gs` v4.19.1）；已有後台先讀 `docs/gs-upgrade-no-data-loss.md`，沿用原有專案／Sheet，升級只追加新表／欄／行，不改舊資料／權限。
-2. Apps Script **全部覆蓋貼上** → 儲存。
-3. Sheet 選單「🧭 區統一後台」→「🧱 補建缺失表（不清空資料）」。
-4. **已有區只編輯原有 Web App**（執行身分：我自己；存取：任何人），選新版本；唔好換 `/exec`。只有全新區先新增部署。
-5. 健康檢查（免 Key）：`{apiBase}?action=getHealthCheck` 要見到 `"version":"4.19.1"`、`apiKeySet: true`。
-6. DDC 或以上登入管理系統，睇主控台 HERO 走馬燈 + `/venue-regs` 四掣。
+1. 確認安全修補已合併 MAIN，再下載 `public/downloads/Code.gs.txt`（與 `gs/Code.gs` v4.26.1 一致）。先讀 [`docs/gs-upgrade-no-data-loss.md`](gs-upgrade-no-data-loss.md)，備份原 Sheet／Apps Script 並沿用原有專案及 Sheet。
+2. Apps Script **全部覆蓋貼上** → 儲存；執行選單 `setupSheets()`。此操作只追加缺項及新增卡片／權限，不改既有資料。只有真正全新空白試算表才建立隨機未知的臨時初始帳戶；既有系統不自動補帳戶。
+3. 確認 Script Properties 有有效 `PORTAL_TOKEN_SECRET`（setup 會在缺少有效值時自動建立）；有既有 `API_KEY_HASH` 先保留，空白 hash 必須明確重新生成並同步兩個前端 API Key。
+4. **已有區只編輯原有 Web App**（執行身分：我自己；存取：任何人），選新版本；不要換 `/exec`。由用家自行部署。
+5. 部署後健康檢查須見 `version: "4.26.1"`、`apiKeySet: true`、`tokenSecretSet: true`。部署前不可視為已上線；真實 Sheet、Apps Script、Teamup、TTLock、郵件及 YMIS 仍須區方按指引驗證。
 
-`setupSheets()` **只追加**：已有表只加新欄、新行，唔 `clear()`、唔改 Cards／Perms／AwardTypes 舊格／Sheet 保護；已有 Config key（連空白 value）都唔覆寫。空白 `API_KEY_HASH` 須由區方另外明確生成 Key 後才部署。上述歷史版本筆記未必反映新版的只追加路徑，以 `docs/gs-upgrade-no-data-loss.md` 為準。
+`setupSheets()` 只追加升級，不會修改已存在的儲存格、Cards／Perms 舊格或 Sheet 保護；空白 `API_KEY_HASH` fail-closed，須明確輪換及同步後才可使用。詳情以 [`docs/gs-upgrade-no-data-loss.md`](gs-upgrade-no-data-loss.md) 為準。
 
 ---
 

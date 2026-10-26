@@ -116,6 +116,8 @@ const ctx = {
 };
 vm.createContext(ctx);
 vm.runInContext(code, ctx, { filename: 'Code.gs' });
+const testApiKey = 'circulars-test-api-key';
+sheets.Config.appendRow(['API_KEY_HASH', ctx.sha256_(testApiKey), 'test only']);
 
 function tokenFor(email, role) { return ctx.makeToken_(email, role, 12); }
 
@@ -331,12 +333,14 @@ check('課程端報錯原樣 passthrough', () => {
 });
 
 check('Router：doGet getCirculars 有 wiring；listCirculars／getCircular 已移除', () => {
-  const r = JSON.parse(ctx.doGet({ parameter: { action: 'getCirculars', token: dcToken } }));
+  const denied = JSON.parse(ctx.doGet({ parameter: { action: 'getCirculars', token: dcToken } }));
+  assert.strictEqual(denied.ok, false, 'missing API key must fail closed');
+  const r = JSON.parse(ctx.doGet({ parameter: { action: 'getCirculars', token: dcToken, apiKey: testApiKey } }));
   assert.ok(r.ok && Array.isArray(r.data.items));
-  const gone1 = JSON.parse(ctx.doGet({ parameter: { action: 'listCirculars' } }));
+  const gone1 = JSON.parse(ctx.doGet({ parameter: { action: 'listCirculars', apiKey: testApiKey } }));
   assert.strictEqual(gone1.ok, false);
   assert.ok(String(gone1.error).indexOf('未知的 action') >= 0);
-  const gone2 = JSON.parse(ctx.doGet({ parameter: { action: 'getCircular', id: 'x' } }));
+  const gone2 = JSON.parse(ctx.doGet({ parameter: { action: 'getCircular', id: 'x', apiKey: testApiKey } }));
   assert.strictEqual(gone2.ok, false);
 });
 

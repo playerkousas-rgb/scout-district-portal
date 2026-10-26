@@ -103,7 +103,7 @@ master GS 檔（已附標準 Script，只有區會存）
 ---
 
 ## 四、安全注意
-- 逐區私密設定：Apps Script **Script Properties** 必設 `PORTAL_TOKEN_SECRET`（每區獨立、至少 32 字元亂碼），否則不發出／驗證登入 token；若要用維護登入，另設 `PORTAL_MASTER_PASSWORD`（至少 12 字元），否則維護帳號停用。不得把密碼寫入原始碼／聊天；更新 token 密鑰後舊登入及重設連結失效。詳見 [`YMIS 人工登入卡部署指引`](ymis-verification-feasibility.md)。
+- 逐區確認 Apps Script **Script Properties** 有 `PORTAL_TOKEN_SECRET`（每區獨立、至少 32 字元亂碼）；v4.26.1 `setupSheets()` 缺少有效值時會自動建立，未設定仍不發出／驗證登入 token。若要用維護登入，另設 `PORTAL_MASTER_PASSWORD`（至少 12 字元），否則維護帳號停用。不得把密碼寫入原始碼／聊天；更新 token 密鑰後舊登入及重設連結失效。詳見 [`YMIS 人工登入卡部署指引`](ymis-verification-feasibility.md)。
 - API Key：每區自動隨機生成，存 Vercel env，唔出現喺前端。
 - 受保護工作表：Config / Users / Staff / CourseLinks（含每班 key）。
 
