@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const ts = require('typescript');
 
 // 直接執行前端 lib/fps.ts，核對 GS 另行實作的 payload 沒有漂移。
@@ -50,7 +51,16 @@ async function waitUntilReady() {
   throw new Error(`mock server 啟動逾時：${output}`);
 }
 async function loginWithPassword(email, password) {
-  const result = await post({ action: 'login', email, password });
+  let result;
+  if (email === 'sheep') {
+    // 模擬 Vercel：明文密碼不送至 Apps Script，只送橋接 HMAC 簽署的短效授權。
+    const bridgeSecret = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    const assertion = JSON.stringify({ email: 'sheep', exp: Date.now() + 30_000, nonce: crypto.randomBytes(16).toString('hex') });
+    const signature = crypto.createHmac('sha256', bridgeSecret).update(assertion).digest('hex');
+    result = await post({ action: 'proxyMasterLogin', assertion, signature });
+  } else {
+    result = await post({ action: 'login', email, password });
+  }
   assert.equal(result.ok, true, `${email}: ${result.error || '登入失敗'}`);
   return result.data;
 }
@@ -198,7 +208,7 @@ async function login(email) {
   console.log('  ✓ 無效批次整批 rollback；後端自行驗證金額及 Ref，唔信 client');
 
   const health = await get('getHealthCheck');
-  assert.equal(health.data.version, '4.26.1');
+  assert.equal(health.data.version, '4.27.0');
   console.log('  ✓ setupSheets 補卡及 DebitNotes 帳簿成功，健康檢查版本 4.26.1');
   console.log('\n全部後台門禁及帳簿整合測試通過 ✓');
 })().catch(error => {

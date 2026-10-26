@@ -3,7 +3,7 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
-> **GS v4.26.1 認證修補已於 PR #45 合併 MAIN；正式 Apps Script 尚未部署本版本，亦未在真實 Apps Script／Sheet／外部服務驗證。** 更新原有 GS 前仍須先備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，正式 GS 由區方自行更新；助手不會代部署。修補新增認證與角色門禁，並保留 DC 保密意見分頁設計；Sheet 分頁保護不是檢視隔離。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
+> **GS v4.26.1 認證修補已於 PR #45 合併 MAIN；目前分支新增 v4.27.0 的 Vercel-only sheep 密碼流程，尚待合併，正式 Apps Script 仍未部署該流程，亦未在真實 Apps Script／Sheet／外部服務驗證。** 更新原有 GS 前仍須先備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，正式 GS 由區方自行更新；助手不會代部署。修補新增認證與角色門禁，並保留 DC 保密意見分頁設計；Sheet 分頁保護不是檢視隔離。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
 >
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
@@ -28,9 +28,11 @@
    - 自動建齊所有工作表（Config / Users / Venues / VenueBookings / CourseLinks …）。
    - ★ 係「**只追加**」：舊表只在最右加缺欄、在最底加缺行；舊借場／消息／帳戶／Cards／Perms／AwardTypes 的原有儲存格與工作表保護保持原樣。升級前仍要先備份。
    - **只有全新 Config 或舊 Config 缺少 `API_KEY_HASH` 整行**，才生成新 API Key（只顯示一次，請私下複製）；已有行連空白值都不覆寫。空白時須由區方另外明確生成 Key 並同步前端，未完成勿部署。
-4. `setupSheets()` 會在 Script Properties 缺少有效 `PORTAL_TOKEN_SECRET` 時自動建立每專案獨立的高熵密鑰（至少 32 字元）；亦可由區方先私下設定。確認 `getHealthCheck` 顯示 `tokenSecretSet: true`。首次建立／更換會令舊 session／重設連結失效。如需維護登入，另設私密 `PORTAL_MASTER_PASSWORD`（至少 12 字元）；不設定即停用。不可再使用／提交原始碼中的公開示範密鑰或密碼。
-5. 新版拒絕共享初始密碼 `1234`／`scout1234`。**既有系統不會自動補預設 Users／Staff 帳戶**；只有全新空白試算表才建立隨機未知的臨時密碼帳戶，須由管理員另行重設。停用不再使用的帳戶；啟用 YMIS 卡前確認合資格 Users 帳戶已啟用。`MASTER_EMAIL` 只是帳號名稱，密碼不可寫入 Code.gs。
-6. **全新區**：部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：**任何人**）→ 攞 `/exec` 網址。**已有區**：管理部署 → 編輯**原有** Web App → 新版本；沿用舊 `/exec`。
+4. `setupSheets()` 會在 Script Properties 缺少有效 `PORTAL_TOKEN_SECRET` 時自動建立每專案獨立的高熵密鑰（至少 32 字元）；亦會自動建立 Vercel→Apps Script 機器橋接密鑰。確認 `getHealthCheck` 顯示 `tokenSecretSet: true` 及 `masterProxyBridgeSet: true`。首次更換 token 密鑰會令舊 session／重設連結失效。
+5. `sheep` 維護帳戶密碼只存在 Vercel：設定 `PORTAL_{區碼}_MASTER_PASSWORD`（例如 `PORTAL_SKW_MASTER_PASSWORD`），建議先在 Vercel 設好新密碼再升級；密碼可自行選長短；短密碼較易被猜中，建議用可記住的長 passphrase（此登入流程沒有跨 Vercel instance 的分散式限速）。Apps Script 不讀取舊維護密碼；`setupSheets()` 會移除舊 `PORTAL_MASTER_PASSWORD` Script Property。Vercel 環境變數更新後需重新部署，變更才會生效；已簽發的 sheep session 最遲 12 小時到期，改密碼不會即時撤銷現有 session。
+6. 在 Apps Script 試算表選單「🔐 顯示 Vercel 維護橋接密鑰」，將顯示的機器密鑰設為對應 `PORTAL_{區碼}_MASTER_BRIDGE_SECRET`（例如 `PORTAL_SKW_MASTER_BRIDGE_SECRET`）。此值不是登入密碼、不需記憶；共用 API Key 單獨不能簽發維護 token。正式 Apps Script 更新仍由區方自行貼上／部署。不可提交任何密鑰或密碼。
+7. 新版拒絕共享初始密碼 `1234`／`scout1234`。**既有系統不會自動補預設 Users／Staff 帳戶**；只有全新空白試算表才建立隨機未知的臨時密碼帳戶，須由管理員另行重設。停用不再使用的帳戶；啟用 YMIS 卡前確認合資格 Users 帳戶已啟用。`MASTER_EMAIL` 只是帳號名稱，密碼不可寫入 Code.gs。
+8. **全新區**：部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：**任何人**）→ 攞 `/exec` 網址。**已有區**：管理部署 → 編輯**原有** Web App → 新版本；沿用舊 `/exec`。
 
 ### 第 2 步：填 Config 金鑰（可直接喺 `/venue-regs`「電子鎖與日曆設定」儲存，或填「Config」工作表）
 
@@ -68,7 +70,7 @@
 ### 第 4 步：接上平台（區目錄 + API Key）
 - `lib/district.ts` 已註冊 **SKW（筲箕灣區）** 嘅 `apiBase`。換區先要加一筆。
 - Vercel → Settings → Environment Variables 設 **`PORTAL_{區碼}_APIKEY`**（例：`PORTAL_SKW_APIKEY=ak_...`）。
-- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.26.1"`，並確認 `feedbackReady`、`dcFeedbackReady` 均為 `true`，才代表意見箱後端已就緒。
+- 驗證：瀏覽器開 `https://你嘅網址/api/proxy?districtCode=SKW&action=getHealthCheck` 見到 `ok: true` 同 `version: "4.27.0"`，並確認 `feedbackReady`、`dcFeedbackReady` 均為 `true`，才代表意見箱後端已就緒。
 
 ### 第 5 步：member-portal 申請表（另一個 repo）
 - member-portal 嘅借場表接公開 action **`submitVenueRequest`**（經佢個 proxy 帶 API Key），欄位：
@@ -81,7 +83,7 @@
 3. 睇結果：頁面顯示 🔑 密碼、Teamup 出現「確認借用」事件、申請人收到密碼電郵。
 
 ### 驗證新版已上線
-- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.26.1"`，且 `feedbackReady`、`dcFeedbackReady` 均為 `true`，即代表意見箱功能已就緒。
+- 部署後開 `?action=getHealthCheck`（免 API Key）→ 見 `version: "4.27.0"`，且 `feedbackReady`、`dcFeedbackReady` 均為 `true`，即代表意見箱功能已就緒。
 
 ---
 
@@ -352,7 +354,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 | 檔案 | 用途 |
 |---|---|
-| `gs/Code.gs` | 完整統一後台 v4.26.1（意見箱未正式部署；升級前依只追加指引備份） |
+| `gs/Code.gs` | 完整統一後台 v4.27.0（尚待合併及正式部署；升級前依只追加指引備份） |
 | `public/downloads/Code.gs.txt` | 與 `gs/Code.gs` 同一份內容，供網站「更新／下載」直接下載 |
 | `gs/Code.gs.course.js` | 每個訓練班嘅收表 Script 模板 |
 | `app/api/proxy/route.ts` | 前端 → Apps Script 嘅代理（API Key 唔出前端） |
@@ -364,6 +366,6 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 | `scripts/test-awards-gs.js` | 獎勵提名後台測試（21 項） |
 | `scripts/test-visit-gs.js` | 旅團探訪後台測試（15 項） |
 | `scripts/test-visit-logic.ts` | 探訪報告／支部篩選測試（16 項，`node --experimental-strip-types`） |
-| `scripts/mock-gs-server.js` | 本機模擬 Apps Script 後台（`node scripts/mock-gs-server.js` → `PORTAL_DEV_APIBASE=http://127.0.0.1:8788/exec PORTAL_SKW_APIKEY=dev npx next dev`，本機 mock 登入 `sheep`／`LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE`） |
+| `scripts/mock-gs-server.js` | 本機模擬 Apps Script 後台（啟動時會顯示僅本機使用的 `PORTAL_SKW_MASTER_PASSWORD` 與 `PORTAL_SKW_MASTER_BRIDGE_SECRET` 假值；切勿用於正式環境） |
 | `scripts/test-awards-logic.ts` | 獎勵夠期推算／Excel 匯入解析測試（24 項，`node --experimental-strip-types`） |
 | `scripts/check-member-alignment.js` | 成員系統 ↔ 後台對齊檢查（action 缺漏 / proxy 白名單 / 安全邊界） |

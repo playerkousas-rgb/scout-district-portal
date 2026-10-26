@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
+const crypto = require('crypto');
 
 const code = fs.readFileSync(path.join(__dirname, '..', 'gs', 'Code.gs'), 'utf8');
 
@@ -134,7 +135,11 @@ const sheets = {
 };
 
 // 只用無效測試字串；不使用或記錄任何真實 YMIS 帳戶資料。
-const scriptProps = { PORTAL_TOKEN_SECRET: 'TEST_ONLY_PRIVATE_TOKEN_SECRET_0123456789_ABCD' };
+const scriptProps = {
+  PORTAL_TOKEN_SECRET: 'TEST_ONLY_PRIVATE_TOKEN_SECRET_0123456789_ABCD',
+  PORTAL_MASTER_PASSWORD: 'FAKE_LEGACY_MASTER_PASSWORD_TO_BE_DELETED',
+};
+const mockCache = new Map();
 let propertyReads = 0;
 const ctx = {
   console,
@@ -151,11 +156,12 @@ const ctx = {
   Session: { getScriptTimeZone: () => 'Asia/Hong_Kong', getActiveUser: () => ({ getEmail: () => 'mock@local' }) },
   Utilities: {
     formatDate: (d, tz, fmt) => { const iso = new Date(d.getTime() + 8 * 3600 * 1000).toISOString(); return fmt === 'yyyy-MM-dd' ? iso.slice(0, 10) : iso; },
-    getUuid: () => 'uuid-' + Math.random().toString(36).slice(2),
+    getUuid: () => crypto.randomUUID(),
     base64EncodeWebSafe: (s) => Buffer.from(String(s), 'utf8').toString('base64url'),
     base64DecodeWebSafe: (s) => Buffer.from(String(s), 'base64url'),
     newBlob: (b) => ({ getDataAsString: () => Buffer.from(b).toString('utf8') }),
     computeDigest: (_a, s) => Array.from(String(s)).map(c => c.charCodeAt(0) % 128),
+    computeHmacSha256Signature: (message, key) => Array.from(crypto.createHmac('sha256', String(key)).update(String(message)).digest()).map(b => b > 127 ? b - 256 : b),
     DigestAlgorithm: { SHA_256: 'sha256' }, Charset: { UTF_8: 'utf8' },
   },
   ContentService: { createTextOutput: (t) => ({ setMimeType: () => t }), MimeType: { JSON: 'json' } },
@@ -164,8 +170,10 @@ const ctx = {
   PropertiesService: { getScriptProperties: () => ({
     getProperty: (k) => { if (k.startsWith('YMIS_VERIFY_')) propertyReads++; return scriptProps[k] || ''; },
     setProperty: (k, v) => { scriptProps[k] = v; },
+    deleteProperty: (k) => { delete scriptProps[k]; },
   }) },
-  CacheService: { getScriptCache: () => ({ get: () => null, put: () => {} }) },
+  CacheService: { getScriptCache: () => ({ get: (k) => mockCache.get(k) || null, put: (k, v) => mockCache.set(k, v) }) },
+  LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
   HtmlService: { createHtmlOutput: () => ({ setWidth: () => ({ setHeight: () => ({}) }) }) },
   __sheets: sheets,
 };
@@ -200,6 +208,9 @@ function guardedSetup() {
 }
 
 check('首輪升級：所有原有表／行／儲存格／格式／保護原封不動，只有缺行／缺欄追加', guardedSetup);
+check('setupSheets 清除舊 Apps Script 維護密碼 Property', () => {
+  assert.strictEqual(scriptProps.PORTAL_MASTER_PASSWORD, undefined);
+});
 check('原 Config 未有 API_KEY_HASH：只能在末尾加新行，不觸碰舊 Config 值', () => {
   const hashRows = sheets.Config._data.filter(r => r[0] === 'API_KEY_HASH');
   assert.strictEqual(hashRows.length, 1);
@@ -325,7 +336,7 @@ check('舊 Sheet 升級新增 YMIS 卡；預設只限 DC／DDC／ADC／職員，
   user.getRange(leaderRow + 1, cardCol + 1).setValue('contacts');
 });
 
-check('登入簽署金鑰未私下設定時拒絕 token；維護帳號必須私下設定長密碼', () => {
+check('Token 簽署密鑰缺失時拒絕 token；sheep 只接受 Vercel HMAC 一次性授權，舊 Script Property 不生效', () => {
   const adc = ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12);
   const secret = scriptProps.PORTAL_TOKEN_SECRET;
   delete scriptProps.PORTAL_TOKEN_SECRET;
@@ -338,14 +349,25 @@ check('登入簽署金鑰未私下設定時拒絕 token；維護帳號必須私�
   }
   assert.strictEqual(ctx.login_('sheep', '0728').ok, false);
   scriptProps.PORTAL_MASTER_PASSWORD = 'FAKE-TEST-MASTER-PASSWORD-ONLY';
-  try {
-    const master = ctx.login_('sheep', scriptProps.PORTAL_MASTER_PASSWORD);
-    assert.strictEqual(master.ok, true);
-    assert.ok(!ctx.getCards_(master.data.token).data.some(c => c.cardId === 'ymis'));
-    assert.strictEqual(ctx.getYmisCredentials_(master.data.token).ok, false);
-  } finally {
-    delete scriptProps.PORTAL_MASTER_PASSWORD;
-  }
+  assert.strictEqual(ctx.login_('sheep', scriptProps.PORTAL_MASTER_PASSWORD).ok, false,
+    'legacy Script Property must never be used to authenticate sheep');
+  assert.strictEqual(ctx.getMasterPassword_, undefined, 'Apps Script must not implement master-password lookup');
+
+  const bridgeSecret = scriptProps.PORTAL_MASTER_PROXY_SECRET;
+  assert.ok(bridgeSecret && bridgeSecret.length >= 64, 'setup should create a high-entropy machine bridge secret');
+  const grant = JSON.stringify({ email: 'sheep', exp: Date.now() + 30_000, nonce: crypto.randomBytes(16).toString('hex') });
+  const sig = crypto.createHmac('sha256', bridgeSecret).update(grant).digest('hex');
+  assert.strictEqual(ctx.proxyMasterLogin_(grant, 'bad-signature').ok, false, 'API-only / unsigned calls cannot issue a master token');
+  const master = ctx.proxyMasterLogin_(grant, sig);
+  assert.strictEqual(master.ok, true, 'a valid signed one-time assertion should issue the maintenance session');
+  assert.strictEqual(ctx.checkToken_(master.data.token).source, 'proxy');
+  assert.strictEqual(ctx.verify_(master.data.token).ok, true);
+  assert.ok(ctx.getCards_(master.data.token).data.some(c => c.cardId === 'venueReg'), 'maintenance session keeps superadmin portal access');
+  assert.strictEqual(ctx.getYmisCredentials_(master.data.token).ok, false, 'maintenance account remains excluded from YMIS credentials');
+  assert.strictEqual(ctx.proxyMasterLogin_(grant, sig).ok, false, 'signed assertion replay must be rejected');
+  assert.strictEqual(ctx.checkToken_(ctx.makeToken_('sheep', 'SYSADMIN', 12)).valid, false,
+    'pre-bridge master tokens must be rejected');
+  delete scriptProps.PORTAL_MASTER_PASSWORD;
 });
 
 check('YMIS 密碼只在明確要求／有效帳戶／卡片授權之下讀取 Script Properties', () => {

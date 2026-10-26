@@ -32,6 +32,7 @@ export interface DistrictInfo {
 // ║  2. 在 Vercel Dashboard → Settings → Environment Variables 加：   ║
 // ║     PORTAL_{區碼}_APIKEY = 區方提交的 API Key                     ║
 // ║     例如區碼 CHW → 設 PORTAL_CHW_APIKEY=ak_xxxxxxxx             ║
+// ║     維護登入另設 PORTAL_CHW_MASTER_PASSWORD + _MASTER_BRIDGE_SECRET║
 // ║  3. git push → Vercel 自動部署                                    ║
 // ╚══════════════════════════════════════════════════════════════════╝
 

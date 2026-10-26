@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.26.1）
+ * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.27.0）
  *
  * 涵蓋：
  *  1. 跨區自動探測（api.sciener.com 10003 → 自動切換 euapi.ttlock.com + 852 電話帳號相容）
@@ -155,9 +155,8 @@ function parseFormPayload(raw) {
   return out;
 }
 
-const props = {
-  PORTAL_MASTER_PASSWORD: 'TEST_MASTER_PASSWORD_123456',
-};
+const props = { PORTAL_MASTER_PASSWORD: 'TEST_ONLY_OLD_PROPERTY_MUST_BE_IGNORED' };
+const mockCache = new Map();
 
 const expectedMd5 = crypto.createHash('md5').update('MyLockPass!99', 'utf8').digest('hex');
 
@@ -199,12 +198,13 @@ const ctx = {
       if (fmt === "yyyy-MM-dd'T'HH:mm:ss") return iso.slice(0, 19);
       return iso;
     },
-    getUuid: () => 'uuid-' + Math.random().toString(36).slice(2, 10),
+    getUuid: () => crypto.randomUUID(),
     base64EncodeWebSafe: (s) => Buffer.from(String(s), 'utf8').toString('base64url'),
     base64DecodeWebSafe: (s) => Buffer.from(String(s), 'base64url'),
     newBlob: (b) => ({ getDataAsString: () => Buffer.from(b).toString('utf8') }),
     computeDigest: (algo, s) =>
       Array.from(crypto.createHash(algo || 'sha256').update(String(s), 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
+    computeHmacSha256Signature: (message, key) => Array.from(crypto.createHmac('sha256', String(key)).update(String(message)).digest()).map(b => b > 127 ? b - 256 : b),
     DigestAlgorithm: { SHA_256: 'sha256', MD5: 'md5' },
     Charset: { UTF_8: 'utf8' },
     sleep: () => {},
@@ -391,7 +391,7 @@ const ctx = {
       getProperties: () => ({ ...props }),
     }),
   },
-  CacheService: { getScriptCache: () => ({ get: () => null, put: () => {}, remove: () => {} }) },
+  CacheService: { getScriptCache: () => ({ get: (k) => mockCache.get(k) || null, put: (k, v) => mockCache.set(k, v), remove: (k) => mockCache.delete(k) }) },
   CalendarApp: { getCalendarById: () => null },
   HtmlService: { createHtmlOutput: () => ({ setWidth: () => ({ setHeight: () => ({}) }), setTitle: () => ({}) }) },
   Logger: { log: () => {} },
@@ -401,6 +401,7 @@ const code = fs.readFileSync(path.join(__dirname, '..', 'gs', 'Code.gs'), 'utf8'
 vm.createContext(ctx);
 vm.runInContext(code, ctx, { filename: 'Code.gs' });
 ctx.setupSheets();
+assert.strictEqual(props.PORTAL_MASTER_PASSWORD, undefined, 'setup must remove the obsolete Apps Script master-password property');
 
 // 設定 API Key 供 doGet / doPost 驗證
 const apiKey = 'ak_test_venue_flow';
@@ -422,25 +423,31 @@ function callPost(action, body = {}) {
   return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action, apiKey, ...body }) } }));
 }
 
-console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.26.1)');
+console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.27.0)');
 
 // 1. 登入超管／DC 並檢查初始健康狀態
-const loginRes = callPost('login', { email: ctx.MASTER_EMAIL, password: props.PORTAL_MASTER_PASSWORD });
+const assertion = JSON.stringify({ email: 'sheep', exp: Date.now() + 30_000, nonce: crypto.randomBytes(16).toString('hex') });
+const bridgeSignature = crypto.createHmac('sha256', props.PORTAL_MASTER_PROXY_SECRET).update(assertion).digest('hex');
+assert.strictEqual(callPost('proxyMasterLogin', { assertion, signature: 'invalid' }).ok, false,
+  'the shared API Key alone must not be sufficient to mint the maintenance token');
+const loginRes = callPost('proxyMasterLogin', { assertion, signature: bridgeSignature });
 assert.strictEqual(loginRes.ok, true, '維護管理員應成功登入');
 const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.26.1');
+assert.strictEqual(h0.data.version, '4.27.0');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
 assert.strictEqual(h0.data.feedbackReady, true, 'DistrictFeedback should be ready after setup');
 assert.strictEqual(h0.data.dcFeedbackReady, true, 'DCConfidential should be ready after setup');
-console.log('  ✓ getHealthCheck 回傳版本 4.26.1、意見箱就緒及電子鎖初始狀態');
+console.log('  ✓ getHealthCheck 回傳版本 4.27.0、意見箱就緒及電子鎖初始狀態');
 assert.strictEqual(h0.data.tokenSecretSet, true, 'setup should create a private token signing secret');
+assert.strictEqual(h0.data.masterProxyBridgeSet, true, 'setup should create the Vercel-to-Apps-Script bridge secret');
 assert.ok(props.PORTAL_TOKEN_SECRET && props.PORTAL_TOKEN_SECRET.length >= 32, 'token secret should be stored in Script Properties');
 assert.strictEqual(ctx.MASTER_PW, undefined, 'the source must not define a hard-coded maintenance password');
 assert.strictEqual(ctx.login_('sheep', '0728').ok, false, 'the published legacy maintenance password must no longer work');
+assert.strictEqual(ctx.login_('sheep', props.PORTAL_MASTER_PASSWORD).ok, false, 'Apps Script must ignore any legacy master-password property');
 assert.strictEqual(callPost('login', { email: 'sysadmin@skwscout.org.hk', password: '1234' }).ok, false,
   'shared preset credentials must be denied');
 
