@@ -5,6 +5,17 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.25.3 — 🔐 阻止 TTLock 既有 ID 假成功、Teamup 安全換紅色事件</h3>
+        <p>針對正式借場回報加強 TTLock 新建確認，並依指定方式以「建立紅色事件 → 刪除舊藍色事件」完成批核。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.25.3</a></p>
+        <ul>
+          <li>🔑 TTLock 只有回傳未重複的 <code>keyboardPwdId</code> 才算新建成功；即使 <code>errcode=0</code>，缺少 ID 或回傳既有 ID 都不會假報成功，會安全拒絕或按候選順序再試。</li>
+          <li>🔢 保留頭4 → 尾4 → 頭尾均撞碼後才遞增的候選順序；活躍鍵碼（例如 10–12 時段的 6107）不可被後續申請誤認為已建立。</li>
+          <li>🔵→🔴 批核先建立紅色事件，成功後才刪除原藍色事件；建立失敗保留藍色，刪除失敗則回滾紅色並告警，避免留下雙事件。</li>
+          <li>✅ Teamup 撞期仍顯示友善訊息，失敗申請不會留下 pending 表格列。</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.25.2 — 🗓 借場撞期提示、排程密碼不互相覆蓋</h3>
         <p>根據正式使用回饋，修正 Teamup 撞期提示、事件搬色 payload，以及尚未到期鍵碼被其他申請重用的問題。</p>
         <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.25.2</a></p>

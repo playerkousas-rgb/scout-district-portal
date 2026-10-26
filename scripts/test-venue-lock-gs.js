@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.25.2）
+ * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.25.3）
  *
  * 涵蓋：
  *  1. 跨區自動探測（api.sciener.com 10003 → 自動切換 euapi.ttlock.com + 852 電話帳號相容）
@@ -90,13 +90,15 @@ const ss = {
 const sentEmails = [];
 const ttlockState = {
   gatewayOffline: false,
+  returnExistingPwdIdOnce: false,
+  returnMissingPwdIdOnce: false,
   rejectCodes: new Set(),
   addedPwds: [],
   existingPwds: [],
   changedPwds: [],
 };
 const teamupEvents = {};
-const teamupState = { failNextCreate: false, failNextOverlap: false, failNextUpdate: false };
+const teamupState = { failNextCreate: false, failNextOverlap: false, failNextUpdate: false, failNextDelete: false, failDeleteCount: 0, throwNextDelete: false };
 let nextPwdId = 700100;
 let nextTeamupId = 5001;
 
@@ -220,6 +222,15 @@ const ctx = {
         if (ttlockState.rejectCodes.has(String(p.keyboardPwd))) {
           return reply(200, { errcode: -3007, errmsg: 'duplicate or invalid keyboardPwd' });
         }
+        if (ttlockState.returnExistingPwdIdOnce) {
+          ttlockState.returnExistingPwdIdOnce = false;
+          assert.ok(ttlockState.existingPwds.length, '此測試需先建立既有 keyboardPwdId');
+          return reply(200, { errcode: 0, keyboardPwdId: ttlockState.existingPwds[0].keyboardPwdId });
+        }
+        if (ttlockState.returnMissingPwdIdOnce) {
+          ttlockState.returnMissingPwdIdOnce = false;
+          return reply(200, { errcode: 0 });
+        }
         const pwdId = ++nextPwdId;
         const added = {
           keyboardPwdId: pwdId,
@@ -261,6 +272,23 @@ const ctx = {
         const method = String(opt.method || 'get').toLowerCase();
         if (method === 'get') {
           return teamupEvents[id] ? reply(200, { event: teamupEvents[id] }) : reply(404, { error: 'not found' });
+        }
+        if (method === 'delete') {
+          if (teamupState.throwNextDelete) {
+            teamupState.throwNextDelete = false;
+            throw new Error('simulated Teamup network failure');
+          }
+          if (teamupState.failDeleteCount > 0) {
+            teamupState.failDeleteCount -= 1;
+            return reply(403, { error: { id: 'no_permission', message: 'no permission to delete' } });
+          }
+          if (teamupState.failNextDelete) {
+            teamupState.failNextDelete = false;
+            return reply(403, { error: { id: 'no_permission', message: 'no permission to delete' } });
+          }
+          if (!teamupEvents[id]) return reply(404, { error: 'not found' });
+          delete teamupEvents[id];
+          return reply(204, {});
         }
         if (method === 'put') {
           if (teamupState.failNextUpdate) {
@@ -322,7 +350,7 @@ function callPost(action, body = {}) {
   return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action, apiKey, ...body }) } }));
 }
 
-console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.25.2)');
+console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.25.3)');
 
 // 1. 登入超管／DC 並檢查初始健康狀態
 const loginRes = callPost('login', { email: ctx.MASTER_EMAIL, password: props.PORTAL_MASTER_PASSWORD });
@@ -331,10 +359,10 @@ const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.25.2');
+assert.strictEqual(h0.data.version, '4.25.3');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
-console.log('  ✓ getHealthCheck 回傳版本 4.25.2 及電子鎖初始狀態');
+console.log('  ✓ getHealthCheck 回傳版本 4.25.3 及電子鎖初始狀態');
 
 // 2. 模擬舊版 Sheet：刻意移除 VenueBookings 的 pwdRef / passcode 欄及 Venues 的 scienerLockId 欄
 sheets.VenueBookings._data[0] = [
@@ -516,11 +544,14 @@ const row1 = afterOkList.data.find(x => x.id === booking1Id);
 assert.strictEqual(row1.status, 'approved');
 assert.strictEqual(row1.passcode, '0512');
 assert.strictEqual(row1.pwdRef, String(lastLockCall.keyboardPwdId));
-assert.deepStrictEqual(teamupEvents[pendingEvId].subcalendar_ids, [102], 'Teamup 事件應轉去紅色已批子日曆');
-assert.deepStrictEqual(teamupEvents[pendingEvId].custom, {
+const approvedEvId = okApprove.data.teamupEventId;
+assert.ok(approvedEvId && approvedEvId !== pendingEvId, '批核應建立新的紅色事件並回傳新 event ID');
+assert.strictEqual(teamupEvents[pendingEvId], undefined, '紅色事件建立成功後應刪除舊藍色事件');
+assert.deepStrictEqual(teamupEvents[approvedEvId].subcalendar_ids, [102], '批核事件應建立在紅色已批子日曆');
+assert.deepStrictEqual(teamupEvents[approvedEvId].custom, {
   '1': '12',
-}, '批核轉紅不可丟失 Teamup 參加人數自訂欄位');
-assert.strictEqual(teamupEvents[pendingEvId].who, '陳大文領袖 團長', '批核轉紅需保留領袖姓名及職位');
+}, '批核事件需保留參加人數自訂欄位');
+assert.strictEqual(teamupEvents[approvedEvId].who, '陳大文領袖 團長', '批核事件需保留領袖姓名及職位');
 assert.strictEqual(sentEmails.length, 1);
 assert.ok(sentEmails[0].htmlBody.includes('0512#'), '電郵應包含入場密碼及 # 提示');
 console.log('  ✓ 一鍵批准完整打通：香港時區準確、前導 0 密碼純文字寫回 Sheet、pwdRef／Teamup／電郵全部回傳');
@@ -542,23 +573,30 @@ const submit2 = callPost('submitVenueRequest', {
   agreeRules: 'TRUE',
 });
 const booking2Id = submit2.data.id;
-const ev2Id = submit2.data.teamupEventId;
+let ev2Id = submit2.data.teamupEventId;
 
-// 先做「僅確認（唔設鎖）」
+// 先做「僅確認（唔設鎖）」：建立紅色事件後刪除原藍色事件
 const confirmRes = callPost('confirmVenueBooking', { token, id: booking2Id });
 assert.strictEqual(confirmRes.ok, true);
+assert.ok(confirmRes.data.teamupEventId && confirmRes.data.teamupEventId !== ev2Id);
+assert.strictEqual(teamupEvents[ev2Id], undefined, '建立紅色事件後應刪除藍色事件');
+ev2Id = confirmRes.data.teamupEventId;
 
 // 隨後點「補發電子鎖匙」（即使無傳 reissue，因為未有真實 pwdRef 亦允許直接補發；撞碼先試電話尾4）
 const reissueRes = callPost('approveVenueBooking', { token, id: booking2Id, reissue: true });
 assert.strictEqual(reissueRes.ok, true, '補發鎖匙應成功：' + JSON.stringify(reissueRes));
 assert.strictEqual(reissueRes.data.passcode, '9876', '頭 4 位撞碼時應改用電話尾 4 位 9876');
 assert.strictEqual(reissueRes.data.lockWritten, true);
+assert.strictEqual(teamupEvents[ev2Id], undefined, '補發成功後亦應刪除舊紅色事件');
+ev2Id = reissueRes.data.teamupEventId;
 
 // 再令頭4及尾4都撞碼，確認兩者失敗後才 +1；同時確保 Teamup 備註只留最新密碼
 ttlockState.rejectCodes.add('9876');
 const reissueAgain = callPost('approveVenueBooking', { token, id: booking2Id, reissue: true });
 assert.strictEqual(reissueAgain.ok, true);
 assert.strictEqual(reissueAgain.data.passcode, '0513', '頭4和電話尾4均撞碼後才應使用 +1 備選碼');
+assert.strictEqual(teamupEvents[ev2Id], undefined, '再次補發成功後應刪除上一個紅色事件');
+ev2Id = reissueAgain.data.teamupEventId;
 const pwdNoteMatches = String(teamupEvents[ev2Id].notes || '').match(/🔑 密碼：/g) || [];
 assert.strictEqual(pwdNoteMatches.length, 1, '重製鎖匙後 Teamup 備註只應保留最新一行密碼');
 console.log('  ✓ 電話頭4撞碼後先改用尾4；僅確認後補發鎖匙及重製鎖匙覆寫 Teamup 備註全部通過');
@@ -611,22 +649,92 @@ const tailFirst = ctx.createTtlockPasscode_(
   '61070452', '2027-07-10T19:00', '2027-07-10T20:00', '尾4測試', '170488'
 );
 assert.strictEqual(tailFirst.passcode, '0452', '頭4撞碼必須先改用尾4；兩者都撞才可 +1');
+
+// 12b. 活躍 10–12 的 6107 不可被 13–14 申請當作成功；新增 API 若錯回既有 ID，必須拒絕並試下一候選。
+const existingActiveId = 700001;
+ttlockState.existingPwds.length = 0;
+ttlockState.existingPwds.push({
+  keyboardPwdId: existingActiveId, keyboardPwd: '6107',
+  startDate: Date.parse('2027-08-10T10:00:00+08:00'),
+  endDate: Date.parse('2027-08-10T12:15:00+08:00'),
+});
+ttlockState.returnExistingPwdIdOnce = true;
+const addedBeforeExistingIdCase = ttlockState.addedPwds.length;
+const existingIdGuard = ctx.createTtlockPasscode_(
+  '61070452', '2027-08-10T13:00', '2027-08-10T14:00', '既有 ID 假成功測試', '170488'
+);
+assert.strictEqual(existingIdGuard.passcode, '6108', '6107 在使用中、尾4回傳既有 ID 時，應改試下一遞增候選');
+assert.notStrictEqual(existingIdGuard.pwdRef, String(existingActiveId), '不可把 API 回傳既有 keyboardPwdId 當作新 key 成功');
+assert.strictEqual(ttlockState.addedPwds.length, addedBeforeExistingIdCase + 1, '只有最終有效的新候選可計入新增');
+assert.strictEqual(ttlockState.addedPwds[ttlockState.addedPwds.length - 1].keyboardPwd, '6108');
+const addedBeforeMissingIdCase = ttlockState.addedPwds.length;
+ttlockState.returnMissingPwdIdOnce = true;
+assert.throws(
+  () => ctx.createTtlockPasscode_('77778888', '2027-08-11T13:00', '2027-08-11T14:00', '缺少 ID 測試', '170488'),
+  /keyboardPwdId/,
+  '即使 errcode=0，沒有 keyboardPwdId 亦不得假報成功'
+);
+assert.strictEqual(ttlockState.addedPwds.length, addedBeforeMissingIdCase, '無 ID 回應不得假裝成功新增');
+console.log('  ✓ TTLock 拒絕既有／缺失 keyboardPwdId 假成功；13–14 不會誤報 6107 已設定');
+
 console.log('  ✓ TTLock 過期鍵碼更新原 key；有效頭4撞碼改用尾4 0452');
 
-// 13. Teamup 更新既有事件失敗時，不得另建同時段紅色事件留下重複藍色事件
+// 13. Teamup 建紅色失敗保留藍色；刪除藍色失敗時回滾紅色，避免留下兩筆
 const submit4 = callPost('submitVenueRequest', {
-  venueId: 'HQ-1704', name: '搬色失敗測試', position: '領袖', phone: '91231234',
-  activityName: '搬色失敗測試', attendeeCount: 3, agreeRules: true,
+  venueId: 'HQ-1704', name: '批核建立失敗測試', position: '領袖', phone: '91231234',
+  activityName: '批核建立失敗測試', attendeeCount: 3, agreeRules: true,
   startDate: '2027-07-20T19:00', endDate: '2027-07-20T20:00',
 });
 assert.strictEqual(submit4.ok, true);
-const eventCountBeforeFailedMove = Object.keys(teamupEvents).length;
-teamupState.failNextUpdate = true;
-const moveFail = callPost('confirmVenueBooking', { token, id: submit4.data.id });
-assert.strictEqual(moveFail.ok, true);
-assert.ok(moveFail.data.warn.includes('HTTP 403'));
-assert.strictEqual(Object.keys(teamupEvents).length, eventCountBeforeFailedMove, '搬色失敗時不可另建紅色重複事件');
-assert.deepStrictEqual(teamupEvents[submit4.data.teamupEventId].subcalendar_ids, [101], '搬色失敗時原藍色事件仍在，供職員重試');
-console.log('  ✓ Teamup 搬色失敗只回報警告，不另建紅色重複事件');
+const eventCountBeforeCreateFail = Object.keys(teamupEvents).length;
+teamupState.failNextCreate = true;
+const createFail = callPost('confirmVenueBooking', { token, id: submit4.data.id });
+assert.strictEqual(createFail.ok, true);
+assert.ok(createFail.data.warn.includes('HTTP 503'));
+assert.strictEqual(Object.keys(teamupEvents).length, eventCountBeforeCreateFail, '建立紅色失敗不可刪藍色或留下額外事件');
+assert.deepStrictEqual(teamupEvents[submit4.data.teamupEventId].subcalendar_ids, [101], '建立失敗時原藍色事件必須保留');
+
+const submit5 = callPost('submitVenueRequest', {
+  venueId: 'HQ-1704', name: '批核刪除失敗測試', position: '領袖', phone: '91231235',
+  activityName: '批核刪除失敗測試', attendeeCount: 4, agreeRules: true,
+  startDate: '2027-07-21T19:00', endDate: '2027-07-21T20:00',
+});
+assert.strictEqual(submit5.ok, true);
+const eventCountBeforeDeleteFail = Object.keys(teamupEvents).length;
+teamupState.failNextDelete = true;
+const deleteFail = callPost('confirmVenueBooking', { token, id: submit5.data.id });
+assert.strictEqual(deleteFail.ok, true);
+assert.ok(deleteFail.data.warn.includes('HTTP 403'));
+assert.strictEqual(Object.keys(teamupEvents).length, eventCountBeforeDeleteFail, '刪除藍色失敗時應回滾新紅色事件');
+assert.deepStrictEqual(teamupEvents[submit5.data.teamupEventId].subcalendar_ids, [101], '刪除失敗時原藍色事件保留，供職員重試');
+
+const submit6 = callPost('submitVenueRequest', {
+  venueId: 'HQ-1704', name: '批核刪除網絡錯誤測試', position: '領袖', phone: '91231236',
+  activityName: '批核刪除網絡錯誤測試', attendeeCount: 5, agreeRules: true,
+  startDate: '2027-07-22T19:00', endDate: '2027-07-22T20:00',
+});
+assert.strictEqual(submit6.ok, true);
+const eventCountBeforeThrownDelete = Object.keys(teamupEvents).length;
+teamupState.throwNextDelete = true;
+const networkDeleteFail = callPost('confirmVenueBooking', { token, id: submit6.data.id });
+assert.strictEqual(networkDeleteFail.ok, true);
+assert.ok(networkDeleteFail.data.warn.includes('連線錯誤'));
+assert.strictEqual(Object.keys(teamupEvents).length, eventCountBeforeThrownDelete, '刪除請求拋出連線錯誤時亦應回滾紅色事件');
+assert.deepStrictEqual(teamupEvents[submit6.data.teamupEventId].subcalendar_ids, [101]);
+
+const submit7 = callPost('submitVenueRequest', {
+  venueId: 'HQ-1704', name: '批核回滾失敗告警測試', position: '領袖', phone: '91231237',
+  activityName: '批核回滾失敗告警測試', attendeeCount: 6, agreeRules: true,
+  startDate: '2027-07-23T19:00', endDate: '2027-07-23T20:00',
+});
+assert.strictEqual(submit7.ok, true);
+const eventCountBeforeRollbackFail = Object.keys(teamupEvents).length;
+teamupState.failDeleteCount = 2;
+const rollbackFail = callPost('confirmVenueBooking', { token, id: submit7.data.id });
+assert.strictEqual(rollbackFail.ok, true);
+assert.ok(rollbackFail.data.warn.includes('撤銷紅色事件亦失敗'));
+assert.ok(rollbackFail.data.warn.includes('tup-'), '回滾失敗告警應包含需人工檢查的紅色事件 ID');
+assert.strictEqual(Object.keys(teamupEvents).length, eventCountBeforeRollbackFail + 1, '模擬 Teamup 同時拒絕刪除與回滾時應保留可定位的紅色事件供人工處理');
+console.log('  ✓ Teamup 建立紅色失敗保留藍色；刪除失敗回滾並告警，回滾失敗會提供人工檢查 ID');
 
 console.log('\n🎉 場地借用電子鎖與回傳整合測試全部通過！');

@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.25.2
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.25.3
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -318,7 +318,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.25.2',
+      version: '4.25.3',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -1814,7 +1814,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.25.2',
+    version: '4.25.3',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -5668,9 +5668,24 @@ function createTtlockPasscode_(phone, startDate, endDate, name, venueLockId) {
     var res = UrlFetchApp.fetch(conn.apiBase + '/v3/keyboardPwd/add', { method: 'post', payload: payload, muteHttpExceptions: true });
     var data;
     try { data = JSON.parse(res.getContentText()); } catch (e) { data = { errmsg: res.getContentText().slice(0, 120) }; }
-    if (data && (data.keyboardPwdId || data.errcode === 0)) {
+    var addHttpOk = res.getResponseCode() >= 200 && res.getResponseCode() < 300;
+    var addApiOk = !data || data.errcode === undefined || Number(data.errcode) === 0;
+    if (addHttpOk && addApiOk) {
+      if (!data || data.keyboardPwdId === undefined || data.keyboardPwdId === null || String(data.keyboardPwdId).trim() === '') {
+        throw new Error('TTLock 新增密碼回應沒有 keyboardPwdId；無法確認已建立有效密碼，請檢查鎖上密碼清單後再重試');
+      }
+      var returnedPwdId = String(data.keyboardPwdId).trim();
+      var idAlreadyExists = existingPwds.some(function (row) {
+        return row.keyboardPwdId !== undefined && row.keyboardPwdId !== null
+          && String(row.keyboardPwdId).trim() === returnedPwdId;
+      });
+      if (idAlreadyExists) {
+        // add 回傳既有 ID 代表並未證實新 key 成功；視為本候選撞碼，按既定順序試下一候選。
+        lastErr = { errcode: -3007, errmsg: 'TTLock 新增回應回傳既有 keyboardPwdId ' + returnedPwdId };
+        continue;
+      }
       return {
-        passcode: code, pwdRef: String(data.keyboardPwdId || 'OK'), simulated: false,
+        passcode: code, pwdRef: returnedPwdId, simulated: false,
         lockWritten: true, validFrom: validFrom, validTo: validTo,
         apiBase: conn.apiBase, lockId: String(lockId), reused: false,
       };
@@ -5788,7 +5803,7 @@ function createPendingTeamupEvent_(req) {
     toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true), fields.custom, fields.who);
 }
 
-/** 批准時更新原事件轉至確認子日曆；有原 event ID 時絕不另建重複事件。 */
+/** 批准時建立紅色確認事件，成功後刪除舊藍色事件；任一步失敗都避免留下兩筆。 */
 function applyTeamupApproved_(booking, extraNotes) {
   var out = { warn: '', eventId: String(booking.teamupEventId || '').trim() };
   if (!teamupReady_()) {
@@ -5799,8 +5814,9 @@ function applyTeamupApproved_(booking, extraNotes) {
     var extra = extraNotes || '';
     var stamp = '\n✅ 已批准於 ' + formatHkDateTime_(new Date()) + extra;
     if (out.eventId) {
-      var moveError = teamupMoveToApproved_(out.eventId, booking, stamp);
-      if (moveError) out.warn = moveError + '；為避免重複事件，未另建紅色事件';
+      var transfer = teamupMoveToApproved_(out.eventId, booking, stamp);
+      if (!transfer.ok) out.warn = transfer.error;
+      else out.eventId = transfer.eventId || out.eventId;
       return out;
     }
 
@@ -5851,61 +5867,69 @@ function createTeamupEvent_(subId, title, notes, startDt, endDt, customFields, w
   var body = JSON.stringify(eventBody);
   var r = teamupFetch_('https://api.teamup.com/' + teamupCfg_().calendarId + '/events', { method: 'post', payload: body });
   if (r.code < 200 || r.code >= 300) return { ok: false, error: teamupEventErrorMessage_(r.code, r.text) };
-  try { var data = JSON.parse(r.text); return { ok: true, eventId: data && data.event ? data.event.id : '' }; }
-  catch (e) { return { ok: true, eventId: '' }; }
+  try {
+    var data = JSON.parse(r.text);
+    var eventId = data && data.event && data.event.id ? String(data.event.id) : '';
+    if (!eventId) return { ok: false, error: 'Teamup 已回應建立事件，但沒有回傳 event ID；請檢查日曆確認事件狀態' };
+    return { ok: true, eventId: eventId };
+  } catch (e) {
+    return { ok: false, error: 'Teamup 已回應建立事件，但回應格式無法確認 event ID；請檢查日曆確認事件狀態' };
+  }
 }
-/** 將 pending 事件搬去「確認借用」子日曆（轉色），補發鎖匙時覆寫舊密碼備註避免重複 */
+/** 建立紅色事件成功後才刪除舊事件；刪除失敗會回滾新事件，避免重複。 */
 function teamupMoveToApproved_(eventId, booking, extraNotes) {
   var c = teamupCfg_();
-  if (!eventId) return '冇 Teamup 事件 ID';
-  if (!c.approvedSub) return '未設定 TEAMUP_APPROVED_SUBCAL_ID';
+  if (!eventId) return { ok: false, error: '冇 Teamup 事件 ID' };
+  if (!c.approvedSub) return { ok: false, error: '未設定 TEAMUP_APPROVED_SUBCAL_ID' };
   var cur = teamupApi_('get', c.calendarId + '/events/' + eventId);
-  if (!cur || !cur.event) return '找不到原 Teamup 事件（' + eventId + '）';
+  if (!cur || !cur.event) return { ok: false, error: '找不到原 Teamup 事件（' + eventId + '），未建立紅色事件' };
   var ev = cur.event;
   var fields = teamupCustomFields_(booking || {});
-  if (fields.error) return fields.error;
+  if (fields.error) return { ok: false, error: fields.error };
   var customFields = {};
   Object.keys(ev.custom || {}).forEach(function (key) { customFields[key] = ev.custom[key]; });
   Object.keys(fields.custom).forEach(function (key) { customFields[key] = fields.custom[key]; });
-  var title = (booking && (booking.venueName || booking.venueId))
-    ? String(booking.venueName || booking.venueId) + '（已批准）'
-    : ((ev.title || '區總部').replace('【申請】', '').replace('（已批准）', '').trim() + '（已批准）');
-  var baseNotes = String(ev.notes || (booking ? buildTeamupNotes_(booking) : ''))
+  var titleBase = (ev.title || booking.venueName || booking.venueId || '區總部')
+    .replace('【申請】', '').replace('（已批准）', '').trim();
+  var title = String(booking.venueName || booking.venueId || titleBase) + '（已批准）';
+  var notes = String(ev.notes || buildTeamupNotes_(booking))
     .replace(/\n✅ 已批准於 [^\n]*/g, '')
-    .replace(/\n🔑 密碼：[^\n]*/g, '');
-  var notes = baseNotes + (extraNotes || '');
-  var startDt = ev.start_dt || (booking ? toTeamupDt_(booking.startDate, false) : '');
-  var endDt = ev.end_dt || (booking ? toTeamupDt_(booking.endDate || booking.startDate, true) : startDt);
-  var body = {
-    id: String(eventId),
-    subcalendar_ids: [Number(c.approvedSub)],
-    title: title,
-    notes: notes,
-    start_dt: startDt,
-    end_dt: endDt,
-    who: fields.who,
-    custom: customFields,
-  };
-  var r = teamupFetch_('https://api.teamup.com/' + c.calendarId + '/events/' + eventId, {
-    method: 'put', payload: JSON.stringify(body),
-  });
-  if (r.code < 200 || r.code >= 300) return 'TeamUp 更新失敗 HTTP ' + r.code + '：' + r.text;
-  var updatedEvent = null;
+    .replace(/\n🔑 密碼：[^\n]*/g, '') + (extraNotes || '');
+  var startDt = ev.start_dt || toTeamupDt_(booking.startDate, false);
+  var endDt = ev.end_dt || toTeamupDt_(booking.endDate || booking.startDate, true);
+
+  var created = createTeamupEvent_(c.approvedSub, title, notes, startDt, endDt, customFields, fields.who);
+  if (!created.ok || !created.eventId) {
+    return { ok: false, error: created.error || '無法確認紅色事件 ID；原藍色事件保留，請管理員檢查 Teamup 日曆' };
+  }
+
+  var deleteError = '';
   try {
-    var responseData = JSON.parse(r.text || '{}');
-    updatedEvent = responseData.event || responseData;
-  } catch (ignore) {}
-  var targetSub = Number(c.approvedSub);
-  var subs = updatedEvent && Array.isArray(updatedEvent.subcalendar_ids) ? updatedEvent.subcalendar_ids : null;
-  if (!subs) {
-    var verify = teamupApi_('get', c.calendarId + '/events/' + eventId);
-    updatedEvent = verify && verify.event ? verify.event : null;
-    subs = updatedEvent && Array.isArray(updatedEvent.subcalendar_ids) ? updatedEvent.subcalendar_ids : null;
+    var deleted = teamupFetch_('https://api.teamup.com/' + c.calendarId + '/events/' + eventId, { method: 'delete' });
+    if (deleted.code >= 200 && deleted.code < 300) {
+      return { ok: true, eventId: created.eventId };
+    }
+    deleteError = 'HTTP ' + deleted.code;
+  } catch (e) {
+    deleteError = '連線錯誤：' + String((e && e.message) || e);
   }
-  if (!subs || subs.map(Number).indexOf(targetSub) < 0 || (c.pendingSub && subs.map(Number).indexOf(Number(c.pendingSub)) >= 0)) {
-    return 'TeamUp API 接受更新但未確認事件已移至已批日曆；為避免重複事件，未另建紅色事件';
+
+  // 藍色事件刪除失敗時，撤銷剛建立的紅色事件，避免同時留下兩筆。
+  var rollbackOk = false;
+  var rollbackError = '';
+  try {
+    var rollback = teamupFetch_('https://api.teamup.com/' + c.calendarId + '/events/' + created.eventId, { method: 'delete' });
+    rollbackOk = rollback.code >= 200 && rollback.code < 300;
+    if (!rollbackOk) rollbackError = 'HTTP ' + rollback.code;
+  } catch (e) {
+    rollbackError = '連線錯誤：' + String((e && e.message) || e);
   }
-  return '';
+  return {
+    ok: false,
+    error: '紅色事件已建立，但刪除原事件失敗 ' + deleteError
+      + (rollbackOk ? '；已撤銷紅色事件，藍色事件保留供重試'
+        : '；撤銷紅色事件亦失敗（' + rollbackError + '），請管理員檢查 Teamup 事件 ' + created.eventId),
+  };
 }
 /** 拒絕/取消：有原事件就搬去拒絕子日曆，否則選填新建 */
 function teamupOnReject_(req, status) {
