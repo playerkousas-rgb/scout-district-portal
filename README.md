@@ -3,7 +3,7 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
-> **GS v4.26.1 認證修補已於 PR #45 合併 MAIN；目前分支新增 v4.27.0 的 Vercel-only sheep 密碼流程，尚待合併，正式 Apps Script 仍未部署該流程，亦未在真實 Apps Script／Sheet／外部服務驗證。** 更新原有 GS 前仍須先備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，正式 GS 由區方自行更新；助手不會代部署。修補新增認證與角色門禁，並保留 DC 保密意見分頁設計；Sheet 分頁保護不是檢視隔離。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
+> **GS v4.26.1 認證修補已於 PR #45 合併 MAIN；v4.27.0 Vercel-only sheep 密碼流程亦已由 PR #47 合併 MAIN。正式 Apps Script 尚未由區方更新／部署 v4.27.0，亦未在真實 Apps Script／Sheet／外部服務驗證。** 更新原有 GS 前仍須先備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，正式 GS 由區方自行更新；助手不會代部署。修補新增認證與角色門禁，並保留 DC 保密意見分頁設計；Sheet 分頁保護不是檢視隔離。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
 >
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
@@ -354,7 +354,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 | 檔案 | 用途 |
 |---|---|
-| `gs/Code.gs` | 完整統一後台 v4.27.0（尚待合併及正式部署；升級前依只追加指引備份） |
+| `gs/Code.gs` | 完整統一後台 v4.27.0（PR #47 已合併；正式 Apps Script 尚待區方自行部署，升級前依只追加指引備份） |
 | `public/downloads/Code.gs.txt` | 與 `gs/Code.gs` 同一份內容，供網站「更新／下載」直接下載 |
 | `gs/Code.gs.course.js` | 每個訓練班嘅收表 Script 模板 |
 | `app/api/proxy/route.ts` | 前端 → Apps Script 嘅代理（API Key 唔出前端） |
