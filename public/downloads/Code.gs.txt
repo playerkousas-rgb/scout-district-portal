@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.28.1
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.29.1
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -169,6 +169,7 @@ var SHEET = {
   DC_FEEDBACK: 'DCConfidential', // DC 意見管理分頁（主試算表；前端卡片及 API 角色受限）
   AWARDS: 'Awards',              // 獎勵提名名冊（一人一行，每個獎一欄＝獲獎年份）
   UNITS: 'Units',                // 全區旅團名單（旅號、主辦機構、各支部團數）
+  UNIT_SECTIONS: 'UnitSections', // v4.29.0 旅→團階層：每個團（支部單位）一列嘅集會時間／地點／社交帳戶
   VISITS: 'Visits',              // 旅團探訪登記（一次探訪一行）
   AWARD_TYPES: 'AwardTypes',     // 獎項及年期設定（可喺管理系統改，唔使改程式）
   INCIDENT_REQ: 'IncidentReports', // 意外報告（HKSA ACC-RPT 2019/07 欄位）
@@ -379,7 +380,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.28.1',
+      version: '4.29.1',
       feedbackReady: feedbackReady_(),
       dcFeedbackReady: dcFeedbackReady_(),
       districtName: getConfigValue_('districtName') || '',
@@ -529,6 +530,7 @@ function doPost(e) {
       case 'saveDebitNote':       return json(saveDebitNote_(b.token, b.note || b.debitNote || {}));
       case 'importDebitNotes':    return json(importDebitNotes_(b.token, b.rows));
       case 'saveUnits':           return json(saveUnits_(b.token, b.units));
+      case 'saveUnitSections':    return json(saveUnitSections_(b.token, b.rows || b.unitSections));
       case 'saveAnnouncement':      return json(saveAnnouncement_(b.token, b.announcement || b.news || b));
       case 'deleteAnnouncement':    return json(deleteAnnouncement_(b.token, b.id));
       case 'restoreAnnouncement':   return json(restoreAnnouncement_(b.token, b.id));
@@ -1967,7 +1969,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.28.1',
+    version: '4.29.1',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -3836,20 +3838,185 @@ function visitUnits_() {
   });
 }
 
-/** 成員系統公開名錄只回傳旅團公開欄位；空值保留為空字串，由前端隱藏欄位。 */
+// ===================== 旅→團階層名錄（v4.29.0：UnitSections 表） =====================
+// 架構：Units 表維護「旅」層級（旅號／主辦／五支部團數字串）；UnitSections 表維護「團」層級
+// （每個支部單位一列：集會時間／地點／社交帳戶）。未維護團資料時按團數字串自動產骨架，
+// 公開名錄永遠有結構、詳情空白由前端回落旅層級資料。
+
+var UNIT_SECTION_HEADER = ['troop', 'section', 'unitCode', 'meetingTime', 'location',
+  'instagramUrl', 'facebookUrl', 'websiteUrl', 'active', 'publicVisible'];
+
+/**
+ * 拆團數字串（Units 表 gh/cub/scout/venture/rover 欄）→ 團代號陣列。
+ * '1+A1' → ['', 'A1']（''＝常規團）；'2' → ['', '']；'1+A1+S1' → ['', 'A1', 'S1']。
+ * 純數字＝常規團數目（每支部 cap 9）；A／S 前綴＝空／海童軍團變體；無法辨識嘅部份丟棄。
+ */
+function parseSectionCount_(text) {
+  var tokens = String(text == null ? '' : text).toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+  var regular = 0, variants = [], seen = {};
+  tokens.forEach(function (tk) {
+    var plain = tk.match(/^(\d{1,2})$/);
+    if (plain) {
+      regular += Math.min(parseInt(plain[1], 10), 9);
+      return;
+    }
+    var variant = tk.match(/^([AS])(\d{1,2})$/);
+    if (variant && !seen[tk]) { seen[tk] = true; variants.push(tk); }
+  });
+  var out = [];
+  var i;
+  for (i = 0; i < Math.min(regular, 9); i++) out.push('');
+  for (i = 0; i < variants.length && out.length < 9; i++) out.push(variants[i]);
+  return out;
+}
+
+/** 團嘅公開顯示名：常規團＝支部名＋團（童軍團）；A 前綴＝空童軍團；S 前綴＝海童軍團。 */
+function publicUnitLabel_(section, unitCode) {
+  var base = VISIT_SECTION_LABEL[section] || '';
+  var code = String(unitCode == null ? '' : unitCode).trim().toUpperCase();
+  if (!base) return '';
+  if (!code) return base + '團';
+  if (code.charAt(0) === 'A') return '空' + base + '團';
+  if (code.charAt(0) === 'S') return '海' + base + '團';
+  return base + '團';
+}
+
+/** UnitSections 表一列 → 結構化列（內部 active/publicVisible 保留俾管理端，公開端另做過濾）。 */
+function unitSectionRow_(r) {
+  return {
+    troop: String(r.troop == null ? '' : r.troop).trim(),
+    section: visitSection_(r.section),
+    unitCode: String(r.unitCode == null ? '' : r.unitCode).trim().toUpperCase(),
+    meetingTime: String(r.meetingTime || '').trim(),
+    location: String(r.location || '').trim(),
+    instagramUrl: String(r.instagramUrl || '').trim(),
+    facebookUrl: String(r.facebookUrl || '').trim(),
+    websiteUrl: String(r.websiteUrl || '').trim(),
+    active: String(r.active).toUpperCase() !== 'FALSE',
+    publicVisible: String(r.publicVisible).toUpperCase() !== 'FALSE',
+  };
+}
+
+/** 讀 UnitSections 全部列（管理端用；含停用／非公開，過濾唔成列嘅壞 row）。 */
+function readUnitSections_() {
+  return readSheet_(SHEET.UNIT_SECTIONS).map(unitSectionRow_).filter(function (u) {
+    return u.troop && u.section;
+  });
+}
+
+/**
+ * 一個旅嘅公開團列表（8 個公開欄位，無 note／active／publicVisible）。
+ * UnitSections 有該旅嘅維護列 → 只公開啟用＋公開列；完全未維護才自動產骨架。
+ */
+function publicTroopUnits_(troopRow) {
+  var maintained = readUnitSections_().filter(function (u) {
+    return u.troop === troopRow.troop;
+  });
+  // 有維護列但全部隱藏時不可回落骨架，否則隱藏團會再次出現在成員端。
+  if (maintained.length) {
+    return maintained.filter(function (u) { return u.active && u.publicVisible; }).map(function (u) {
+      return {
+        section: u.section,
+        unitCode: u.unitCode || '',
+        label: publicUnitLabel_(u.section, u.unitCode),
+        meetingTime: u.meetingTime || '',
+        location: u.location || '',
+        instagramUrl: validPublicUnitUrl_(u.instagramUrl) || '',
+        facebookUrl: validPublicUnitUrl_(u.facebookUrl) || '',
+        websiteUrl: validPublicUnitUrl_(u.websiteUrl) || '',
+      };
+    });
+  }
+  var out = [];
+  VISIT_SECTIONS.forEach(function (sec) {
+    parseSectionCount_(troopRow.sections[sec]).forEach(function (code) {
+      out.push({
+        section: sec,
+        unitCode: code,
+        label: publicUnitLabel_(sec, code),
+        meetingTime: '', location: '', instagramUrl: '', facebookUrl: '', websiteUrl: '',
+      });
+    });
+  });
+  return out;
+}
+
+/** 成員系統公開名錄：旅層級 7 欄＋五支部團數＋各團公開列表；空值保留空字串，由前端隱藏欄位。 */
 function listDistrictTroops_() {
   var troops = visitUnits_().filter(function (u) { return u.active && u.publicVisible; }).map(function (u) {
+    var sectionCounts = {};
+    VISIT_SECTIONS.forEach(function (k) {
+      var count = String(u.sections[k] == null ? '' : u.sections[k]).trim();
+      if (count) sectionCounts[k] = count;
+    });
     return {
       troop: u.troop,
       label: u.label,
       organizer: u.org,
       meetingTime: u.meetingTime || '',
-      instagramUrl: u.instagramUrl || '',
-      facebookUrl: u.facebookUrl || '',
-      websiteUrl: u.websiteUrl || '',
+      instagramUrl: validPublicUnitUrl_(u.instagramUrl) || '',
+      facebookUrl: validPublicUnitUrl_(u.facebookUrl) || '',
+      websiteUrl: validPublicUnitUrl_(u.websiteUrl) || '',
+      sectionCounts: sectionCounts,
+      units: publicTroopUnits_(u),
     };
   });
   return ok({ districtCode: districtCode_(), districtName: getConfigValue_('districtName') || '', troops: troops });
+}
+
+/**
+ * 整份覆寫 UnitSections 表（同 saveUnits 一樣嘅全表重寫模式）。
+ * 需要 visit 卡 edit 權限；dup key＝troop|section|unitCode；網址同團代號伺服器端驗證。
+ * 傳空陣列＝清空維護資料，公開名錄回落自動骨架。
+ */
+function saveUnitSections_(token, rows) {
+  var t = requireCardEdit_(token, 'visit'); if (t.error) return err(t.error);
+  if (!Array.isArray(rows) || rows.length > 1000) return err('支部團資料格式錯誤（最多 1000 團）');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(SHEET.UNIT_SECTIONS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 UnitSections 表）');
+
+  var knownTroops = {};
+  visitUnits_().forEach(function (u) { knownTroops[u.troop] = true; });
+  var seen = {}, out = [];
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return err('支部團資料格式錯誤');
+    var troop = String(r.troop == null ? '' : r.troop).trim();
+    var section = visitSection_(r.section);
+    if (!troop || !section || !knownTroops[troop]) return err('請填寫有效旅號及支部');
+    if (['active', 'publicVisible'].some(function (k) { return r[k] !== undefined && typeof r[k] !== 'boolean'; })) return err('啟用及公開顯示必須是布林值');
+    var unitCode = String(r.unitCode == null ? '' : r.unitCode).trim().toUpperCase();
+    if (unitCode && !/^[AS]\d{1,2}$/.test(unitCode)) {
+      return err('旅團 ' + troop + ' 嘅團代號格式錯誤（應為 A1／S1 呢類，常規團留空）');
+    }
+    var key = troop + '|' + section + '|' + unitCode;
+    if (seen[key]) {
+      return err('支部團資料重複：' + troop + ' ' + VISIT_SECTION_LABEL[section] + ' ' + (unitCode || '常規團'));
+    }
+    seen[key] = true;
+    var instagramUrl = validPublicUnitUrl_(r.instagramUrl);
+    var facebookUrl = validPublicUnitUrl_(r.facebookUrl);
+    var websiteUrl = validPublicUnitUrl_(r.websiteUrl);
+    if (instagramUrl === null) return err('旅團 ' + troop + ' 的 Instagram 網址必須以 http:// 或 https:// 開頭，且不可含空白');
+    if (facebookUrl === null) return err('旅團 ' + troop + ' 的 Facebook 網址必須以 http:// 或 https:// 開頭，且不可含空白');
+    if (websiteUrl === null) return err('旅團 ' + troop + ' 的網頁網址必須以 http:// 或 https:// 開頭，且不可含空白');
+    var meetingTime = String(r.meetingTime || '').trim().slice(0, 200);
+    var location = String(r.location || '').trim().slice(0, 200);
+    out.push([
+      troop, section, unitCode, meetingTime, location,
+      instagramUrl || '', facebookUrl || '', websiteUrl || '',
+      r.active === false ? 'FALSE' : 'TRUE',
+      r.publicVisible === false ? 'FALSE' : 'TRUE',
+    ]);
+  }
+
+  sh.clear();
+  sh.getRange(1, 1, 1, UNIT_SECTION_HEADER.length).setValues([UNIT_SECTION_HEADER]);
+  sh.getRange(1, 1, 1, UNIT_SECTION_HEADER.length).setFontWeight('bold').setBackground('#bbf7d0');
+  sh.setFrozenRows(1);
+  if (out.length) sh.getRange(2, 1, out.length, UNIT_SECTION_HEADER.length).setValues(out);
+  return ok({ saved: true, count: out.length });
 }
 function validPublicUnitUrl_(value) {
   var url = String(value == null ? '' : value).trim();
@@ -3900,6 +4067,9 @@ function getVisitBoard_(token, from, to) {
   var publicTroopFieldsReady = ['meetingTime', 'instagramUrl', 'facebookUrl', 'websiteUrl', 'publicVisible'].every(function (h) {
     return unitHeaders.indexOf(h) >= 0;
   });
+  // v4.29.0：UnitSections 表存在先開放團層級編輯器；未補建時管理端只顯示提示。
+  var unitSectionsReady = !!ss.getSheetByName(SHEET.UNIT_SECTIONS);
+  var unitSections = unitSectionsReady ? readUnitSections_() : [];
   var all = readSheet_(SHEET.VISITS).map(visitRow_).filter(function (v) { return !!v.troop && !!v.visitDate; });
   var visits = all.filter(function (v) { return v.visitDate >= f && v.visitDate <= tt; });
   visits.sort(function (a, b) { return a.visitDate < b.visitDate ? 1 : a.visitDate > b.visitDate ? -1 : 0; });
@@ -3914,6 +4084,8 @@ function getVisitBoard_(token, from, to) {
     districtName: getConfigValue_('districtName') || '',
     units: visitUnits_(),
     publicTroopFieldsReady: publicTroopFieldsReady,
+    unitSectionsReady: unitSectionsReady,
+    unitSections: unitSections,
     visits: visits,
     years: Object.keys(years).map(Number).sort(function (a, b) { return b - a; }),
     sections: VISIT_SECTIONS.map(function (k) { return { key: k, label: VISIT_SECTION_LABEL[k] }; }),
@@ -7406,6 +7578,11 @@ function blueprint_() {
     { name: SHEET.UNITS, headerColor: '#bbf7d0', rows: [
       ['troop', 'label', 'org', 'gh', 'cub', 'scout', 'venture', 'rover', 'active', 'note', 'meetingTime', 'instagramUrl', 'facebookUrl', 'websiteUrl', 'publicVisible'],
     ].concat(unitSeed_().map(function (a) { return a.concat(['TRUE', '', '', '', '', '', 'TRUE']); })) },
+
+    // v4.29.0 旅→團階層：每個團（支部單位）一列；全空表時公開名錄按 Units 團數字串自動產骨架
+    { name: SHEET.UNIT_SECTIONS, headerColor: '#bbf7d0', rows: [
+      UNIT_SECTION_HEADER.slice(),
+    ] },
 
     { name: SHEET.VISITS, rows: [
       // v4.10.0 加咗總會匯報四欄（leaderMet/method/officerCount/support）喺尾，舊表跑 setupSheets 自動補

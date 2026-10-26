@@ -5,6 +5,20 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。Apps Script 只有在區方完成備份、設定及驗收後才由區方自行部署。</p>
       <div className="info-card">
+        <h3>v4.29.1 — 🧭 區內旅團升級做旅→團階層名錄（對齊港島總會官網）</h3>
+        <p>成員系統「區內旅團」由每旅單一彈窗，升級為每旅一列顯示五支部團數，展開後可逐個團檢閱獨立集會時間、地點同社交帳戶。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.29.1</a></p>
+        <ul>
+          <li>🆕 新建 <code>UnitSections</code> 分頁（10 欄：旅號／支部／團代號／集會時間／地點／3 個網址／啟用／公開）；<code>setupSheets()</code> 自動補建，唔影響舊資料。</li>
+          <li>🧩 <code>listDistrictTroops</code> 新 shape：每旅帶 <code>sectionCounts</code>（五支部團數字串）同 <code>units[]</code>（每團 8 個公開欄位，含集會地點）；內部備註同旗標唔外流。</li>
+          <li>🏗 未維護嘅旅自動按團數字串產骨架（<code>1+A1</code>＝常規團＋空童軍團；A＝空、S＝海），詳情空白時成員端回落旅層級資料。</li>
+          <li>✍️ 新 action <code>saveUnitSections</code>（需 visit 卡 edit 權限）：全表覆寫、dup key／網址／團代號伺服器端驗證；成員端維持只讀。</li>
+          <li>🔧 同步修補：全部團隱藏時不重生骨架；不完整列會拒絕儲存，公開網址再次清洗。</li>
+          <li>🛡️ 向後相容：舊版成員端可繼續讀旅層級 7 欄；上線次序係先貼新版 GS、再部署成員端。</li>
+        </ul>
+        <p><b>部署提示：</b>貼上新 Code.gs 後執行「🧱 補建缺失表」，確認 <code>UnitSections</code> 分頁出現；健康檢查版本應顯示 <code>4.29.1</code>。</p>
+      </div>
+      <div className="info-card">
         <h3>v4.26.0 — 💬「你講我聽」一般及 DC 保密意見箱</h3>
         <p>配合 member-portal 的公開留言提交合約，支援意見／支援分類、可選聯絡回覆，以及 DC 專用保密提交。</p>
         <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.26.0</a></p>

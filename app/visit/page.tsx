@@ -8,6 +8,7 @@
  *   ＋ 👥 幹部努力統計（邊個探咗幾多次／邊啲旅 — 內部用，唔會出現喺交總會嗰份）
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
@@ -21,18 +22,21 @@ import {
 } from '@/lib/visits';
 import { downloadHqXlsx } from '@/lib/hqReport';
 import BackLink, { BackBar } from '@/components/BackLink';
+import UnitSectionsEditor from '@/components/UnitSectionsEditor';
 
 type Tab = 'board' | 'report' | 'units';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'board', label: '🗺 探訪登記' },
   { id: 'report', label: '📊 探訪報告' },
-  { id: 'units', label: '⚙️ 旅團名單' },
+  { id: 'units', label: '⚙️ 旅團資料' },
 ];
 
 const SECTION_KEY = 'skw.visit.section';
 
 export default function VisitPage() {
   const session = useRequireCard('visit');
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get('tab');
   const { district: districtInfo } = useDistrict();
   const [board, setBoard] = useState<VisitBoard | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,6 +45,10 @@ export default function VisitPage() {
   const [canEdit, setCanEdit] = useState(false);
   const [needUpgrade, setNeedUpgrade] = useState(false);
   const [tab, setTab] = useState<Tab>('board');
+
+  useEffect(() => {
+    setTab(requestedTab === 'units' || requestedTab === 'report' ? requestedTab : 'board');
+  }, [requestedTab]);
 
   const thisYear = new Date().getFullYear();
   const [from, setFrom] = useState(`${thisYear}-01-01`);
@@ -883,6 +891,11 @@ function UnitsTab({ board, canEdit, token, reload, flash, setError }: {
           />
         </div>
       )}
+
+      <UnitSectionsEditor
+        board={board} canEdit={canEdit} token={token}
+        reload={reload} flash={flash} setError={setError}
+      />
     </>
   );
 }

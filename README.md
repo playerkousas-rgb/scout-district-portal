@@ -3,7 +3,7 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
-> **GS v4.26.1 認證修補（PR #45）及 v4.27.0 Vercel-only sheep 密碼流程（PR #47）已合併 MAIN；v4.28.0 旅團公開名錄管理 API 已由 PR #49 合併 MAIN；本分支再修正 DC 保密卡說明及留言排序（v4.28.1），待合併。正式 Apps Script 尚未部署 v4.27.0／v4.28.1，亦未在真實 Apps Script／Sheet／外部服務驗證。** 更新原有 GS 前仍須先備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，正式 GS 由區方自行更新；助手不會代部署。修補新增認證與角色門禁，並保留 DC 保密意見分頁設計；Sheet 分頁保護不是檢視隔離。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
+> **本分支 GS v4.29.1 已對齊 member-portal 最新 MAIN `9dbe876`（PR #22）保存的 v4.29.0 快照及管理端 patch。** 新增旅→團名錄、`UnitSections` 表及管理編輯器；v4.29.1 保留同一 v1.3 API 格式，修正全部團隱藏後重新產生骨架、公開網址清洗及不完整提交驗證。原始 v4.29.0 快照保留不改，見 [`gs/releases`](gs/releases/README.md)。**尚未部署或在真實 Apps Script／Sheet／外部服務驗證**；區方須先備份並閱讀 [GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，由區方自行更新原有專案及 deployment。房間讀取仍用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
 >
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
@@ -149,7 +149,7 @@
 - **一入去只睇自己支部**：跟角色自動揀（`ADC_GH` → 小童軍、`ADC_CUBS` → 幼童軍、`ADC_SCOUT` → 童軍），DC 等其他角色 = 全部支部；頂部隨時切換，揀完會記住（localStorage）。
 - **支部分開計**：探咗 17 旅童軍團，唔會當幼童軍團都探咗；冇填支部嘅記錄當「全旅」，邊個支部都計入。
 - 內建旅團名單跟港島地域官網「筲箕灣區旅團一覽表」（覆檢日期 2026-03-31），`101` 旅嗰啲 `1+A1+S1`（空童軍團／海童軍團）寫法照樣保留。
-- v4.28.0 新增旅團公開資料管理（集會時間、IG、FB、旅團網頁及獨立公開顯示開關）及 `listDistrictTroops` 公開 action；v4.28.1 更新 DC 保密卡說明並由前端保證最新留言置頂；前端資料由 `/visit` →「旅團名單」維護。成員系統卡片 UI 需另在 `member-portal` repo 完成，合約見 [`docs/member-portal-troop-directory.md`](docs/member-portal-troop-directory.md)。
+- v4.29.1 對齊成員系統 v1.3 旅→團名錄：`listDistrictTroops` 回傳 `sectionCounts` 及 `units`；管理端由「旅團資料」卡 → `/visit?tab=units` 維護旅層及各團集會時間、地點、IG／FB／網站。`saveUnitSections` 需 visit 卡 edit 權限，成員端只讀。合約及同步來源見 [`docs/member-portal-troop-directory.md`](docs/member-portal-troop-directory.md)。
 - 後台 4.8.1：新增 `Units`（旅團名單）同 `Visits`（探訪記錄）兩張表 + `getVisitBoard`／`saveVisit`／`deleteVisit`／`saveUnits`；權限用卡片 `visit` = ✏️。
 - **總會格式匯報（v4.10.0）**：`Visits` 表加四欄 `leaderMet`／`method`／`officerCount`／`support`；`getVisitBoard` 回傳 `districtName`（Config `districtName`）做匯報表頭。一筆記錄 = 匯報一行（同旅同日可以有幾行，例如電話一筆 Email 一筆，跟總會樣本）；日期出 `18.1.2026`、冇跟進出 `NA`、冇填人數當 1；排序旅號細到大、同旅舊到新。**舊部署升級：貼新 `Code.gs` → 跑一次 `setupSheets()` 就會自動補四欄，舊資料全部保留**；生成 Excel 嘅 xlsx 產生器係零依賴（`lib/xlsx.ts`＋`lib/hqReport.ts`）。
 - **一日一個旅一次（v4.8.1）**：同一日、同一個旅、同一位幹部只會有一筆記錄 —— 轉支部撳都當同一次（「今日去咗 206 旅」就係一次）。前端方塊會鎖住，後台 `saveVisit` 都會擋（雙重保險）。第二位幹部同日探同一個旅 = 佢有佢名下嗰筆（會先確認）。第二日、下個月再探同一個旅照樣得。

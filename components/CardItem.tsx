@@ -1,6 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useDistrict } from '@/lib/useDistrict';
+import { isDashboardShortcut } from '@/lib/dashboardCards';
 import type { CardDef } from '@/lib/types';
 
 const typeLabel: Record<string, string> = { builtin: '內建', jump: '跳轉', resource: '資源' };
@@ -30,6 +31,8 @@ export default function CardItem({
 
   /** 組出帶區碼 + 角色的外部網址 */
   function buildExternalUrl(): string {
+    // 官方 YMIS 使用 hash route；導覽捷徑不附加區系統的角色或來源參數。
+    if (isDashboardShortcut(card)) return card.url;
     const sep = card.url.includes('?') ? '&' : '?';
     const params = new URLSearchParams();
     params.set('role', role);

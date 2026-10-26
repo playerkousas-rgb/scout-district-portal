@@ -176,6 +176,28 @@ export const DEMO_UNITS: Record<string, any>[] = [
   { troop: '1745', label: '港島第1745旅', org: '明愛柴灣馬登基金中學', sections: { gh: '', cub: '', scout: '1', venture: '1', rover: '1' } },
 ];
 
+/** v4.29.0 旅→團階層示範：206 兩個公開團＋60 一個未公開團（展示停用／非公開過濾） */
+export const DEMO_UNIT_SECTIONS: Record<string, any>[] = [
+  {
+    troop: '206', section: 'gh', unitCode: '',
+    meetingTime: '逢星期六 09:30–11:00', location: '番禺會所學校一樓活動室',
+    instagramUrl: 'https://instagram.com/demo.206.gh', facebookUrl: '', websiteUrl: '',
+    active: true, publicVisible: true,
+  },
+  {
+    troop: '206', section: 'scout', unitCode: '',
+    meetingTime: '逢星期六 14:00–17:00', location: '番禺會所學校禮堂',
+    instagramUrl: '', facebookUrl: 'https://facebook.com/demo.206.scout', websiteUrl: '',
+    active: true, publicVisible: true,
+  },
+  {
+    troop: '60', section: 'venture', unitCode: '',
+    meetingTime: '逢星期日 10:00–12:30', location: '慈幼學校副堂',
+    instagramUrl: '', facebookUrl: '', websiteUrl: '',
+    active: true, publicVisible: false,
+  },
+];
+
 // ───────────────────────── 消息（含一條軟刪除留底示範） ─────────────────────────
 
 function iso(daysAgo: number): string {
@@ -497,6 +519,7 @@ export interface DemoDb {
   awardMembers: Record<string, any>[];
   deadlineCfg: { habDistrict: string; habHq: string };
   units: Record<string, any>[];
+  unitSections: Record<string, any>[];
   visits: Record<string, any>[];
   contactNames: Record<string, string>;
   venues: Record<string, any>[];
@@ -538,6 +561,7 @@ export function freshDemoDb(): DemoDb {
     awardMembers: JSON.parse(JSON.stringify(DEMO_AWARD_MEMBERS)),
     deadlineCfg: { habDistrict: '01-15', habHq: '02-03' },
     units: JSON.parse(JSON.stringify(DEMO_UNITS)),
+    unitSections: JSON.parse(JSON.stringify(DEMO_UNIT_SECTIONS)),
     visits: [
       { id: 'vs-01', districtCode: 'DEMO', troop: '206', section: 'gh', visitDate: dateOnly(30), year: new Date().getFullYear(), kind: 'section', visitorName: '黃志強', visitorEmail: 'demo-adc@demo', note: '集會人數 22', followUp: '', leaderMet: '支部團長', method: '面談', officerCount: 1, support: '旅團發展方向', createdAt: iso(30) },
       { id: 'vs-02', districtCode: 'DEMO', troop: '82', section: 'gh', visitDate: dateOnly(20), year: new Date().getFullYear(), kind: 'section', visitorName: '黃志強', visitorEmail: 'demo-adc@demo', note: '', followUp: '', leaderMet: '旅長', method: '電話', officerCount: 1, support: 'Annual account submission', createdAt: iso(20) },
