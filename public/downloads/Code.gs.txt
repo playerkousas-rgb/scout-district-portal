@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.25.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.25.1
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -318,7 +318,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.25.0',
+      version: '4.25.1',
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -1814,7 +1814,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.25.0',
+    version: '4.25.1',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -5509,32 +5509,102 @@ function getLockList_(token) {
   }
 }
 
-/** 建立限時密碼；ttlockDisabled=TRUE 時返回模擬密碼，否則經網關寫入實體鎖並回傳 keyboardPwdId */
+/** 讀取鎖上既有鍵盤密碼；用於重用已過期密碼及避開仍有效的撞碼。 */
+function listTtlockKeyboardPwds_(conn, lockId) {
+  var rows = [];
+  var pageSize = 100;
+  for (var pageNo = 1; pageNo <= 20; pageNo++) {
+    var payload = {
+      clientId: conn.clientId,
+      accessToken: conn.accessToken,
+      lockId: String(lockId),
+      pageNo: String(pageNo),
+      pageSize: String(pageSize),
+      date: String(Date.now()),
+    };
+    var res = UrlFetchApp.fetch(conn.apiBase + '/v3/lock/listKeyboardPwd', {
+      method: 'post', payload: payload, muteHttpExceptions: true,
+    });
+    var data;
+    try { data = JSON.parse(res.getContentText()); }
+    catch (e) { throw new Error('讀取 TTLock 現有密碼清單失敗：' + res.getContentText().slice(0, 160)); }
+    if (res.getResponseCode() < 200 || res.getResponseCode() >= 300 || (data && data.errcode !== undefined && Number(data.errcode) !== 0)) {
+      throw new Error('讀取 TTLock 現有密碼清單失敗：' + explainTtlockError_(data));
+    }
+    if (!data || !Array.isArray(data.list)) throw new Error('TTLock 密碼清單回應沒有 list，無法安全檢查重複碼');
+    var page = data.list;
+    if (page.some(function (row) { return row.keyboardPwd === undefined || row.keyboardPwd === null || String(row.keyboardPwd) === ''; })) {
+      throw new Error('TTLock 密碼清單未回傳完整 keyboardPwd，無法安全檢查重複碼');
+    }
+    rows = rows.concat(page);
+    var total = Number(data.total || data.totalCount || 0);
+    if (page.length < pageSize || (total && rows.length >= total)) break;
+    if (pageNo === 20 && total && rows.length < total) throw new Error('TTLock 密碼清單超過安全查詢上限，停止新增避免漏判重複碼');
+  }
+  return rows;
+}
+
+/** 同一鍵盤碼是否與申請時段重疊；缺少有效期資料時保守視為仍佔用。 */
+function ttlockPwdOverlaps_(record, startMs, endMs) {
+  var oldEnd = Number(record && record.endDate);
+  var oldStart = Number(record && record.startDate);
+  if (!oldEnd) return true;
+  if (oldEnd <= Date.now()) return false;
+  if (oldStart && oldStart >= endMs) return false;
+  if (oldEnd <= startMs) return false;
+  return true;
+}
+
+/** 重用既有 keyboardPwdId，只更新密碼名稱及有效期，不另開一條 key。 */
+function changeTtlockPasscodePeriod_(conn, lockId, record, name, validFrom, validTo) {
+  var payload = {
+    clientId: conn.clientId,
+    accessToken: conn.accessToken,
+    lockId: String(lockId),
+    keyboardPwdId: String(record.keyboardPwdId),
+    keyboardPwdName: String(name || '申請人').substring(0, 30),
+    startDate: String(validFrom.getTime()),
+    endDate: String(validTo.getTime()),
+    date: String(Date.now()),
+  };
+  var res = UrlFetchApp.fetch(conn.apiBase + '/v3/keyboardPwd/change', {
+    method: 'post', payload: payload, muteHttpExceptions: true,
+  });
+  var data;
+  try { data = JSON.parse(res.getContentText()); }
+  catch (e) { data = { errmsg: res.getContentText().slice(0, 160) }; }
+  if (res.getResponseCode() >= 200 && res.getResponseCode() < 300
+    && (!data || data.errcode === undefined || Number(data.errcode) === 0)) {
+    return { ok: true, data: data || {} };
+  }
+  return { ok: false, data: data || {} };
+}
+
+/** 只把明確的重複鍵碼錯誤當作撞碼；其他 API 失敗不可誤跳到 +1。 */
+function isTtlockPwdCollision_(data) {
+  var code = Number(data && data.errcode);
+  if (code === -3007 || code === 3007) return true;
+  var message = String((data && (data.errmsg || data.description || data.message)) || '').toLowerCase();
+  return /duplicate|already exists|already used|password exists|keyboard.?pwd exists|重複|已存在|已使用/.test(message);
+}
+
+/** 建立或重用限時密碼；ttlockDisabled=TRUE 時返回模擬密碼。 */
 function createTtlockPasscode_(phone, startDate, endDate, name, venueLockId) {
   var startMs = parseVenueDateMs_(startDate, false);
   var endMs = parseVenueDateMs_(endDate || startDate, true);
   if (isNaN(startMs) || isNaN(endMs)) {
     throw new Error('借用日期時間格式不正確（' + String(startDate || '') + ' → ' + String(endDate || '') + '）');
   }
-  if (endMs < startMs) {
-    throw new Error('結束時間不可早於開始時間');
-  }
+  if (endMs < startMs) throw new Error('結束時間不可早於開始時間');
   var validFrom = new Date(startMs - 15 * 60 * 1000);
   var validTo = new Date(endMs + 15 * 60 * 1000);
 
   if (ttlockDisabled_()) {
     return {
-      passcode: buildKeyboardPwd_(phone),
-      pwdRef: 'SIMULATED',
-      simulated: true,
-      lockWritten: false,
-      validFrom: validFrom,
-      validTo: validTo,
-      apiBase: '',
-      lockId: '',
+      passcode: buildKeyboardPwd_(phone), pwdRef: 'SIMULATED', simulated: true,
+      lockWritten: false, validFrom: validFrom, validTo: validTo, apiBase: '', lockId: '',
     };
   }
-
   if (validTo.getTime() <= Date.now()) {
     throw new Error('借用時段已過期（' + formatHkDateTime_(validTo) + '），電子鎖不接受過去時段密碼；請先編輯延長時間或改用「確認（唔設鎖）」');
   }
@@ -5551,9 +5621,41 @@ function createTtlockPasscode_(phone, startDate, endDate, name, venueLockId) {
   var candidates = passcodeCandidates_(phone);
   var lastErr = null;
   var fatalCodes = [-2012, -3002, -3003, 30002, -4037, -2018, 20002, -1009, -3006, -2019, -3009, 10001, 10002, 10003, 10004];
+  // 為免清單讀取失敗時又新增重複 key，先確認可讀取鎖上密碼清單；失敗即停止，不寫鎖。
+  var existingPwds = listTtlockKeyboardPwds_(conn, lockId);
 
   for (var i = 0; i < candidates.length; i++) {
     var code = candidates[i];
+    var matching = existingPwds.filter(function (row) {
+      return String(row.keyboardPwd || '').trim() === code;
+    });
+    var overlapping = matching.filter(function (row) { return ttlockPwdOverlaps_(row, validFrom.getTime(), validTo.getTime()); });
+    if (overlapping.length) {
+      lastErr = { errcode: -3007, errmsg: '鍵盤碼 ' + code + ' 在申請時段仍被使用' };
+      continue;
+    }
+
+    // 若同碼只存在於已過期／不重疊的舊記錄，優先更新該 keyboardPwdId。
+    if (matching.length) {
+      var reusable = matching.filter(function (row) { return !!row.keyboardPwdId; })[0];
+      if (!reusable) {
+        throw new Error('找到舊鍵盤碼 ' + code + '，但清單沒有 keyboardPwdId；為免新增重複 key，已停止寫鎖');
+      }
+      var changed = changeTtlockPasscodePeriod_(conn, lockId, reusable, name, validFrom, validTo);
+      if (changed.ok) {
+        reusable.startDate = validFrom.getTime();
+        reusable.endDate = validTo.getTime();
+        reusable.keyboardPwdName = String(name || '申請人').substring(0, 30);
+        return {
+          passcode: code, pwdRef: String(reusable.keyboardPwdId), simulated: false,
+          lockWritten: true, validFrom: validFrom, validTo: validTo,
+          apiBase: conn.apiBase, lockId: String(lockId), reused: true,
+        };
+      }
+      lastErr = changed.data;
+      throw new Error('找到同碼過期 key（ID ' + reusable.keyboardPwdId + '），但 TTLock 更新失敗；為免新增另一條 key，已停止寫鎖：' + explainTtlockError_(lastErr));
+    }
+
     var payload = {
       clientId: conn.clientId,
       accessToken: conn.accessToken,
@@ -5571,18 +5673,14 @@ function createTtlockPasscode_(phone, startDate, endDate, name, venueLockId) {
     try { data = JSON.parse(res.getContentText()); } catch (e) { data = { errmsg: res.getContentText().slice(0, 120) }; }
     if (data && (data.keyboardPwdId || data.errcode === 0)) {
       return {
-        passcode: code,
-        pwdRef: String(data.keyboardPwdId || 'OK'),
-        simulated: false,
-        lockWritten: true,
-        validFrom: validFrom,
-        validTo: validTo,
-        apiBase: conn.apiBase,
-        lockId: String(lockId),
+        passcode: code, pwdRef: String(data.keyboardPwdId || 'OK'), simulated: false,
+        lockWritten: true, validFrom: validFrom, validTo: validTo,
+        apiBase: conn.apiBase, lockId: String(lockId), reused: false,
       };
     }
     lastErr = data;
     if (data && fatalCodes.indexOf(Number(data.errcode)) >= 0) break;
+    if (!isTtlockPwdCollision_(data)) break;
   }
   throw new Error(explainTtlockError_(lastErr));
 }
@@ -5693,7 +5791,7 @@ function createPendingTeamupEvent_(req) {
     toTeamupDt_(req.startDate, false), toTeamupDt_(req.endDate || req.startDate, true), fields.custom, fields.who);
 }
 
-/** 批准：有 pending 事件就搬去確認子日曆；若原事件已刪除或冇 ID 就新建。回傳 {warn, eventId} */
+/** 批准時更新原事件轉至確認子日曆；有原 event ID 時絕不另建重複事件。 */
 function applyTeamupApproved_(booking, extraNotes) {
   var out = { warn: '', eventId: String(booking.teamupEventId || '').trim() };
   if (!teamupReady_()) {
@@ -5704,36 +5802,22 @@ function applyTeamupApproved_(booking, extraNotes) {
     var extra = extraNotes || '';
     var stamp = '\n✅ 已批准於 ' + formatHkDateTime_(new Date()) + extra;
     if (out.eventId) {
-      var moved = teamupMoveToApproved_(out.eventId, booking, stamp);
-      if (!moved) return out;
-      // 原事件可能已喺 Teamup 手動刪除，自動改為新建確認事件並回傳新 eventId
-      var fields = teamupCustomFields_(booking);
-      if (fields.error) {
-        out.warn = fields.error;
-        return out;
-      }
-      var fallbackEv = createTeamupEvent_(teamupCfg_().approvedSub,
-        (booking.venueName || booking.venueId || '區總部') + '（已批准）',
-        buildTeamupNotes_(booking) + stamp,
-        toTeamupDt_(booking.startDate, false), toTeamupDt_(booking.endDate || booking.startDate, true), fields.custom, fields.who);
-      if (fallbackEv.ok) {
-        out.eventId = fallbackEv.eventId || out.eventId;
-        return out;
-      }
-      out.warn = moved;
-    } else {
-      var fields = teamupCustomFields_(booking);
-      if (fields.error) {
-        out.warn = fields.error;
-        return out;
-      }
-      var ev = createTeamupEvent_(teamupCfg_().approvedSub,
-        (booking.venueName || booking.venueId || '區總部') + '（已批准）',
-        buildTeamupNotes_(booking) + stamp,
-        toTeamupDt_(booking.startDate, false), toTeamupDt_(booking.endDate || booking.startDate, true), fields.custom, fields.who);
-      if (!ev.ok) out.warn = ev.error || 'Teamup 建立確認事件失敗';
-      else out.eventId = ev.eventId || '';
+      var moveError = teamupMoveToApproved_(out.eventId, booking, stamp);
+      if (moveError) out.warn = moveError + '；為避免重複事件，未另建紅色事件';
+      return out;
     }
+
+    var fields = teamupCustomFields_(booking);
+    if (fields.error) {
+      out.warn = fields.error;
+      return out;
+    }
+    var ev = createTeamupEvent_(teamupCfg_().approvedSub,
+      (booking.venueName || booking.venueId || '區總部') + '（已批准）',
+      buildTeamupNotes_(booking) + stamp,
+      toTeamupDt_(booking.startDate, false), toTeamupDt_(booking.endDate || booking.startDate, true), fields.custom, fields.who);
+    if (!ev.ok) out.warn = ev.error || 'Teamup 建立確認事件失敗';
+    else out.eventId = ev.eventId || '';
   } catch (e) {
     out.warn = e.message;
   }
@@ -5788,8 +5872,26 @@ function teamupMoveToApproved_(eventId, booking, extraNotes) {
     who: fields.who,
     custom: customFields,
   };
-  var r = teamupApi_('put', c.calendarId + '/events/' + eventId, body);
-  return (r && r.event) ? '' : 'TeamUp 更新失敗';
+  var r = teamupFetch_('https://api.teamup.com/' + c.calendarId + '/events/' + eventId, {
+    method: 'put', payload: JSON.stringify(body),
+  });
+  if (r.code < 200 || r.code >= 300) return 'TeamUp 更新失敗 HTTP ' + r.code + '：' + r.text;
+  var updatedEvent = null;
+  try {
+    var responseData = JSON.parse(r.text || '{}');
+    updatedEvent = responseData.event || responseData;
+  } catch (ignore) {}
+  var targetSub = Number(c.approvedSub);
+  var subs = updatedEvent && Array.isArray(updatedEvent.subcalendar_ids) ? updatedEvent.subcalendar_ids : null;
+  if (!subs) {
+    var verify = teamupApi_('get', c.calendarId + '/events/' + eventId);
+    updatedEvent = verify && verify.event ? verify.event : null;
+    subs = updatedEvent && Array.isArray(updatedEvent.subcalendar_ids) ? updatedEvent.subcalendar_ids : null;
+  }
+  if (!subs || subs.map(Number).indexOf(targetSub) < 0 || (c.pendingSub && subs.map(Number).indexOf(Number(c.pendingSub)) >= 0)) {
+    return 'TeamUp API 接受更新但未確認事件已移至已批日曆；為避免重複事件，未另建紅色事件';
+  }
+  return '';
 }
 /** 拒絕/取消：有原事件就搬去拒絕子日曆，否則選填新建 */
 function teamupOnReject_(req, status) {

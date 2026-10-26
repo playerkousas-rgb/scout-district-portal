@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.25.0）
+ * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.25.1）
  *
  * 涵蓋：
  *  1. 跨區自動探測（api.sciener.com 10003 → 自動切換 euapi.ttlock.com + 852 電話帳號相容）
@@ -92,9 +92,11 @@ const ttlockState = {
   gatewayOffline: false,
   rejectCodes: new Set(),
   addedPwds: [],
+  existingPwds: [],
+  changedPwds: [],
 };
 const teamupEvents = {};
-const teamupState = { failNextCreate: false };
+const teamupState = { failNextCreate: false, failNextUpdate: false };
 let nextPwdId = 700100;
 let nextTeamupId = 5001;
 
@@ -188,6 +190,25 @@ const ctx = {
         });
       }
 
+      if (/\/v3\/lock\/listKeyboardPwd$/.test(url)) {
+        const p = parseFormPayload(opt.payload);
+        assert.strictEqual(p.accessToken, 'tok-eu-valid');
+        assert.strictEqual(p.lockId, '170488');
+        return reply(200, { list: ttlockState.existingPwds.slice() });
+      }
+
+      if (/\/v3\/keyboardPwd\/change$/.test(url)) {
+        const p = parseFormPayload(opt.payload);
+        assert.strictEqual(p.accessToken, 'tok-eu-valid');
+        const found = ttlockState.existingPwds.find(x => String(x.keyboardPwdId) === String(p.keyboardPwdId));
+        if (!found) return reply(200, { errcode: -3004, errmsg: 'keyboardPwdId does not exist' });
+        found.startDate = Number(p.startDate);
+        found.endDate = Number(p.endDate);
+        found.keyboardPwdName = p.keyboardPwdName;
+        ttlockState.changedPwds.push({ ...found });
+        return reply(200, { errcode: 0 });
+      }
+
       if (/\/v3\/keyboardPwd\/add$/.test(url)) {
         const p = parseFormPayload(opt.payload);
         assert.strictEqual(url, 'https://euapi.ttlock.com/v3/keyboardPwd/add');
@@ -200,13 +221,16 @@ const ctx = {
           return reply(200, { errcode: -3007, errmsg: 'duplicate or invalid keyboardPwd' });
         }
         const pwdId = ++nextPwdId;
-        ttlockState.addedPwds.push({
+        const added = {
           keyboardPwdId: pwdId,
+          lockId: Number(p.lockId),
           keyboardPwd: String(p.keyboardPwd),
           startDate: Number(p.startDate),
           endDate: Number(p.endDate),
-          name: p.keyboardPwdName,
-        });
+          keyboardPwdName: p.keyboardPwdName,
+        };
+        ttlockState.addedPwds.push(added);
+        ttlockState.existingPwds.push({ ...added });
         return reply(200, { keyboardPwdId: pwdId, errcode: 0 });
       }
 
@@ -235,6 +259,10 @@ const ctx = {
           return teamupEvents[id] ? reply(200, { event: teamupEvents[id] }) : reply(404, { error: 'not found' });
         }
         if (method === 'put') {
+          if (teamupState.failNextUpdate) {
+            teamupState.failNextUpdate = false;
+            return reply(403, { error: { id: 'no_permission', message: 'no permission' } });
+          }
           const body = JSON.parse(opt.payload);
           if (!validTeamupIso(body.start_dt) || !validTeamupIso(body.end_dt)) {
             return reply(400, { error: { id: 'event_invalid_datetime_string', message: `Invalid datetime string: "${body.start_dt}"` } });
@@ -287,7 +315,7 @@ function callPost(action, body = {}) {
   return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action, apiKey, ...body }) } }));
 }
 
-console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.25.0)');
+console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.25.1)');
 
 // 1. 登入超管／DC 並檢查初始健康狀態
 const loginRes = callPost('login', { email: ctx.MASTER_EMAIL, password: props.PORTAL_MASTER_PASSWORD });
@@ -296,10 +324,10 @@ const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.25.0');
+assert.strictEqual(h0.data.version, '4.25.1');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
-console.log('  ✓ getHealthCheck 回傳版本 4.25.0 及電子鎖初始狀態');
+console.log('  ✓ getHealthCheck 回傳版本 4.25.1 及電子鎖初始狀態');
 
 // 2. 模擬舊版 Sheet：刻意移除 VenueBookings 的 pwdRef / passcode 欄及 Venues 的 scienerLockId 欄
 sheets.VenueBookings._data[0] = [
@@ -493,8 +521,8 @@ const submit2 = callPost('submitVenueRequest', {
   email: 'lee@example.com',
   troop: '港島第 1888 旅',
   purpose: '訓練籌備',
-  startDate: '2027-05-20T19:30',
-  endDate: '2027-05-20T22:00',
+  startDate: '2027-05-15T20:00',
+  endDate: '2027-05-15T22:00',
   agreeRules: 'TRUE',
 });
 const booking2Id = submit2.data.id;
@@ -541,5 +569,52 @@ assert.strictEqual(approve3.ok, true);
 assert.strictEqual(approve3.data.passcode, '9365');
 assert.strictEqual(approve3.data.teamupSynced, true, '批核時 Teamup 亦應零錯誤同步');
 console.log('  ✓ .000Z／Date 時間自動正規化為香港 +08:00 無毫秒格式，徹底消除 Teamup HTTP 400');
+
+// 12. 有效頭4碼撞碼時改試電話尾4；過期同碼優先更新舊 keyboardPwdId，不新增另一條 key
+const expiredPwdId = 909001;
+const oldStart = Date.now() - 30 * 24 * 60 * 60 * 1000;
+const oldEnd = Date.now() - 24 * 60 * 60 * 1000;
+ttlockState.existingPwds.push({
+  keyboardPwdId: expiredPwdId, lockId: 170488, keyboardPwd: '6107',
+  startDate: oldStart, endDate: oldEnd, keyboardPwdName: '舊申請',
+});
+const addedBeforeReuse = ttlockState.addedPwds.length;
+const changedBeforeReuse = ttlockState.changedPwds.length;
+const reusedExpired = ctx.createTtlockPasscode_(
+  '61070452', '2027-06-10T19:00', '2027-06-10T20:00', '重用過期碼測試', '170488'
+);
+assert.strictEqual(reusedExpired.passcode, '6107');
+assert.strictEqual(reusedExpired.pwdRef, String(expiredPwdId));
+assert.strictEqual(reusedExpired.reused, true);
+assert.strictEqual(ttlockState.addedPwds.length, addedBeforeReuse, '重用過期碼不得呼叫 add 新增 key');
+assert.strictEqual(ttlockState.changedPwds.length, changedBeforeReuse + 1, '應呼叫 change 更新舊 key 時段');
+
+// 頭4位 6107 現在仍在申請時段內，必須嘗試尾4位 0452，而不是 6108。
+ttlockState.existingPwds.push({
+  keyboardPwdId: 909002, lockId: 170488, keyboardPwd: '6107',
+  startDate: Date.parse('2027-06-01T00:00:00+08:00'),
+  endDate: Date.parse('2027-08-01T00:00:00+08:00'), keyboardPwdName: '目前有效',
+});
+const tailFirst = ctx.createTtlockPasscode_(
+  '61070452', '2027-07-10T19:00', '2027-07-10T20:00', '尾4測試', '170488'
+);
+assert.strictEqual(tailFirst.passcode, '0452', '頭4撞碼必須先改用尾4；兩者都撞才可 +1');
+console.log('  ✓ TTLock 過期鍵碼更新原 key；有效頭4撞碼改用尾4 0452');
+
+// 13. Teamup 更新既有事件失敗時，不得另建同時段紅色事件留下重複藍色事件
+const submit4 = callPost('submitVenueRequest', {
+  venueId: 'HQ-1704', name: '搬色失敗測試', position: '領袖', phone: '91231234',
+  activityName: '搬色失敗測試', attendeeCount: 3, agreeRules: true,
+  startDate: '2027-07-20T19:00', endDate: '2027-07-20T20:00',
+});
+assert.strictEqual(submit4.ok, true);
+const eventCountBeforeFailedMove = Object.keys(teamupEvents).length;
+teamupState.failNextUpdate = true;
+const moveFail = callPost('confirmVenueBooking', { token, id: submit4.data.id });
+assert.strictEqual(moveFail.ok, true);
+assert.ok(moveFail.data.warn.includes('HTTP 403'));
+assert.strictEqual(Object.keys(teamupEvents).length, eventCountBeforeFailedMove, '搬色失敗時不可另建紅色重複事件');
+assert.deepStrictEqual(teamupEvents[submit4.data.teamupEventId].subcalendar_ids, [101], '搬色失敗時原藍色事件仍在，供職員重試');
+console.log('  ✓ Teamup 搬色失敗只回報警告，不另建紅色重複事件');
 
 console.log('\n🎉 場地借用電子鎖與回傳整合測試全部通過！');
