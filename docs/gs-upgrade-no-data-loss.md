@@ -1,6 +1,6 @@
-# 區後台 GS：只追加升級（v4.31.0）
+# 區後台 GS：只追加升級（v4.32.0）
 
-**完整程式：[`gs/Code.gs`](../gs/Code.gs)**；網站下載的 [`Code.gs.txt`](../public/downloads/Code.gs.txt) 及本版 [`Code-v4.31.0.gs`](../gs/releases/Code-v4.31.0.gs) 必須與它完全相同。本分支已整合 member-portal MAIN `9dbe876`（PR #22）保存的 v4.29.0 快照及管理端配套；原始快照保留不改，現行 v4.29.1 增加隱藏團及輸入驗證修補，公開 v1.3 格式不變。**尚未由區方部署至正式 Apps Script，亦未在真實 Apps Script／Sheet／外部服務上驗證。** 本地 mock 測試不能代替正式驗收；區方須先備份，按下列步驟更新原有專案。
+**完整程式：[`gs/Code.gs`](../gs/Code.gs)**；網站下載的 [`Code.gs.txt`](../public/downloads/Code.gs.txt) 及本版 [`Code-v4.32.0.gs`](../gs/releases/Code-v4.32.0.gs) 必須與它完全相同。本分支已整合 member-portal MAIN `9dbe876`（PR #22）保存的 v4.29.0 快照及管理端配套；原始快照保留不改，現行 v4.29.1 增加隱藏團及輸入驗證修補，公開 v1.3 格式不變。**尚未由區方部署至正式 Apps Script，亦未在真實 Apps Script／Sheet／外部服務上驗證。** 本地 mock 測試不能代替正式驗收；區方須先備份，按下列步驟更新原有專案。
 
 ## 先備份與安全遷移
 
@@ -15,7 +15,7 @@
 3. **不會在既有系統補建預設帳戶**，包括 Users 只有表頭、或部分舊系統缺 Users 表的情況；由有權管理員明確建立帳戶。只有整本全新空白試算表才按藍圖種初始帳戶，密碼為隨機且不顯示的臨時值，無法以公開共用密碼登入；管理員須另行重設並完成首次改密碼。
 4. **API Key**：已有非空 `API_KEY_HASH` 原樣保留。舊 Config 缺少該行時，`setupSheets()` 只追加一行新雜湊並顯示新 Key 一次，須私下同步前端 `PORTAL_{區碼}_APIKEY` 及成員端 `MEMBER_{區碼}_APIKEY`。若該行已存在但 value 空白，setup 會保持空白並 fail-closed；須由區方明確使用「重新生成 API Key」功能並同步兩端環境變數。**不要把空 hash 當作可通過，也不要在未確認兩邊 Key 一致前使用。** setup 不會改動 Vercel 環境變數。
 5. `rooms` 仍按原卡片及範圍規則提供唯讀日曆；管理平台卡片按角色限制可見，DC API 保留後端角色檢查。YMIS 允許 DC、DDC、各 ADC、STAFF 及 SYSADMIN 的有效 Users 帳戶查看；已驗證伺服器簽署的維護超管亦可使用。DL、LEADER、AL 及舊 Staff token 仍不可讀取。此為應用層/API 限制，不是 Google Sheet 閱讀隔離：有主試算表檢視權限的人仍可能直接讀取 `DCConfidential` 分頁。
-6. 只有在備份、檢查 Script Properties、API Key 同步及測試帳戶準備完成後，才由區方編輯**原有** Web App deployment → New version → Deploy，以沿用 `/exec`。健康檢查應回傳 `version: "4.31.0"`、正確區碼、`apiKeySet: true` 及 `tokenSecretSet: true`。在此之前**不要部署**；本地測試不能替代 Apps Script 執行、Sheet ACL、Teamup、TTLock、郵件及正式 YMIS 驗證。
+6. 只有在備份、檢查 Script Properties、API Key 同步及測試帳戶準備完成後，才由區方編輯**原有** Web App deployment → New version → Deploy，以沿用 `/exec`。健康檢查應回傳 `version: "4.32.0"`、正確區碼、`apiKeySet: true` 及 `tokenSecretSet: true`。在此之前**不要部署**；本地測試不能替代 Apps Script 執行、Sheet ACL、Teamup、TTLock、郵件及正式 YMIS 驗證。
 
 > 「只追加」只指自動升級函式 `setupSheets()`，不代表業務操作永遠不會依權限寫入資料。本倉測試使用虛構資料驗證升級保留、角色門禁與模擬借場流程；沒有存取或測試區方真實 Google Sheet／YMIS／Teamup／TTLock。先備份，合併與部署狀態以實際 GitHub／Apps Script 為準。
 
@@ -36,3 +36,10 @@
 - `YMIS_VERIFY_USERNAME`／`YMIS_VERIFY_PASSWORD` 仍放 Script Properties，無須改名／搬到 Sheet。更新值後下一次按「顯示帳密」會直接讀取新值，不用改前端或通知每個人。
 - 新旅團編輯器先檢查 `unitSectionsScopedSave: true`，只有部署 v4.30.0 後才開放按旅儲存，避免新前端配舊 GS 造成全表覆寫。
 - 個人卡片位置只寫 localStorage（區碼＋帳戶），不寫 GS，不會改其他人的排列。
+
+## v4.32.0 旅團合併卡＋子分頁權限（取代 v4.31.0 固定政策）
+
+- 「旅團探訪」「旅團資料」兩張卡合併為一張 `troop` 入口卡（`/troop`）。**例外披露**：`setupSheets()` 升級時會將 Cards 表入面舊 `visit`、`troopDirectory` 兩行移除、補入 `troop` 一行（主控台排序跟新卡 order）；除此之外維持只追加原則。Perms 表唔受影響：原有 `visit`、`troopDirectory` 兩行儲存格**原封保留**，並只追加 `troopContacts`、`troopRequests` 兩行；`troop` 入口卡本身冇 Perms 行，係由四行子權限推導。
+- 權限管治改為 Perms 表唯一準則：超管喺「⚙️ 權限／角色管理」對四個小分頁逐行撳 👁／✏️ 即時生效，不再需要改程式。升級預設同 v4.31.0 行為一致（探訪全員可登記、DDC+ 改／刪；資料 ADC+ 可改），新增兩行預設：`troopContacts`＝ADC 唯讀、STAFF／DDC／DC 可改；`troopRequests`＝ADC＋STAFF／DDC／DC 可處理。**注意**：`Users.cards` 個人卡片範圍由 v4.32.0 起同其他卡一樣適用於探訪／資料子分頁（v4.31.0 係繞過嘅）；如有帳戶填咗 cards 範圍，升級前先核對包唔包 `troop`。
+- 新表 `TroopContacts`（私隠聯絡）及 `VisitRequests`（成員端聯絡區會申請）由 `setupSheets()` 補建，並列入工作表保護清單。聯絡只經 `getTroopContacts` 按子分頁權限＋支部範疇讀取：支部 ADC 只見自己支部（該支部冇團長就只見旅長）；`listDistrictTroops` 等公開回應絕不包含聯絡資料。公開提交 `submitVisitRequest`（成員端用，回覆聯絡可選）只寫入 `VisitRequests`，不會寫入 `Visits`。
+- 上線次序：備份 → 貼新 GS → `setupSheets()` → 更新原有部署 → 部署前端。前端對舊 GS 有相容（舊兩卡自動合成一張「旅團」卡先顯示），但聯絡／申請小分頁要新 GS 至有。健康檢查應顯示 `version: "4.32.0"` 及 `troopContactsReady`／`visitRequestsReady` 為 true。

@@ -10,6 +10,7 @@ import type {
   CourseLink, Venue, VenueLockInfo, VenueLockConfigStatus, VenueLockConfigInput, VenueApproveResult, BackendHealthInfo,
   VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, TroopDirectoryBoard, ScoutUnit, UnitSection,
+  TroopContact, TroopContactsBoard, VisitRequest, VisitRequestsBoard,
   Circular, CircularsBoard, CircularStatus, DistrictFeedback, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
   CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec, HubCoursesResult,
   DistrictTroopDirectory,
@@ -362,9 +363,25 @@ export const api = {
     callPost('deleteVisit', { token, id }),
   saveUnits: (token: string, units: ScoutUnit[]): Promise<ApiResult<{ saved: boolean; count: number }>> =>
     callPost('saveUnits', { token, units }),
-  /** v4.30.0：傳 troop 時只儲存所選旅；省略時相容舊版全表儲存。需要 visit edit。 */
+  /** v4.30.0：傳 troop 時只儲存所選旅；省略時相容舊版全表儲存。需要「旅團資料」子分頁 edit。 */
   saveUnitSections: (token: string, rows: UnitSection[], troop?: string): Promise<ApiResult<{ saved: boolean; count: number }>> =>
     callPost('saveUnitSections', { token, rows, ...(troop !== undefined ? { troop } : {}) }),
+
+  // ── 🔒 旅團聯絡（v4.32.0，Perms 行 troopContacts；個人資料不經公開 API） ──
+  getTroopContacts: (token: string): Promise<ApiResult<TroopContactsBoard>> =>
+    callGet('getTroopContacts', { token }),
+  saveTroopContact: (token: string, contact: Partial<TroopContact>): Promise<ApiResult<{ saved: boolean; id: string }>> =>
+    callPost('saveTroopContact', { token, contact }),
+  deleteTroopContact: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
+    callPost('deleteTroopContact', { token, id }),
+
+  // ── 📨 聯絡區會（v4.32.0，Perms 行 troopRequests；成員端經其 proxy 用公開 submit） ──
+  submitVisitRequest: (data: Record<string, unknown>): Promise<ApiResult<{ id: string; refCode: string }>> =>
+    callPost('submitVisitRequest', data as Record<string, string>),
+  getVisitRequests: (token: string): Promise<ApiResult<VisitRequestsBoard>> =>
+    callGet('getVisitRequests', { token }),
+  setVisitRequestStatus: (token: string, id: string, patch: Partial<Pick<VisitRequest, 'status' | 'assignedTo' | 'districtNote'>>): Promise<ApiResult<{ saved: boolean; id: string }>> =>
+    callPost('setVisitRequestStatus', { token, id, patch }),
 
   saveAwardTypes: (token: string, types: AwardType[]): Promise<ApiResult<{ saved: boolean; count: number; newColumns: string[] }>> =>
     callPost('saveAwardTypes', { token, types }),

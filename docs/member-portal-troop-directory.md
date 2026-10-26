@@ -141,3 +141,9 @@ v4.29.0 將名錄由「每旅一張卡」升級為對齊[港島總會筲箕灣�
 - `node scripts/check-member-alignment.js /path/to/latest-member-portal`：最新 MAIN 的 action／proxy／公開 sanitizer 合約通過。
 - 14 組 GS suites 中 13 組通過；仍只有原有 `test-district-hq-gs.js:62` 的月曆配置基線失敗，未改動該功能或掩蓋測試。
 - 原 v4.30.0 快照及 YMIS 舊頁保持不變；沒有合併 MAIN、部署 GS、改動正式 Sheet 或提交成員端 repo。
+
+## v4.32.0 旅團合併卡＋聯絡區會（取代上節 v4.31.0 固定政策描述）
+
+- 管理端「旅團資料」已併入「旅團」卡（`/troop` 的「旅團資料」分頁）；讀寫權限由 Perms 表 `troopDirectory` 子分頁行決定（唔再係寫死政策），公開合約 `listDistrictTroops`（v1.3 shape）不變。
+- 新增成員端入口「聯絡區會」：公開 POST `submitVisitRequest`（申請探訪／邀請出席；回覆聯絡可選，同「你講我聽」模式），欄位合約見 [`member-gs-handshake.md`](member-gs-handshake.md) 尾節。申請只入 `VisitRequests` 待區方跟進，不會直接變探訪紀錄。
+- 旅團領袖私人聯絡存在管理端私隠表 `TroopContacts`，任何公開回應都不會包含；成員端不需要亦不應讀取。

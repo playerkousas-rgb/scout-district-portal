@@ -276,3 +276,24 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
 2. 卡片 `unit` 你已經有自己嘅旅團管理系統（jump）定係想喺呢邊內建？
 3. `venue`/`stock` 批核要唔要喺呢一期做，定淨係先做訓練班條線？
 4. 入數紙係「只睇」定係「批核後先睇」？
+
+---
+
+## 11. v4.32.0 子分頁權限（「旅團」卡）— Perms 表統管
+
+原 `visit`＋`troopDirectory` 兩張卡合併為一張入口卡 `troop`（`/troop`，兩個大分頁：旅團探訪／旅團資料）。
+入口卡本身**唔佔 Perms 行**；四個小分頁各自有一行 Perms（「子權限」），超管喺 `/admin` 逐行撳 👁／✏️，
+`getCards` 會將已授權子分頁以 `type:'subperm'`、`parentId:'troop'` 偽卡形式附帶回傳（主控台會過濾，只顯示入口卡）；
+入口卡 `access` = 四行之中最高級。`getPerms` 回傳 `subPerms` 清單俾管理頁畫子行；`savePerms` 照單保存四行（唔寫 `troop` 行）。
+
+| 子分頁 Perms id | 內容 | 後端 actions | 預設 |
+|---|---|---|---|
+| `visit` | 探訪登記／報告（👁＝可登記，✏️＝可改／刪紀錄） | `getVisitBoard`（view）、`saveVisit`（新增 view／改 edit）、`deleteVisit`（edit） | 全員 👁；DC／DDC／SYSADMIN ✏️ |
+| `troopDirectory` | 旅團公開資料（Units＋UnitSections） | `getTroopDirectoryBoard`（view）、`saveUnits`／`saveUnitSections`（edit） | 全員 👁；DC／DDC／各 ADC ✏️ |
+| `troopContacts` | 🔒 私隠聯絡（旅長／團長電話電郵；支部 ADC 只見自己支部，自己支部冇團長就只見旅長） | `getTroopContacts`（view）、`saveTroopContact`／`deleteTroopContact`（edit） | 各 ADC 👁；DC／DDC／STAFF ✏️；其餘 — |
+| `troopRequests` | 📨 成員端申請探訪／邀請出席（支部 ADC 只見自己支部＋全旅申請） | `getVisitRequests`（view）、`setVisitRequestStatus`（edit）；公開 `submitVisitRequest` 供成員端提交 | 各 ADC／DC／DDC／STAFF ✏️；其餘 — |
+
+- 取代 v4.31.0 嘅固定政策（`districtFeatureAccess_` 已刪除）：以後調整權限只改 Perms 表，唔使改程式。
+- `Users.cards` 個人範圍同一般卡一致適用（填咗白名單而冇包該子分頁／`troop` 就入唔到）。
+- 私隠聯絡資料只存 `TroopContacts` 表，永不寫落 `Units`／`UnitSections`，公開 `listDistrictTroops` 絕不包含（已加測試把關）。
+- 明知限制：任何人有主試算表檢視權限都可直接開 `TroopContacts` 分頁（同其他敏感表一樣，已列入保護清單但唔係閱讀隔離）— 區方已確認接受。

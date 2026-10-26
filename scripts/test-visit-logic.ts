@@ -129,15 +129,21 @@ check('季度／年份：由日期計', () => {
   assert.strictEqual(yearOf('2026-10-01'), 2026);
 });
 
-check('報告日期範圍快捷掣：本季／全年／上下半年／童軍年度', () => {
+check('報告日期範圍快捷掣：童軍年度=1月–12月；9月–8月叫學年', () => {
   const p = rangePresets(new Date('2026-09-08T12:00:00+08:00'));
   const q = p.find(x => x.id === 'thisQuarter')!;
   assert.strictEqual(q.from, '2026-07-01');
   assert.strictEqual(q.to, '2026-09-30');
-  assert.strictEqual(p.find(x => x.id === 'thisYear')!.from, '2026-01-01');
+  const scoutYear = p.find(x => x.id === 'thisYear')!;
+  assert.strictEqual(scoutYear.from, '2026-01-01');
+  assert.strictEqual(scoutYear.to, '2026-12-31');
+  assert.ok(scoutYear.label.includes('童軍年度'), '1 月–12 月先叫童軍年度');
   assert.strictEqual(p.find(x => x.id === 'h2')!.from, '2026-07-01');
-  assert.strictEqual(p.find(x => x.id === 'scoutYear')!.from, '2025-09-01');
-  assert.strictEqual(p.find(x => x.id === 'scoutYear')!.to, '2026-08-31');
+  const school = p.find(x => x.id === 'schoolYear')!;
+  assert.strictEqual(school.from, '2025-09-01');
+  assert.strictEqual(school.to, '2026-08-31');
+  assert.ok(school.label.includes('學年') && !school.label.includes('童軍'), '9 月–8 月只叫學年');
+  assert.strictEqual(p.find(x => x.id === 'scoutYear'), undefined, '舊 scoutYear id 已退役');
 });
 
 check('旅號排序：86 → 206 → 1745', () => {

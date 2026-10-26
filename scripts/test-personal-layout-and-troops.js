@@ -12,7 +12,7 @@ function load(name) {
 const storage = new Map();
 global.localStorage = { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) };
 const order = load('cardOrder');
-const cards = ['ymis', 'troopDirectory', 'rooms', 'plugin', 'resource'].map(cardId => ({ cardId }));
+const cards = ['ymis', 'troop', 'rooms', 'plugin', 'resource'].map(cardId => ({ cardId }));
 const moved = order.moveInList(cards, 4, 0);
 order.saveCardOrder('SKW', 'a@example.org', Object.fromEntries(moved.map((c, i) => [c.cardId, i])));
 assert.deepEqual(order.applyCardOrder(cards, order.loadCardOrder('SKW', 'a@example.org')), moved, '重載後保留每一種卡片的位置');
@@ -24,10 +24,12 @@ assert.deepEqual(order.loadCardOrder('SKW', 'a@example.org'), {});
 order.saveCardOrder('SKW', 'a@example.org', { ymisWebsiteShortcut: 2 });
 assert.deepEqual(order.loadCardOrder('SKW', 'a@example.org'), { ymis: 2 }, '舊錯誤外連卡的位置遷移到正確 YMIS 內頁');
 order.saveCardOrder('SKW', 'a@example.org', { troopDirectoryShortcut: 3 });
-assert.deepEqual(order.loadCardOrder('SKW', 'a@example.org'), { troopDirectory: 3 });
+assert.deepEqual(order.loadCardOrder('SKW', 'a@example.org'), { troop: 3 }, '舊捷徑位置經資料卡再遷去合併旅團卡');
+order.saveCardOrder('SKW', 'a@example.org', { visit: 5, troopDirectory: 2, rooms: 7 });
+assert.deepEqual(order.loadCardOrder('SKW', 'a@example.org'), { troop: 2, rooms: 7 }, 'v4.32.0 合併：旅團卡用舊兩卡較前位置');
 storage.set(order.cardOrderKey('SKW', 'a@example.org'), 'broken-json');
 assert.deepEqual(order.loadCardOrder('SKW', 'a@example.org'), {});
-console.log('✓ 所有卡片排序、跨區／跨帳戶隔離、重載、還原、舊 YMIS 排位遷移');
+console.log('✓ 所有卡片排序、跨區／跨帳戶隔離、重載、還原、舊 YMIS／旅團排位遷移');
 
 const { unitSectionDrafts } = load('unitSectionDrafts');
 const troop82 = { troop: '82', sections: { gh: '1', cub: '1', scout: '1', venture: '1', rover: '1' } };

@@ -56,8 +56,7 @@ export const DEMO_TOKEN = 'demo-session-token';
 // ───────────────────────── 卡片（照後台 Cards 表，冇 news） ─────────────────────────
 
 export const DEMO_CARDS: Record<string, any>[] = [
-  { cardId: 'troopDirectory', title: '旅團資料', icon: '🧭', type: 'builtin', url: '/troop-directory', description: '各旅已開設支部資料 · ADC 或以上可修改', order: 1.1, enabled: true, embed: false, source: 'core', category: 'done' },
-  { cardId: 'visit', title: '旅團探訪', icon: '🏕', type: 'builtin', url: '/visit', description: '一撳登記探訪 · 未探旅團紅燈 · 季度報告', order: 1, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'troop', title: '旅團', icon: '🏕', type: 'builtin', url: '/troop', description: '旅團探訪 · 旅團資料 · 聯絡 · 申請邀請', order: 1, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'contacts', title: '聯絡簿', icon: '📇', type: 'builtin', url: '/contacts', description: '聯絡電話：旅團 · 港島地域 · 總會（職員姓名區方可改）', order: 2, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'awards', title: '獎勵提名', icon: '🎖', type: 'builtin', url: '/awards', description: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', order: 3, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'circulars', title: '區通告', icon: '📜', type: 'builtin', url: '/circulars', description: '開班資料自動帶入 · 傳統通告列印 PDF 上載區網', order: 4, enabled: true, embed: false, source: 'core', category: 'done' },
@@ -74,6 +73,13 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'rooms', title: '區總部及地域房間使用情況', icon: '🏢', type: 'builtin', url: '/rooms', description: '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆', order: 15, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'orgchart', title: '地域及總會架構', icon: '🏛', type: 'builtin', url: '/orgchart', description: '港島地域總監架構 · 總會領導層，自動跟官網更新', order: 16, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'debitNote', title: 'DEBIT NOTE 生成', icon: '🧾', type: 'builtin', url: '/debit-note', description: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出', order: 17, enabled: true, embed: false, source: 'core', category: 'done' },
+];
+
+export const DEMO_SUB_PERMS = [
+  { id: 'visit', parentId: 'troop', title: '旅團探訪', icon: '🏕' },
+  { id: 'troopDirectory', parentId: 'troop', title: '旅團資料', icon: '🧭' },
+  { id: 'troopContacts', parentId: 'troop', title: '旅團聯絡（私隱）', icon: '🔒' },
+  { id: 'troopRequests', parentId: 'troop', title: '旅團申請／邀請', icon: '📨' },
 ];
 
 export const DEMO_ROLES: Record<string, any>[] = [
@@ -109,12 +115,20 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
       else if (c.cardId === 'venueReg') m[c.cardId][role] = lv <= 2 || role === 'STAFF' ? 'edit' : '';
       else if (c.cardId === 'rooms') m[c.cardId][role] = 'view';
       else if (c.cardId === 'ymis') m[c.cardId][role] = 'view';
-      else if (c.cardId === 'troopDirectory') m[c.cardId][role] = lv <= 3 ? 'edit' : 'view';
-      else if (c.cardId === 'visit') m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
       else if (c.cardId === 'circulars') m[c.cardId][role] = lv <= 4 ? 'edit' : 'view';
       else m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
     });
   });
+  // v4.32.0 旅團卡子權限行（同 GS blueprint 預設一致）
+  const sub = (fn: (role: string, lv: number) => 'edit' | 'view' | '') => {
+    const row: Record<string, 'edit' | 'view' | ''> = {};
+    Object.keys(roleLevel).forEach(role => { row[role] = fn(role, roleLevel[role]); });
+    return row;
+  };
+  m.visit = sub((_r, lv) => (lv <= 2 ? 'edit' : 'view'));
+  m.troopDirectory = sub((_r, lv) => (lv <= 3 ? 'edit' : 'view'));
+  m.troopContacts = sub((r, lv) => (lv <= 2 || r === 'STAFF' ? 'edit' : lv === 3 ? 'view' : ''));
+  m.troopRequests = sub((r, lv) => (lv <= 3 || r === 'STAFF' ? 'edit' : ''));
   // 超管不屬一般可轉授角色，但 DEBIT NOTE 仍保留最高權限。
   if (m.debitNote) m.debitNote.SYSADMIN = 'edit';
   return m;
@@ -523,6 +537,8 @@ export interface DemoDb {
   units: Record<string, any>[];
   unitSections: Record<string, any>[];
   visits: Record<string, any>[];
+  troopContacts: Record<string, any>[];
+  visitRequests: Record<string, any>[];
   contactNames: Record<string, string>;
   venues: Record<string, any>[];
   venueBookings: Record<string, any>[];
@@ -537,9 +553,25 @@ export interface DemoDb {
   seq: number;
 }
 
+export function demoTroopContacts(): Record<string, any>[] {
+  return [
+    { id: 'tc-01', troop: '206', section: '', unitCode: '', contactRole: 'gsl', name: '張國強（示範旅長）', phone: '9123 4567', email: 'gsl206@demo', note: '', active: true, createdAt: iso(40), updatedAt: iso(40), updatedBy: '示範' },
+    { id: 'tc-02', troop: '206', section: 'scout', unitCode: '', contactRole: 'leader', name: '陳小明（示範童軍團長）', phone: '9234 5678', email: 'scout206@demo', note: '逢星期六集會', active: true, createdAt: iso(40), updatedAt: iso(40), updatedBy: '示範' },
+    { id: 'tc-03', troop: '82', section: 'gh', unitCode: '', contactRole: 'leader', name: '李小芬（示範小童軍團長）', phone: '9345 6789', email: '', note: '', active: true, createdAt: iso(40), updatedAt: iso(40), updatedBy: '示範' },
+    { id: 'tc-04', troop: '17', section: '', unitCode: '', contactRole: 'gsl', name: '林志傑（示範旅長）', phone: '9456 7890', email: 'gsl17@demo', note: '童軍團長待委任，ADC 先睇旅長', active: true, createdAt: iso(40), updatedAt: iso(40), updatedBy: '示範' },
+  ];
+}
+
+export function demoVisitRequests(): Record<string, any>[] {
+  return [
+    { id: 'vrq-01', refCode: 'TR-DEMO-0001', districtCode: 'DEMO', createdAt: iso(2), type: 'invite', troop: '206', section: 'scout', activityName: '周年檢閱暨宣誓典禮（示範）', preferredDate: dateOnly(-14), preferredTime: '14:00', location: '太古城', purpose: '誠邀童軍支部區幹部出席主禮及檢閱', attendeeCount: 60, wantReply: true, contactName: '陳小明', contactType: 'phone', contact: '9234 5678', status: 'new', assignedTo: '', districtNote: '', updatedBy: '', updatedAt: '' },
+    { id: 'vrq-02', refCode: 'TR-DEMO-0002', districtCode: 'DEMO', createdAt: iso(6), type: 'visit', troop: '82', section: 'gh', activityName: '', preferredDate: '', preferredTime: '', location: '', purpose: '新團長剛上任，想請區幹部到訪交流集會編排', attendeeCount: '', wantReply: false, contactName: '', contactType: '', contact: '', status: 'accepted', assignedTo: '黃志強', districtNote: '已聯絡旅長安排日期', updatedBy: '黃志強', updatedAt: iso(5) },
+  ];
+}
+
 export function freshDemoDb(): DemoDb {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     config: {
       districtName: '筲箕灣區（示範）',
       theme: '',
@@ -570,6 +602,8 @@ export function freshDemoDb(): DemoDb {
       { id: 'vs-03', districtCode: 'DEMO', troop: '17', section: 'scout', visitDate: dateOnly(12), year: new Date().getFullYear(), kind: 'inspection', visitorName: '陳大文', visitorEmail: 'demo-dc@demo', note: '周年檢閱籌備', followUp: '', leaderMet: '旅長及支部領袖', method: '面談', officerCount: 3, support: '增長人數', createdAt: iso(12) },
       { id: 'vs-04', districtCode: 'DEMO', troop: '242', section: 'cub', visitDate: dateOnly(5), year: new Date().getFullYear(), kind: 'section', visitorName: '黃志強', visitorEmail: 'demo-adc@demo', note: '需要協助招募領袖', followUp: '跟進招募', leaderMet: '副團長', method: '面談', officerCount: 1, support: '旅團訓練需要', createdAt: iso(5) },
     ],
+    troopContacts: demoTroopContacts(),
+    visitRequests: demoVisitRequests(),
     contactNames: { '地域秘書|2882 7001|0': '（示範）馮詠珊' },
     venues: JSON.parse(JSON.stringify(DEMO_VENUES)),
     venueBookings: demoVenueBookings(),

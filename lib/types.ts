@@ -1,6 +1,6 @@
 // 與 Google Sheet 對應的型別
 
-export type CardType = 'builtin' | 'jump' | 'resource';
+export type CardType = 'builtin' | 'jump' | 'resource' | 'subperm';
 export type AccessLevel = 'edit' | 'view' | '';
 
 export interface CardDef {
@@ -16,6 +16,8 @@ export interface CardDef {
   embed?: boolean;
   source?: string; // core / plugin
   category?: string; // done=已實作 / todo=加入中
+  subPerm?: boolean; // v4.32.0 子分頁權限偽卡（只供卡片門禁查 access，主控台不渲染）
+  parentId?: string; // 子權限所屬入口卡（例如 troop）
 }
 
 export interface RoleDef {
@@ -25,10 +27,18 @@ export interface RoleDef {
   level?: number;      // 層級：0 超管 / 1 DC / 2 DDC / 3 ADC / 4 STAFF / 5 其他
 }
 
+export interface SubPermDef {
+  id: string;
+  parentId: string;
+  title: string;
+  icon: string;
+}
+
 export interface PermsBundle {
   cards: CardDef[];
   roles: RoleDef[];
   matrix: Record<string, Record<string, AccessLevel>>;
+  subPerms?: SubPermDef[]; // v4.32.0 卡內分頁權限行（Perms 表獨立行）
 }
 
 export interface UserSession {
@@ -776,6 +786,68 @@ export interface TroopDirectoryBoard {
   unitSectionsScopedSave?: boolean;
   canEdit: boolean;
   permissionsVersion: number;
+}
+
+export type TroopContactRole = 'gsl' | 'leader' | 'assistant' | 'other';
+
+export interface TroopContact {
+  id: string;
+  troop: string;
+  section: VisitSection | '';
+  unitCode: string;
+  contactRole: TroopContactRole;
+  name: string;
+  phone: string;
+  email: string;
+  note?: string;
+  active: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface TroopContactsBoard {
+  contacts: TroopContact[];
+  canEdit: boolean;
+  scopeSection: VisitSection | ''; // 支部 ADC 的支部範圍；'' = 不限支部
+  permissionsVersion: number;
+  units: ScoutUnit[];
+}
+
+export type VisitRequestType = 'visit' | 'invite';
+export type VisitRequestStatus = 'new' | 'accepted' | 'declined' | 'done' | 'cancelled';
+
+export interface VisitRequest {
+  id: string;
+  refCode: string;
+  districtCode?: string;
+  createdAt: string;
+  type: VisitRequestType;
+  troop: string;
+  section: VisitSection | '';
+  activityName: string;
+  preferredDate: string;
+  preferredTime: string;
+  location: string;
+  purpose: string;
+  attendeeCount: number | '';
+  wantReply: boolean;
+  contactName: string;
+  contactType: 'phone' | 'email' | 'ig' | 'fb' | '';
+  contact: string;
+  status: VisitRequestStatus;
+  assignedTo: string;
+  districtNote: string;
+  updatedBy?: string;
+  updatedAt?: string;
+}
+
+export interface VisitRequestsBoard {
+  requests: VisitRequest[];
+  canEdit: boolean;
+  scopeSection: VisitSection | '';
+  permissionsVersion: number;
+  units: ScoutUnit[];
 }
 
 export interface VisitBoard {

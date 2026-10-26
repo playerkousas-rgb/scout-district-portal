@@ -683,24 +683,37 @@ check('舊 UnitSections 自訂欄位及既有集會資料升級保留，重跑�
   } finally { sheets.UnitSections = previous; }
 });
 
-check('升級追加獨立旅團資料卡及固定權限，原 Cards／Perms 儲存格不變', () => {
-  assert.strictEqual(sheets.Cards._data.filter(r => r[0] === 'troopDirectory').length, 1);
-  assert.strictEqual(sheets.Perms._data.filter(r => r[0] === 'troopDirectory').length, 1);
-  const card = ctx.getCards_(ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12)).data.find(c => c.cardId === 'troopDirectory');
-  assert.ok(card);
-  assert.strictEqual(card.url, '/troop-directory');
-  assert.strictEqual(card.access, 'edit');
+check('升級合併旅團卡：Cards 只餘 troop 一行，Perms 保留四行子權限（原 visit／troopDirectory 設定不被刪除）', () => {
+  assert.strictEqual(sheets.Cards._data.filter(r => r[0] === 'troop').length, 1);
+  assert.strictEqual(sheets.Cards._data.filter(r => r[0] === 'visit').length, 0);
+  assert.strictEqual(sheets.Cards._data.filter(r => r[0] === 'troopDirectory').length, 0);
+  ['visit', 'troopDirectory', 'troopContacts', 'troopRequests'].forEach(id => {
+    assert.strictEqual(sheets.Perms._data.filter(r => r[0] === id).length, 1, id + ' Perms 行');
+  });
+  assert.strictEqual(sheets.Perms._data.filter(r => r[0] === 'troop').length, 0, '入口卡冇 Perms 行');
+  const cards = ctx.getCards_(ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12)).data;
+  const entry = cards.find(c => c.cardId === 'troop');
+  assert.ok(entry);
+  assert.strictEqual(entry.url, '/troop');
+  assert.strictEqual(entry.access, 'edit');
+  const sub = cards.find(c => c.cardId === 'troopDirectory');
+  assert.ok(sub);
+  assert.strictEqual(sub.subPerm, true);
+  assert.strictEqual(sub.parentId, 'troop');
+  assert.strictEqual(sub.access, 'edit');
+  assert.strictEqual(cards.find(c => c.cardId === 'visit').access, 'view');
   assert.strictEqual(ctx.requireCardEdit_(ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12), 'visit').error != null, true);
   assert.strictEqual(ctx.requireCardEdit_(ctx.makeToken_('staff@x.org', 'STAFF', 12), 'troopDirectory').error != null, true);
 });
 
 check('現行發布快照與開發源一致，原 v4.29.0 凍結快照保留', () => {
-  const current = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.31.0.gs'), 'utf8');
+  const current = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.32.0.gs'), 'utf8');
   assert.strictEqual(current, code);
+  assert.ok(fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.31.0.gs'), 'utf8').includes("version: '4.31.0'"));
   assert.ok(fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.30.0.gs'), 'utf8').includes("version: '4.30.0'"));
   const frozen = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.29.0.gs'), 'utf8');
   assert.ok(frozen.includes("version: '4.29.0'"));
-  assert.ok(code.includes("version: '4.31.0'"));
+  assert.ok(code.includes("version: '4.32.0'"));
 });
 
 check('前端可下載的完整 Code.gs 與後台原始檔完全一致', () => {
