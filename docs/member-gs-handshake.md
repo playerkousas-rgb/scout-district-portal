@@ -410,3 +410,9 @@ member-portal 借場表提交
 - v4.13.0（工作簿格式＋通告內文 pull）係管理系統＋訓練班 Script 單邊改動，member-portal **唔使改**。
 - v4.14.0（新制直入＋網頁列印）同樣係管理系統＋訓練班 Script 單邊改動，member-portal **唔使改**（收表照舊經每班 /exec；試驗期收表唔變）。
 - ✅ 2026-09-09 已核對 live 站全站（`/`／`/training`／`/venue`／`/stock`／`/activity`／`/contact`）：內置報名表完整（入數紙必填；註明「按課程通告提供嘅付款資料」繳費——即係我哋通告 PDF 印嘅 FPS 資料）；首頁通告入口指去圖書館，同 PDF-only 設計一致；其餘四頁唔掂訓練班，零影響。
+
+## 🏕 區內旅團公開名錄（管理端及 GS v4.28.0）
+
+管理系統 `Units` 表已擴充可選的 `meetingTime`、`instagramUrl`、`facebookUrl`、`websiteUrl` 及 `publicVisible` 欄位；主辦機構沿用 `org`。管理員於 `/visit` →「⚙️ 旅團名單」編輯，空白欄位在成員端不顯示；`active=FALSE` 或 `publicVisible=FALSE` 不公開，後者獨立於旅團啟用狀態。公開 GET action `listDistrictTroops` 回傳 `{ districtCode, districtName, troops:[{ troop, label, organizer, meetingTime, instagramUrl, facebookUrl, websiteUrl }] }`，不回傳探訪支部團數或內部備註。
+
+member-portal 需將 `listDistrictTroops` 加入自己的 server-side proxy GET action allowlist 及欄位白名單，新增「區內旅團」卡片／頁面與詳情彈窗。完整 API 合約及前端未完成項目見 [`member-portal-troop-directory.md`](member-portal-troop-directory.md)。

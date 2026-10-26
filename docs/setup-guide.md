@@ -103,7 +103,7 @@ master GS 檔（已附標準 Script，只有區會存）
 ---
 
 ## 四、安全注意
-- 逐區確認 Apps Script **Script Properties** 有 `PORTAL_TOKEN_SECRET` 及 `PORTAL_MASTER_PROXY_SECRET`；v4.27.0 `setupSheets()` 缺少有效值時會自動建立。若啟用 sheep 維護登入，Vercel 設 `PORTAL_{區碼}_MASTER_PASSWORD`（筲箕灣：`PORTAL_SKW_MASTER_PASSWORD`，長度由區方選擇）及 `PORTAL_{區碼}_MASTER_BRIDGE_SECRET`（同區 Apps Script 選單顯示的橋接值）。密碼只在 Vercel；短密碼較易被猜中且目前沒有跨 Vercel instance 的分散式限速，建議用長 passphrase；更新 Vercel env 後需重新部署；已簽發的 sheep session 最多仍有效 12 小時。`setupSheets()` 會移除舊 Script Property `PORTAL_MASTER_PASSWORD`。更新 token 簽署密鑰後舊登入及重設連結失效。詳見 [`YMIS 人工登入卡部署指引`](ymis-verification-feasibility.md)。
+- 逐區確認 Apps Script **Script Properties** 有 `PORTAL_TOKEN_SECRET` 及 `PORTAL_MASTER_PROXY_SECRET`；v4.28.0 `setupSheets()` 缺少有效值時會自動建立。若啟用 sheep 維護登入，Vercel 設 `PORTAL_{區碼}_MASTER_PASSWORD`（筲箕灣：`PORTAL_SKW_MASTER_PASSWORD`，長度由區方選擇）及 `PORTAL_{區碼}_MASTER_BRIDGE_SECRET`（同區 Apps Script 選單顯示的橋接值）。密碼只在 Vercel；短密碼較易被猜中且目前沒有跨 Vercel instance 的分散式限速，建議用長 passphrase；更新 Vercel env 後需重新部署；已簽發的 sheep session 最多仍有效 12 小時。`setupSheets()` 會移除舊 Script Property `PORTAL_MASTER_PASSWORD`。更新 token 簽署密鑰後舊登入及重設連結失效。詳見 [`YMIS 人工登入卡部署指引`](ymis-verification-feasibility.md)。
 - API Key：每區自動隨機生成，存 Vercel env，唔出現喺前端。
 - 受保護工作表：Config / Users / Staff / CourseLinks（含每班 key）。
 

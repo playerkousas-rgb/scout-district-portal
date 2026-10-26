@@ -345,9 +345,47 @@ check('舊 Visits 表（未升級）跑 ensureSheetColumns_ 自動補四欄，�
   sheets.Visits = makeSheet('Visits', [VISIT_HEAD]);   // 還原，等其他測試環境乾淨
 });
 
-check('健康檢查版本 4.26.1', () => {
+check('舊 Units 表只追加旅團公開資料欄位，原欄位順序不變', () => {
+  sheets.Units = makeSheet('Units', [UNIT_HEAD]);
+  assert.strictEqual(ctx.getVisitBoard_(dcToken).data.publicTroopFieldsReady, false);
+  const bp = ctx.blueprint_().find(b => b.name === 'Units');
+  const added = [...ctx.ensureSheetColumns_(bp)];
+  assert.deepStrictEqual(added, ['meetingTime', 'instagramUrl', 'facebookUrl', 'websiteUrl', 'publicVisible']);
+  assert.deepStrictEqual(sheets.Units._data[0].slice(0, UNIT_HEAD.length), UNIT_HEAD);
+  assert.strictEqual(ctx.getVisitBoard_(dcToken).data.publicTroopFieldsReady, true);
+});
+
+check('成員公開名錄只回傳啟用及公開旅團的公開欄位，並保留空值供前端隱藏', () => {
+  const blankList = JSON.parse(ctx.doGet({ parameter: { action: 'listDistrictTroops', apiKey: testApiKey } }));
+  assert.strictEqual(blankList.ok, true);
+  assert.strictEqual(blankList.data.troops.length, 28);
+  assert.strictEqual(blankList.data.troops[0].instagramUrl, '');
+  assert.strictEqual(blankList.data.troops[0].meetingTime, '');
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(blankList.data.troops[0], 'sections'), false);
+
+  const saved = ctx.saveUnits_(dcToken, [
+    { troop: '17', label: '港島第17旅', org: '慈幼中學', meetingTime: '星期六 19:30', instagramUrl: 'https://www.instagram.com/troop17/', facebookUrl: '', websiteUrl: 'https://example.org/troop17', sections: { gh: '', cub: '1', scout: '1', venture: '', rover: '' }, active: true, note: 'private admin note' },
+    { troop: '50', label: '港島第50旅', org: '聖馬可中學', meetingTime: '', instagramUrl: '', facebookUrl: '', websiteUrl: '', sections: { gh: '', cub: '', scout: '1', venture: '1', rover: '1' }, active: false },
+    { troop: '51', label: '港島第51旅', org: '測試主辦機構', sections: {}, active: true, publicVisible: false },
+  ]);
+  assert.strictEqual(saved.ok, true);
+  const publicList = JSON.parse(ctx.doGet({ parameter: { action: 'listDistrictTroops', apiKey: testApiKey } }));
+  assert.strictEqual(publicList.data.troops.length, 1, 'inactive and hidden troops must be excluded from public listing');
+  assert.strictEqual(publicList.data.troops[0].organizer, '慈幼中學');
+  assert.strictEqual(publicList.data.troops[0].meetingTime, '星期六 19:30');
+  assert.strictEqual(publicList.data.troops[0].instagramUrl, 'https://www.instagram.com/troop17/');
+  assert.strictEqual(publicList.data.troops[0].facebookUrl, '');
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(publicList.data.troops[0], 'note'), false, 'admin-only note must not be exposed');
+
+  const invalid = ctx.saveUnits_(dcToken, [
+    { troop: '17', label: '港島第17旅', sections: {}, active: true, instagramUrl: 'javascript:alert(1)' },
+  ]);
+  assert.strictEqual(invalid.ok, false, 'non-http(s) URLs must be rejected');
+});
+
+check('健康檢查版本 4.28.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.27.0');
+  assert.strictEqual(parsed.data.version, '4.28.0');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);
