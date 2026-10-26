@@ -61,6 +61,14 @@ function loadDb(): DemoDb {
           db.schemaVersion = 4;
           persistDb();
         }
+        if ((db.schemaVersion || 0) < 5) {
+          const card = DEMO_CARDS.find(c => c.cardId === 'troopDirectory');
+          if (card && !db.cards.some(c => c.cardId === card.cardId)) db.cards.push({ ...card });
+          db.matrix.troopDirectory = { ...demoDefaultMatrix().troopDirectory };
+          db.matrix.visit = { ...demoDefaultMatrix().visit };
+          db.schemaVersion = 5;
+          persistDb();
+        }
         return db;
       }
     }
@@ -129,6 +137,13 @@ function sessionPayload(u: DemoUser): AnyObj {
   };
 }
 
+function canEditVisits(u: DemoUser): boolean {
+  return !!u.mockAdmin || u.role === 'SYSADMIN' || u.role === 'DC' || /^DDC(_|$)/.test(u.role);
+}
+function canEditDirectory(u: DemoUser): boolean {
+  return canEditVisits(u) || /^ADC(_|$)/.test(u.role);
+}
+
 function visibleCards(u: DemoUser): AnyObj[] {
   const d = loadDb();
   // 🎭 示範版權限全開：全部卡片（連隱藏咗嘅都照列，enabled=false 做標示）、一律 edit。
@@ -142,11 +157,14 @@ function visibleCards(u: DemoUser): AnyObj[] {
   return d.cards
     .filter(c => c.enabled || u.isSuper)
     .filter(c => {
+      if (c.cardId === 'visit' || c.cardId === 'troopDirectory') return true;
       const access = (d.matrix[c.cardId] || {})[u.role] || '';
       return access !== '' || u.isSuper || u.level <= 1;
     })
     .map((c): AnyObj => {
       const access = (d.matrix[c.cardId] || {})[u.role] || '';
+      if (c.cardId === 'visit') return { ...c, access: canEditVisits(u) ? 'edit' : 'view' };
+      if (c.cardId === 'troopDirectory') return { ...c, access: canEditDirectory(u) ? 'edit' : 'view' };
       return { ...c, access: u.level <= 1 ? (access || 'view') : access };
     })
     .sort((a, b) => a.order - b.order);
@@ -510,6 +528,11 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
     case 'saveAwardDeadlines': return awardsNotInDemo();
 
     // ── 旅團探訪 ──
+    case 'getTroopDirectoryBoard': {
+      if (!u) return fail('未登入或登入已過期（示範版）。');
+      return ok({ units: d.units, unitSections: d.unitSections || [], publicTroopFieldsReady: true,
+        unitSectionsReady: true, unitSectionsScopedSave: true, canEdit: canEditDirectory(u), permissionsVersion: 1 });
+    }
     case 'getVisitBoard': {
       if (!u) return fail('未登入或登入已過期（示範版）。');
       const from = String(payload.from || '') || today();
@@ -517,6 +540,7 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const y = new Date().getFullYear();
       return ok({
         from, to, today: today(),
+        permissions: { version: 1, canRegister: true, canEditRecords: canEditVisits(u) },
         districtName: '筲箕灣區',
         units: d.units,
         unitSectionsReady: true,
@@ -540,43 +564,39 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const troop = String(v.troop || '');
       const visitDate = String(v.visitDate || today());
       if (!troop) return fail('旅團必填');
-      // 一日一個旅一次（v4.8.1）
-      const dup = d.visits.find(x => x.troop === troop && x.visitDate === visitDate);
-      let id: string;
-      if (dup) {
-        if (dup.visitorEmail && dup.visitorEmail !== u.email) {
-          // 另一位幹部同日探同一旅：照實際系統留兩筆（各自名下）
-          id = genId('vs');
-          d.visits.push(newVisit(id, v, u, visitDate));
-        } else {
-          ['note', 'section', 'followUp', 'leaderMet', 'method', 'support'].forEach(k => {
-            if (v[k] !== undefined) dup[k] = v[k];
-          });
-          if (v.officerCount !== undefined) {
-            const oc = Number(v.officerCount);
-            dup.officerCount = oc > 0 ? Math.floor(oc) : 1;
-          }
-          dup.updatedAt = nowIso();
-          id = dup.id;
-        }
-      } else {
-        id = genId('vs');
-        d.visits.push(newVisit(id, v, u, visitDate));
-      }
+      const existing = v.id ? d.visits.find(x => x.id === v.id) : undefined;
+      if (v.id && !canEditVisits(u)) return fail('只有 DDC 或以上可以修改探訪紀錄');
+      if (v.id && !existing) return fail('找不到該探訪記錄');
+      const email = existing?.visitorEmail || u.email;
+      const dup = d.visits.find(x => x.id !== v.id && x.troop === troop && x.visitDate === visitDate && x.visitorEmail === email);
+      if (dup) return fail('同一幹部同日已登記此旅');
+      const id = existing?.id || genId('vs');
+      if (existing) {
+        ['troop', 'visitDate', 'note', 'section', 'followUp', 'leaderMet', 'method', 'support', 'visitorName'].forEach(k => {
+          if (v[k] !== undefined) existing[k] = v[k];
+        });
+        if (v.officerCount !== undefined) existing.officerCount = Number(v.officerCount) > 0 ? Math.floor(Number(v.officerCount)) : 1;
+        existing.year = Number(visitDate.slice(0, 4));
+        existing.quarter = Math.floor((Number(visitDate.slice(5, 7)) - 1) / 3) + 1;
+        existing.updatedAt = nowIso();
+      } else d.visits.push(newVisit(id, v, u, visitDate));
       persistDb();
       return ok({ saved: true, id, troop, visitDate });
     }
     case 'deleteVisit': {
+      if (u && !canEditVisits(u)) return fail('只有 DDC 或以上可以刪除探訪紀錄');
       if (!u) return fail('未登入或登入已過期（示範版）。');
       d.visits = d.visits.filter(x => x.id !== payload.id);
       persistDb(); return ok({ deleted: true, id: payload.id });
     }
     case 'saveUnits': {
+      if (u && !canEditDirectory(u)) return fail('只有 ADC 或以上可以修改旅團資料');
       if (!u) return fail('未登入或登入已過期（示範版）。');
       d.units = ((payload.units || []) as AnyObj[]).map(x => ({ ...x }));
       persistDb(); return ok({ saved: true, count: d.units.length });
     }
     case 'saveUnitSections': {
+      if (u && !canEditDirectory(u)) return fail('只有 ADC 或以上可以修改旅團資料');
       if (!u) return fail('未登入或登入已過期（示範版）。');
       const incoming = ((payload.rows || payload.unitSections || []) as AnyObj[]).map(x => ({ ...x }));
       if (payload.troop !== undefined && incoming.some(x => x.troop !== payload.troop)) return fail('只可儲存所選旅的團資料');

@@ -3,7 +3,7 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
-> **本分支 v4.30.0：恢復既有 YMIS 帳密內頁入口（不是重新設計頁面），補齊個人卡片排序及按旅、按支部編輯資料。** YMIS 仍從 Script Properties 讀取 `YMIS_VERIFY_USERNAME`／`YMIS_VERIFY_PASSWORD`；SYSADMIN（含已簽署的維護超管）亦可使用。第82旅五個支部可各自設定時間、地點和社交平台；新介面使用按旅儲存，舊 GS 未支援時會禁止編輯以免覆寫其他旅。**尚未合併／部署正式環境，亦未使用真實帳密或 Sheet 驗證。** 升級前先備份並閱讀 [GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)。
+> **本分支 v4.31.0：旅團資料／探訪獨立權限、隱藏未開設支部。** 「旅團資料」獨立卡片及頁面，區幹部均可看、ADC 或以上可改；「旅團探訪」所有登入者可看及新增，只有 DDC／DC／SYSADMIN 可修改或刪除任何已存紀錄（包括自己的）。GS 即時核對帳戶及角色，不依賴舊 Perms 的 edit 格。1745 只有童軍支部就只顯示一個標籤；關閉支部的舊資料保留。既有 YMIS 帳密內頁、個人排序及按旅安全儲存不變。**尚未合併／部署正式環境，亦未在真實 Apps Script／Sheet 驗證。** 升級前先備份並閱讀 [GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)。
 >
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
@@ -150,7 +150,7 @@
 - **支部分開計**：探咗 17 旅童軍團，唔會當幼童軍團都探咗；冇填支部嘅記錄當「全旅」，邊個支部都計入。
 - 內建旅團名單跟港島地域官網「筲箕灣區旅團一覽表」（覆檢日期 2026-03-31），`101` 旅嗰啲 `1+A1+S1`（空童軍團／海童軍團）寫法照樣保留。
 - v4.29.1 對齊成員系統 v1.3 旅→團名錄：`listDistrictTroops` 回傳 `sectionCounts` 及 `units`；管理端由「旅團資料」卡 → `/visit?tab=units` 維護旅層及各團集會時間、地點、IG／FB／網站。`saveUnitSections` 需 visit 卡 edit 權限，成員端只讀。合約及同步來源見 [`docs/member-portal-troop-directory.md`](docs/member-portal-troop-directory.md)。
-- 後台 4.8.1：新增 `Units`（旅團名單）同 `Visits`（探訪記錄）兩張表 + `getVisitBoard`／`saveVisit`／`deleteVisit`／`saveUnits`；權限用卡片 `visit` = ✏️。
+- 後台 4.8.1：新增 `Units`（旅團名單）同 `Visits`（探訪記錄）兩張表 + `getVisitBoard`／`saveVisit`／`deleteVisit`／`saveUnits`；v4.31.0 起探訪人人可新增、DDC+ 可改／刪；旅團資料改用獨立 `troopDirectory` 卡（ADC+ 可改）。
 - **總會格式匯報（v4.10.0）**：`Visits` 表加四欄 `leaderMet`／`method`／`officerCount`／`support`；`getVisitBoard` 回傳 `districtName`（Config `districtName`）做匯報表頭。一筆記錄 = 匯報一行（同旅同日可以有幾行，例如電話一筆 Email 一筆，跟總會樣本）；日期出 `18.1.2026`、冇跟進出 `NA`、冇填人數當 1；排序旅號細到大、同旅舊到新。**舊部署升級：貼新 `Code.gs` → 跑一次 `setupSheets()` 就會自動補四欄，舊資料全部保留**；生成 Excel 嘅 xlsx 產生器係零依賴（`lib/xlsx.ts`＋`lib/hqReport.ts`）。
 - **一日一個旅一次（v4.8.1）**：同一日、同一個旅、同一位幹部只會有一筆記錄 —— 轉支部撳都當同一次（「今日去咗 206 旅」就係一次）。前端方塊會鎖住，後台 `saveVisit` 都會擋（雙重保險）。第二位幹部同日探同一個旅 = 佢有佢名下嗰筆（會先確認）。第二日、下個月再探同一個旅照樣得。
 - **防呆**：揀咗未儲存唔會寫後端；離開頁面會提示；儲存前有確認清單；寫失敗嗰啲會留返喺揀選度可以再試。

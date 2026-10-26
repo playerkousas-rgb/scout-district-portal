@@ -114,3 +114,30 @@ v4.29.0 將名錄由「每旅一張卡」升級為對齊[港島總會筲箕灣�
 「旅團資料」最上方改為先選旅，再顯示各支部獨立編輯卡；第82旅會預列五個支部，各自填寫集會時間、地點、IG／FB／網站，已有資料及公開開關保留，不自動複製旅層資料。新增數字團代號 1／2 以分開維護同支部多個常規團，空團 A1、海團 S1 及舊空代號仍相容。
 
 新管理端提交 `{ token, troop, rows }`：GS 驗證所有列屬於所選旅後，只替換該旅的列，不動其他旅、自訂欄及表頭；使用 ScriptLock 避免按旅儲存互相交錯。沒有 `troop` 的舊客戶端保留全表儲存語義。公開 `listDistrictTroops` 格式不變。`getVisitBoard` 新增 `unitSectionsScopedSave: true`；新編輯器要求此能力才開放儲存，避免配舊 GS 時覆寫其他旅。切換旅前若有未存修改會提示，選旅記在頁面 query 以便儲存後保留。
+
+
+## v4.31.0 獨立權限／已開設支部
+
+管理端卡片 `troopDirectory` → `/troop-directory`，獨立接口 `getTroopDirectoryBoard` 不帶 Visits。名錄 ADC+ 可改；探訪人人可新增但 DDC+ 才可改／刪。舊 `/visit?tab=units` 導向新頁；不再從 visit 卡複製一張捷徑卡。既有個人排位 `troopDirectoryShortcut` 遷移到新 cardId。
+
+管理頁及探訪方塊標籤只列真正已開設支部（`activeSections`）；1745 只有童軍就是一個標籤，0／空白不佔位。編輯支部時只顯示已開設的支部卡與選項；已關閉支部歷史設定仍隨 scoped payload 保留，其他旅不受影響。ADC+ 要新增開設支部，先在「編輯旅團名單／已開設支部及公開資料」更新團數、儲存，再填支部資料。
+
+公開 `listDistrictTroops` 的 v1.3 合約不變；`sectionCounts` 省略 0／空白，`units` 不公開 Units 已關閉支部的維護列，不刪 Sheet 原始資料。**成員系統是另一個 repo**：其標籤元件也應按實際 `sectionCounts`／團清單迭代，不能硬編碼五個灰色標籤；本次僅部署本 repo 不會自動改另一 repo 的 UI。
+
+
+### 成員端標籤配套修補（未套用／部署）
+
+2026-10-26 重新經 GitHub 讀取最新 MAIN：仍為 `9dbe876ad4d4dc09eccfa68d3563def6b81cdf39`。已核對其 `app/troops/page.tsx`：`SECTION_META.map` 不論有無團都畫五個標籤，此處不能單靠 GS 回應隱藏。
+
+配套檔：[`patches/member-portal-v4.31.0-open-sections.patch`](patches/member-portal-v4.31.0-open-sections.patch)。成員端負責人在該 repo 套用前可執行 `git apply --check /path/to/member-portal-v4.31.0-open-sections.patch`，再 `git apply`。只更改標籤顯示：0／空白直接不渲染，1／2／A1／S1 等已開設支部保留；GS v1.3 payload 不變，API 權限不放寬。本 repo 已對最新來源 dry-run 通過及公開 sanitizer 合約驗證，沒有提交、合併或部署另一 repo。
+
+### v4.31.0 本地驗證
+
+- `npm run build`：34 routes 通過（含新 `/troop-directory`）。
+- `node scripts/test-visit-gs.js`：30 項通過，包含所有 ADC／DDC、DC、SYSADMIN、職員／領袖角色、舊權限誤授權、停用／降職、自己的紀錄不可修改、冒認身份及公開支部過濾。
+- `node scripts/test-upgrade-gs.js`：33 項通過；原 Cards／Perms／UnitSections／自訂欄保留、重跑不重複；新獨立卡與發布檔一致。
+- `node scripts/test-unit-sections-gs.js`：14 項通過；示範引擎 28 項、探訪純邏輯 25 項、卡片門禁／主控台／個人排序測試通過。
+- `node scripts/test-troop-ui.js /path/to/latest-member-portal`：實際管理端 TSX 渲染驗證 view 可新增但不能改／刪、DDC 可改／刪、1745 單標籤／單支部卡；另在臨時目錄套用成員端 patch，實際渲染由 5 標籤變為 1。不是瀏覽器操作驗證。
+- `node scripts/check-member-alignment.js /path/to/latest-member-portal`：最新 MAIN 的 action／proxy／公開 sanitizer 合約通過。
+- 14 組 GS suites 中 13 組通過；仍只有原有 `test-district-hq-gs.js:62` 的月曆配置基線失敗，未改動該功能或掩蓋測試。
+- 原 v4.30.0 快照及 YMIS 舊頁保持不變；沒有合併 MAIN、部署 GS、改動正式 Sheet 或提交成員端 repo。

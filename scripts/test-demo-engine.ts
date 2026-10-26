@@ -32,11 +32,11 @@ check('login：任何電郵密碼都入到同一個 ADC 示範身份（權限全
 });
 
 // ── 2. 卡片 ──
-check('getCards：權限全開 — 16 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
+check('getCards：權限全開 — 17 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
   const r = demoCall('getCards', { token: T.adc }, 'GET');
   assert.ok(r.ok);
   const ids = r.data.map((c: any) => c.cardId);
-  assert.strictEqual(ids.length, 16);
+  assert.strictEqual(ids.length, 17);
   assert.ok(ids.indexOf('circulars') >= 0, '區通告卡要喺示範版出現');
   assert.ok(ids.indexOf('debitNote') >= 0, 'DEBIT NOTE 要喺示範版提供虛構預覽');
   assert.ok(r.data.every((c: any) => c.access === 'edit'));
@@ -49,6 +49,10 @@ check('getCards：權限全開 — 16 張卡全部 edit；冇 news；連成人�
 
 check('示範權限矩陣：rooms 全員可看，審批卡唔畀 ADC；mockAdmin 仍可示範所有功能', () => {
   const matrix = demoDefaultMatrix();
+  assert.strictEqual(matrix.visit.ADC_SCOUT, 'view');
+  assert.strictEqual(matrix.visit.DDC_ADMIN, 'edit');
+  assert.strictEqual(matrix.troopDirectory.ADC_SCOUT, 'edit');
+  assert.strictEqual(matrix.troopDirectory.STAFF, 'view');
   assert.strictEqual(matrix.rooms.ADC_SCOUT, 'view');
   assert.strictEqual(matrix.rooms.STAFF, 'view');
   assert.strictEqual(matrix.venueReg.ADC_SCOUT, '');
@@ -134,12 +138,19 @@ check('saveVisit：一日一個旅一次（同人）→ 唔會重複；第二位
   assert.ok(r1.ok);
   const after1 = demoCall('getVisitBoard', { token: T.adc }, 'GET').data.visits.length;
   assert.strictEqual(after1, before + 1);
-  demoCall('saveVisit', { token: T.adc, visit: { ...v, note: '再探' } }, 'POST');
+  const again = demoCall('saveVisit', { token: T.adc, visit: { ...v, note: '再探' } }, 'POST');
+  assert.strictEqual(again.ok, false, '不帶 id 的新增不得暗中更新既有紀錄');
+  const edited = demoCall('saveVisit', { token: T.adc, visit: { ...v, id: r1.data.id, note: '明確修改' } }, 'POST');
+  assert.strictEqual(edited.ok, true, '示範 mockAdmin 可明確帶 id 修改');
   const after2 = demoCall('getVisitBoard', { token: T.adc }, 'GET').data.visits.length;
   assert.strictEqual(after2, after1, '同一日同一旅再儲 → 合併，唔加筆');
   // 第二位幹部：另一個示範 token（照樣 map 做 ADC 身份，但 visitorEmail 同）→ 模擬唔到；
   // 引擎用 session 身份判斷，示範版一律同一人 → 合併（語義：同一示範用戶）
   demoCall('saveVisit', { token: 'demo-adc2', visit: v }, 'POST');
+  const directory = demoCall('getTroopDirectoryBoard', { token: T.adc }, 'GET');
+  assert.strictEqual(directory.data.permissionsVersion, 1);
+  assert.ok(directory.data.canEdit && !('visits' in directory.data));
+  assert.deepStrictEqual(directory.data.units.find((x: any) => x.troop === '1745').sections, { gh: '', cub: '', scout: '1', venture: '', rover: '' });
   const after3 = demoCall('getVisitBoard', { token: T.adc }, 'GET').data.visits.length;
   assert.strictEqual(after3, after2, '示範版只有一個身份：同日同旅再儲照合併');
 });

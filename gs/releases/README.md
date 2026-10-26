@@ -12,9 +12,9 @@
 
 ## 出新版本流程
 
-1. 喺 `gs/Code.gs` 改邏輯，更新檔頭同 `getHealthCheck_` 嘅版本號（例如 `4.29.0` → `4.30.0`）。
+1. 喺 `gs/Code.gs` 改邏輯，更新檔頭同 `getHealthCheck_` 嘅版本號（例如 `4.30.0` → `4.31.0`）。
 2. 跑晒 `scripts/test-*-gs.js` 同 `npx tsc --noEmit`、`npm run build`。
-3. 複製快照：`cp gs/Code.gs gs/releases/Code-v4.30.0.gs`，並同步 `cp gs/Code.gs public/downloads/Code.gs.txt`。
+3. 複製快照：`cp gs/Code.gs gs/releases/Code-v4.31.0.gs`，並同步 `cp gs/Code.gs public/downloads/Code.gs.txt`。
 4. `scripts/test-upgrade-gs.js` 會強制檢查 `gs/Code.gs` 同 `public/downloads/Code.gs.txt` 一致，唔同步會 fail。
 5. 開 PR 合併後，區方下載對應快照（或 `/downloads/Code.gs.txt`）貼入 Apps Script → 執行 `setupSheets()` → 重新部署 Web App。
 
@@ -24,6 +24,7 @@
 
 ## 現有快照
 
+- `Code-v4.31.0.gs` — 旅團資料與探訪獨立權限，新增／修改分開門禁；隱藏未開設支部而保留歷史資料。
 - `Code-v4.30.0.gs` — 恢復 SYSADMIN 使用既有 YMIS 帳密功能；按旅儲存各支部資料及能力旗標，不覆寫其他旅。
 
 - `Code-v4.29.1.gs` — 現行下載版：全隱藏團不重生骨架、公開網址清洗、不完整列拒絕；全表清空要求前端確認。

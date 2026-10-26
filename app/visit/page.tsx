@@ -8,47 +8,51 @@
  *   ＋ 👥 幹部努力統計（邊個探咗幾多次／邊啲旅 — 內部用，唔會出現喺交總會嗰份）
  */
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
-import { isSuper } from '@/lib/levels';
 import type { ScoutUnit, Visit, VisitBoard, VisitKind, VisitSection } from '@/lib/types';
 import {
   SECTIONS, SECTION_LABEL, SECTION_EMOJI, KIND_LABEL, VISIT_KINDS,
   troopStats, coverage, visitorStats, sortUnits, rangePresets, quarterOf,
-  parseUnitPaste, toCsv, todayStr, hasVisitOn, visitsOn,
+  activeSections, toCsv, todayStr, hasVisitOn, visitsOn,
   HQ_METHODS, HQ_LEADERS, SECTION_HQ_LABEL, officialReport, hqPeriodLabel, troopTotal,
 } from '@/lib/visits';
 import { downloadHqXlsx } from '@/lib/hqReport';
 import BackLink, { BackBar } from '@/components/BackLink';
-import UnitSectionsEditor from '@/components/UnitSectionsEditor';
 
-type Tab = 'board' | 'report' | 'units';
+type Tab = 'board' | 'report';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'board', label: '🗺 探訪登記' },
   { id: 'report', label: '📊 探訪報告' },
-  { id: 'units', label: '⚙️ 旅團資料' },
 ];
 
 const SECTION_KEY = 'skw.visit.section';
 
 export default function VisitPage() {
-  const session = useRequireCard('visit');
+  const router = useRouter();
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get('tab');
-  const { district: districtInfo } = useDistrict();
+  const session = useRequireCard(requestedTab === 'units' ? 'troopDirectory' : 'visit');
+  const { district: districtInfo, withDistrict } = useDistrict();
   const [board, setBoard] = useState<VisitBoard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
-  const [canEdit, setCanEdit] = useState(false);
+  const canEdit = board?.permissions?.canEditRecords === true;
+  const canRegister = board?.permissions?.canRegister === true;
   const [needUpgrade, setNeedUpgrade] = useState(false);
   const [tab, setTab] = useState<Tab>('board');
 
   useEffect(() => {
-    setTab(requestedTab === 'units' || requestedTab === 'report' ? requestedTab : 'board');
-  }, [requestedTab]);
+    if (requestedTab === 'units') {
+      const query = new URLSearchParams(searchParams.toString());
+      query.delete('tab');
+      router.replace(withDistrict('/troop-directory' + (query.toString() ? '?' + query.toString() : '')));
+    }
+    setTab(requestedTab === 'report' ? 'report' : 'board');
+  }, [requestedTab, router, withDistrict, searchParams]);
 
   const thisYear = new Date().getFullYear();
   const [from, setFrom] = useState(`${thisYear}-01-01`);
@@ -56,17 +60,8 @@ export default function VisitPage() {
   const [section, setSection] = useState<VisitSection | ''>('');
   const [sectionReady, setSectionReady] = useState(false);
 
-  useEffect(() => {
-    if (!session) return;
-    if (isSuper(session)) { setCanEdit(true); return; }
-    (async () => {
-      const r = await api.getCards(session.token);
-      if (r.ok && r.data) setCanEdit(r.data.some(c => c.cardId === 'visit' && c.access === 'edit'));
-    })().catch(() => { /* ignore */ });
-  }, [session]);
-
   async function load(f = from, t = to) {
-    if (!session) return;
+    if (!session || requestedTab === 'units') return;
     setLoading(true); setError('');
     const r = await api.getVisitBoard(session.token, f, t);
     if (r.ok && r.data) {
@@ -104,6 +99,8 @@ export default function VisitPage() {
         撳一下旅團格仔就登記探訪 · 未探過嘅紅燈提你 · DC 揀日期範圍即出報告
       </p>
 
+      <p className="fps-help">所有已登入用戶可新增探訪；只有 DDC 或以上可修改／刪除已有紀錄，包括自己的紀錄。</p>
+      {board && !board.permissions && <div className="err">請先更新 GS v4.31.0 並重新部署，啟用新增／修改分開的權限。</div>}
       {error && !needUpgrade && <div className="err">{error}</div>}
       {msg && <div className="success">{msg}</div>}
 
@@ -126,12 +123,10 @@ export default function VisitPage() {
 
       {loading ? <div className="center"><div className="spinner" /></div> : board && (
         <>
-          {tab !== 'units' && (
-            <SectionPicker board={board} section={section} onPick={pickSection} />
-          )}
+          <SectionPicker board={board} section={section} onPick={pickSection} />
           {tab === 'board' && (
             <BoardTab
-              board={board} section={section} canEdit={canEdit} token={session.token}
+              board={board} section={section} canEdit={canEdit} canRegister={canRegister} token={session.token}
               reload={() => load()} flash={flash} setError={setError}
             />
           )}
@@ -143,12 +138,7 @@ export default function VisitPage() {
               canEdit={canEdit} token={session.token} reload={() => load()} flash={flash} setError={setError}
             />
           )}
-          {tab === 'units' && (
-            <UnitsTab
-              board={board} canEdit={canEdit} token={session.token}
-              reload={() => load()} flash={flash} setError={setError}
-            />
-          )}
+
         </>
       )}
 
@@ -183,8 +173,8 @@ function SectionPicker({ board, section, onPick }: {
 
 // ───────────────────────── 🗺 探訪登記（方塊磚：揀完先儲存） ─────────────────────────
 
-function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
-  board: VisitBoard; section: VisitSection | ''; canEdit: boolean; token: string;
+function BoardTab({ board, section, canEdit, canRegister, token, reload, flash, setError }: {
+  board: VisitBoard; section: VisitSection | ''; canEdit: boolean; canRegister: boolean; token: string;
   reload: () => Promise<void>; flash: (s: string) => void; setError: (s: string) => void;
 }) {
   const [editing, setEditing] = useState<Partial<Visit> | null>(null);
@@ -216,14 +206,14 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
   }, [picked.length]);
 
   function toggle(troop: string) {
-    if (!canEdit) return;
+    if (!canRegister) return;
     if (picked.includes(troop)) { setPicked(prev => prev.filter(t => t !== troop)); return; }
 
     const label = board.units.find(u => u.troop === troop)?.label || troop;
     // 一日一個旅一次：同一日已經登記過就唔畀再登記（要改就撳「✎ 詳細」／喺記錄度改）
     const mine = visitsOn(board.visits, troop, date, board.me.name);
     if (mine.length) {
-      setError(`${label} 喺 ${date} 你已經登記咗，同一日唔使登記兩次。（要改日期／加備註，撳方塊右下「✎ 詳細」）`);
+      setError(`${label} 喺 ${date} 你已經登記咗，同一日唔使登記兩次。（如需修改，請由 DDC 或以上處理）`);
       return;
     }
     // 第二位幹部同一日都去咗 → 佢有佢嗰筆，你有你嗰筆，但要確認一次
@@ -280,7 +270,7 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
         </label>
       </div>
 
-      {canEdit && (
+      {canRegister && (
         <div className="info-card vs-howto">
           <b>點登記</b>
           <p>
@@ -288,7 +278,7 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
             揀好之後撳下面「<b>💾 儲存登記</b>」先會寫入後台 —— 未撳儲存，咩都唔會入數。
             <b>一日一個旅淨係一次</b>：已經登記咗嗰日嘅方塊會鎖住（🔒），唔會不小心撳多次。
             日期預設今日，<b>儲存嗰日就係探訪日期</b>；聽日入返嚟就係新一日，方塊自動清零，同一個旅下個月再探再撳過就得。
-            <b>記低幾時探先係最緊要</b>；形式／人數自動填「面談、1 人」（最大機會），面見邊個／支援／跟進事後喺「最近登記」撳「編輯」先補都得。
+            <b>記低幾時探先係最緊要</b>；可用「詳細」在新增前填妥內容；儲存後只有 DDC 或以上可以修改／刪除（包括自己的紀錄）。
           </p>
         </div>
       )}
@@ -311,7 +301,7 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
               key={st.unit.troop}
               className={`vs-tile${st.visited ? ' done' : ''}${isPicked ? ' picked' : ''}${anyToday ? ' today' : ''}${mineToday ? ' locked' : ''}`}
               role="button" tabIndex={0}
-              title={!canEdit ? '你冇登記權限'
+              title={!canRegister ? '請先更新後台以啟用登記功能'
                 : mineToday ? `${date} 已經登記咗，同一日唔會登記兩次`
                 : '撳一下揀／取消，最後撳「儲存登記」'}
               onClick={() => toggle(st.unit.troop)}
@@ -330,7 +320,7 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
               <div className="vs-tile-org">{st.unit.org || '—'}</div>
               {todayWho && <div className="vs-tile-hint">呢日 {todayWho} 已探過</div>}
               <div className="vs-card-sections">
-                {SECTIONS.filter(k => String(st.unit.sections?.[k] || '').trim()).map(k => (
+                {activeSections(st.unit).map(k => (
                   <span key={k} className={`vs-chip${section === k ? ' on' : ''}`}>
                     {SECTION_EMOJI[k]} {SECTION_LABEL[k]} {st.unit.sections[k]}
                   </span>
@@ -342,7 +332,7 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
                     ? <>最近 {st.last}{st.visitors.length > 0 ? ` · ${st.visitors[0]}${st.visitors.length > 1 ? ' 等' : ''}` : ''}</>
                     : <span className="vs-none">今年未探過</span>}
                 </span>
-                {canEdit && (
+                {canRegister && (
                   <button
                     className="vs-detail"
                     title="補返以前嘅探訪，或者填面見邊個／支援／跟進（形式預設面談、1 人）"
@@ -362,7 +352,7 @@ function BoardTab({ board, section, canEdit, token, reload, flash, setError }: {
         })}
       </div>
 
-      {canEdit && (
+      {canRegister && (
         <div className={`vs-savebar${picked.length ? ' on' : ''}`}>
           <label className="aw-field vs-savebar-date">
             <span>探訪日期</span>
@@ -665,7 +655,7 @@ function VisitModal({ draft, board, token, onClose, onSaved, setError }: {
   const [d, setD] = useState<Partial<Visit>>({ ...draft });
   const [saving, setSaving] = useState(false);
   const unit = board.units.find(u => u.troop === d.troop);
-  const openSections = SECTIONS.filter(k => String(unit?.sections?.[k] || '').trim());
+  const openSections = unit ? activeSections(unit) : [];
 
   async function save() {
     if (!d.troop) { setError('請揀旅團'); return; }
@@ -674,7 +664,7 @@ function VisitModal({ draft, board, token, onClose, onSaved, setError }: {
     const who = d.visitorName || board.me.name;
     const dup = visitsOn(board.visits, d.troop, date, who).filter(v => v.id !== d.id);
     if (dup.length) {
-      setError(`${unit?.label || d.troop} 喺 ${date} 已經有一筆（${who}）—— 同一日唔使登記兩次，可以喺「最近登記」度改嗰筆。`);
+      setError(`${unit?.label || d.troop} 喺 ${date} 已經有一筆（${who}）—— 同一日唔使登記兩次，如需修改，請由 DDC 或以上處理。`);
       return;
     }
     setSaving(true);
@@ -707,7 +697,7 @@ function VisitModal({ draft, board, token, onClose, onSaved, setError }: {
           <label className="aw-field"><span>支部</span>
             <select value={d.section || ''} onChange={e => setD({ ...d, section: e.target.value as VisitSection | '' })}>
               <option value="">全旅／唔分支部</option>
-              {(openSections.length ? openSections : SECTIONS).map(k => (
+              {openSections.map(k => (
                 <option key={k} value={k}>{SECTION_LABEL[k]}</option>
               ))}
             </select>
@@ -719,7 +709,7 @@ function VisitModal({ draft, board, token, onClose, onSaved, setError }: {
           </label>
           <label className="aw-field"><span>探訪幹部</span>
             <input
-              value={d.visitorName || ''} placeholder={board.me.name}
+              value={d.visitorName || board.me.name} placeholder={board.me.name} readOnly={!board.permissions?.canEditRecords}
               onChange={e => setD({ ...d, visitorName: e.target.value })}
             />
           </label>
@@ -775,128 +765,3 @@ function VisitModal({ draft, board, token, onClose, onSaved, setError }: {
 }
 
 // ───────────────────────── ⚙️ 旅團名單 ─────────────────────────
-
-function UnitsTab({ board, canEdit, token, reload, flash, setError }: {
-  board: VisitBoard; canEdit: boolean; token: string;
-  reload: () => Promise<void>; flash: (s: string) => void; setError: (s: string) => void;
-}) {
-  const [rows, setRows] = useState<ScoutUnit[]>(() => sortUnits(board.units));
-  const [paste, setPaste] = useState('');
-  const [saving, setSaving] = useState(false);
-  const publicFieldsReady = board.publicTroopFieldsReady === true;
-
-  function setCell(i: number, patch: Partial<ScoutUnit>) {
-    setRows(prev => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
-  }
-  function setSec(i: number, key: VisitSection, value: string) {
-    setRows(prev => prev.map((r, idx) => idx === i ? { ...r, sections: { ...r.sections, [key]: value } } : r));
-  }
-  function addRow() {
-    setRows(prev => [...prev, {
-      troop: '', label: '', org: '', meetingTime: '', instagramUrl: '', facebookUrl: '', websiteUrl: '',
-      sections: { gh: '', cub: '', scout: '', venture: '', rover: '' }, active: true, publicVisible: true,
-    }]);
-  }
-  function doPaste() {
-    const parsed = parseUnitPaste(paste, rows);
-    if (!parsed.length) { setError('解析唔到（每行第一格要有旅號數字）'); return; }
-    setRows(sortUnits(parsed));
-    setPaste('');
-    flash(`已讀入 ${parsed.length} 個旅團，撳「儲存名單」先會寫入`);
-  }
-  async function save() {
-    const clean = rows.filter(r => String(r.troop).trim());
-    if (!clean.length) { setError('至少要有一個旅團'); return; }
-    setSaving(true);
-    const r = await api.saveUnits(token, clean);
-    setSaving(false);
-    if (r.ok) { flash(`已儲存 ${r.data?.count ?? clean.length} 個旅團`); await reload(); }
-    else setError(r.error || '儲存失敗');
-  }
-
-  return (
-    <>
-      <UnitSectionsEditor
-        board={board} canEdit={canEdit} token={token}
-        reload={reload} flash={flash} setError={setError}
-      />
-      {!publicFieldsReady && (
-        <div className="info-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <strong>公開資料欄位尚未啟用</strong>
-          <p className="fps-help">請區方先把 GS v4.28.0 更新至 Apps Script 並執行 setupSheets()；完成後這些欄位才可編輯及公開。</p>
-        </div>
-      )}
-      <div className="info-card">
-        <div className="section-head">
-          <div>
-            <h3>全區旅團名單及公開資料（{rows.length}）</h3>
-            <p>旅號、主辦機構及支部資料沿用現有名單；補上集會時間、Instagram、Facebook、旅團網頁後，成員系統「區內旅團」詳情會顯示已填欄位，空白欄位會隱藏。取消「公開顯示」可暫時從成員端名錄隱藏。</p>
-          </div>
-          {canEdit && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="mini-btn" onClick={addRow}>＋ 加一行</button>
-              <button className="btn-sm" disabled={saving} onClick={save}>{saving ? '儲存中…' : '💾 儲存名單'}</button>
-            </div>
-          )}
-        </div>
-
-        <div className="mtx-scroll">
-          <table className="perm-table vs-units">
-            <thead>
-              <tr>
-                <th>旅號</th><th>旅團名稱</th><th>主辦機構</th>
-                {SECTIONS.map(k => <th key={k}>{SECTION_LABEL[k]}</th>)}
-                <th>旅團啟用</th><th>成員名錄</th><th>集會時間</th><th>Instagram 網址</th><th>Facebook 網址</th><th>旅團網頁</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((u, i) => (
-                <tr key={i}>
-                  <td><input value={u.troop} disabled={!canEdit} onChange={e => setCell(i, { troop: e.target.value })} style={{ width: 62 }} /></td>
-                  <td><input value={u.label} disabled={!canEdit} onChange={e => setCell(i, { label: e.target.value })} style={{ width: 130 }} /></td>
-                  <td><input value={u.org || ''} disabled={!canEdit} onChange={e => setCell(i, { org: e.target.value })} style={{ width: 200 }} /></td>
-                  {SECTIONS.map(k => (
-                    <td key={k}>
-                      <input
-                        value={u.sections?.[k] || ''} disabled={!canEdit}
-                        onChange={e => setSec(i, k, e.target.value)}
-                        style={{ width: 54 }} placeholder="—"
-                      />
-                    </td>
-                  ))}
-                  <td style={{ textAlign: 'center' }}><input type="checkbox" checked={u.active !== false} disabled={!canEdit} onChange={e => setCell(i, { active: e.target.checked })} aria-label={`${u.label || u.troop} 旅團啟用`} /></td>
-                  <td style={{ textAlign: 'center' }}><input type="checkbox" checked={u.publicVisible !== false} disabled={!canEdit || !publicFieldsReady} onChange={e => setCell(i, { publicVisible: e.target.checked })} aria-label={`${u.label || u.troop} 在成員系統名錄顯示`} /></td>
-                  <td><input value={u.meetingTime || ''} disabled={!canEdit || !publicFieldsReady} maxLength={200} onChange={e => setCell(i, { meetingTime: e.target.value })} style={{ width: 180 }} placeholder="例如：星期六 19:30" /></td>
-                  <td><input type="url" value={u.instagramUrl || ''} disabled={!canEdit || !publicFieldsReady} onChange={e => setCell(i, { instagramUrl: e.target.value })} style={{ width: 210 }} placeholder="https://instagram.com/…" /></td>
-                  <td><input type="url" value={u.facebookUrl || ''} disabled={!canEdit || !publicFieldsReady} onChange={e => setCell(i, { facebookUrl: e.target.value })} style={{ width: 210 }} placeholder="https://facebook.com/…" /></td>
-                  <td><input type="url" value={u.websiteUrl || ''} disabled={!canEdit || !publicFieldsReady} onChange={e => setCell(i, { websiteUrl: e.target.value })} style={{ width: 210 }} placeholder="https://…" /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="fps-help" style={{ marginTop: 8 }}>
-          支部格入面填「團數」（例如 1、2、1+A1）；留空 = 冇開嗰個支部，探訪頁就唔會列出。「旅團啟用」沿用原有探訪統計狀態；「成員名錄」獨立控制公開顯示。社交平台／網頁請貼完整 http:// 或 https:// 網址；空白即隱藏。
-        </p>
-      </div>
-
-      {canEdit && (
-        <div className="info-card">
-          <div className="section-head">
-            <div>
-              <h3>由官網／Excel 貼上</h3>
-              <p>每行：旅號（可連旅名） · 主辦機構 · 小童軍 · 幼童軍 · 童軍 · 深資 · 樂行</p>
-            </div>
-            <button className="mini-btn" disabled={!paste.trim()} onClick={doPaste}>🔍 讀入</button>
-          </div>
-          <textarea
-            className="aw-paste" rows={5} value={paste} onChange={e => setPaste(e.target.value)}
-            placeholder={'港島第206旅\t太古城物業管理聯絡議會\t1\t1\t1\t1\t'}
-          />
-        </div>
-      )}
-
-
-    </>
-  );
-}

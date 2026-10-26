@@ -59,11 +59,17 @@ export function rangePresets(today = new Date()): { id: string; label: string; f
   ];
 }
 
+/** 只顯示真正已開設的支部，空值／0／無法辨識的團數不當作開設。 */
+export function activeSections(unit: Pick<ScoutUnit, 'sections'>): VisitSection[] {
+  return SECTIONS.filter(section => String(unit.sections?.[section] || '').toUpperCase()
+    .split(/[^A-Z0-9]+/).some(token => /^[AS]\d{1,2}$/.test(token) || (/^\d{1,2}$/.test(token) && Number(token) > 0)));
+}
+
 /** 有開嗰個支部嘅旅團（sections 該欄唔係空白） */
 export function unitsOfSection(units: ScoutUnit[], section: VisitSection | ''): ScoutUnit[] {
   const list = units.filter(u => u.active !== false);
   if (!section) return list;
-  return list.filter(u => String(u.sections?.[section] || '').trim() !== '');
+  return list.filter(u => activeSections(u).includes(section));
 }
 
 export type TroopStat = {

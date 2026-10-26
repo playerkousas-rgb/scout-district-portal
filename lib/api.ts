@@ -9,7 +9,7 @@ import type {
   SystemState, RegistryBundle, PluginItem, RoleDef, PortalUser, BatchUserInput,
   CourseLink, Venue, VenueLockInfo, VenueLockConfigStatus, VenueLockConfigInput, VenueApproveResult, BackendHealthInfo,
   VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
-  Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit, UnitSection,
+  Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, TroopDirectoryBoard, ScoutUnit, UnitSection,
   Circular, CircularsBoard, CircularStatus, DistrictFeedback, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
   CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec, HubCoursesResult,
   DistrictTroopDirectory,
@@ -352,6 +352,8 @@ export const api = {
   /** 成員系統公開讀取區內旅團名錄；Apps Script API Key 仍只在伺服器端 proxy。 */
   listDistrictTroops: (): Promise<ApiResult<DistrictTroopDirectory>> => callGet('listDistrictTroops'),
 
+  getTroopDirectoryBoard: (token: string): Promise<ApiResult<TroopDirectoryBoard>> =>
+    callGet('getTroopDirectoryBoard', { token }),
   getVisitBoard: (token: string, from?: string, to?: string): Promise<ApiResult<VisitBoard>> =>
     callGet('getVisitBoard', { token, ...(from ? { from } : {}), ...(to ? { to } : {}) }),
   saveVisit: (token: string, visit: Partial<Visit>): Promise<ApiResult<{ saved: boolean; id: string; troop: string; visitDate: string }>> =>

@@ -10,21 +10,12 @@ export function isDashboardShortcut(card: CardDef): boolean {
 
 /**
  * 只在已成功取得後台卡片後使用；不參與 API 權限判斷。
- * 旅團資料沿用 visit 權限；YMIS 必須進入內頁，卡片不帶帳密。
+ * 旅團資料只使用後台獨立 troopDirectory 卡；YMIS 必須進入內頁，卡片不帶帳密。
  * 不自行補造後台未授權的 YMIS 卡片。
  */
 export function dashboardCards(cards: CardDef[], _session: UserSession): CardDef[] {
-  const result = cards.map(c => c.cardId === 'ymis'
-    ? { ...c, type: 'builtin' as const, url: '/ymis', embed: false } : c);
-  const visit = cards.find(c => c.cardId === 'visit');
-  if (visit?.enabled && !result.some(c => c.cardId === 'troopDirectoryShortcut')) {
-    result.push({
-      ...visit,
-      cardId: 'troopDirectoryShortcut', title: '旅團資料', icon: '🧭',
-      type: 'builtin', url: '/visit?tab=units', embed: false, source: 'core', category: 'done',
-      description: '旅團名單 · 集會時間 · 社交平台及網站 · 成員名錄公開設定',
-      order: visit.order + 0.1,
-    });
-  }
+  const result = cards.filter(c => !isDashboardShortcut(c)).map(c => c.cardId === 'ymis'
+    ? { ...c, type: 'builtin' as const, url: '/ymis', embed: false }
+    : c.cardId === 'troopDirectory' ? { ...c, type: 'builtin' as const, url: '/troop-directory', embed: false } : c);
   return result.sort((a, b) => a.order - b.order);
 }

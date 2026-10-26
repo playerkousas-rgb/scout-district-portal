@@ -21,6 +21,8 @@ export function loadCardOrder(districtCode: string, email: string): CardOrderMap
     Object.entries(obj).forEach(([k, v]) => { if (typeof v === 'number' && Number.isFinite(v)) out[k] = v; });
     if (out.ymis === undefined && out.ymisWebsiteShortcut !== undefined) out.ymis = out.ymisWebsiteShortcut;
     delete out.ymisWebsiteShortcut;
+    if (out.troopDirectory === undefined && out.troopDirectoryShortcut !== undefined) out.troopDirectory = out.troopDirectoryShortcut;
+    delete out.troopDirectoryShortcut;
     return out;
   } catch { return {}; }
 }
