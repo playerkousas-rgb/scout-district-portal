@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.25.4
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.26.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -36,6 +36,11 @@
  * member-portal 填表 → submitStockRequest 寫入 StockRequests（pending）
  * 管理系統 setStockRequestStatus：批准先扣庫存；拒絕／取消／歸還回補。
  * 提交欄位兼容 qty/quantity、borrowDate/startDate、items[] 多件。
+ *
+ * ──「你講我聽」區務意見箱（v4.26.0）────────────────────
+ * member-portal POST submitDistrictFeedback（匿名／支援／DC 保密直達）。
+ * DistrictFeedback 留在主 Sheet；DCConfidential 用獨立 Google 試算表分享予 DC，
+ * 不把保密資料放入全區職員可讀的主 Sheet。前端列表權限由 feedback / dcFeedback 卡及本檔重複檢查。
  *
  * ── 訓練班收費 FPS QR（v4.3.0）───────────────────────────
  * 管理系統「訓練班管理」按每班 fee 生成 FPS QR，saveCourseLink 寫入
@@ -160,6 +165,8 @@ var SHEET = {
   ACTIVITY_REQ: 'ActivityNotices',
   NEWS: 'News',                  // 消息發佈（管理系統主控台頂發 → 成員系統首頁置頂顯示）
   CONTACT_NAMES: 'ContactNames', // 聯絡簿：地域職員姓名區方自訂（電話唔變人會轉）
+  FEEDBACK: 'DistrictFeedback', // 一般「你講我聽」意見（主試算表）
+  DC_FEEDBACK: 'DCConfidential', // DC 私密意見（獨立試算表，並非此主試算表分頁）
   AWARDS: 'Awards',              // 獎勵提名名冊（一人一行，每個獎一欄＝獲獎年份）
   UNITS: 'Units',                // 全區旅團名單（旅號、主辦機構、各支部團數）
   VISITS: 'Visits',              // 旅團探訪登記（一次探訪一行）
@@ -318,7 +325,9 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.25.4',
+      version: '4.26.0',
+      feedbackReady: feedbackReady_(),
+      dcFeedbackReady: dcFeedbackReady_(),
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -374,6 +383,8 @@ function doGet(e) {
       case 'getCirculars':         return json(getCirculars_(p.token));
       case 'getAllRecords':       return json(getAllRecords_(p.token));
       case 'listIncidentReports': return json(listIncidentReports_(p.token));
+      case 'getDistrictFeedback': return json(getDistrictFeedback_(p.token));
+      case 'getDCFeedback':       return json(getDCFeedback_(p.token));
 
       // ---------- 成員系統 /staff 舊介面 ----------
       case 'staffVerify':         return json(staffVerify_(p.token));
@@ -410,6 +421,7 @@ function doPost(e) {
       case 'addStockBatchRequest': return json(submitStockBatchRequest_(b));
       case 'submitActivityNotice': return json(submitActivityNotice_(b));
       case 'submitCourseReg':      return json(submitCourseReg_(b));
+      case 'submitDistrictFeedback': return json(submitDistrictFeedback_(b));
 
       // ---------- 登入 ----------
       case 'login':                return json(login_(b.email, b.password, b.remember));
@@ -1824,7 +1836,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.25.4',
+    version: '4.26.0',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -2369,6 +2381,155 @@ function setStockRequestStatus_(token, id, status) {
 }
 
 // ===================== 活動知會 =====================
+
+// ===================== 區務意見箱（v4.26.0） =====================
+
+var FEEDBACK_HEADERS = [
+  'id', 'refCode', 'createdAt', 'category', 'message', 'wantReply',
+  'contactName', 'contactType', 'contact', 'dcOnly', 'source', 'districtCode', 'status',
+];
+
+function feedbackText_(value, maxLength) {
+  var text = String(value == null ? '' : value).trim();
+  if (text.length > maxLength) return null;
+  return text;
+}
+function feedbackBool_(value) {
+  return value === true || String(value == null ? '' : value).trim().toLowerCase() === 'true';
+}
+function ensureFeedbackHeaders_(sh) {
+  if (!sh) return false;
+  var data = sh.getDataRange().getValues();
+  if (!data.length || !data[0].some(function (v) { return String(v || '').trim(); })) {
+    sh.getRange(1, 1, 1, FEEDBACK_HEADERS.length).setValues([FEEDBACK_HEADERS]);
+    return true;
+  }
+  var headers = data[0].map(function (v) { return String(v || '').trim(); });
+  FEEDBACK_HEADERS.forEach(function (h) {
+    if (headers.indexOf(h) < 0) {
+      var next = sh.getLastColumn() + 1;
+      sh.getRange(1, next).setValue(h);
+      headers.push(h);
+    }
+  });
+  return true;
+}
+function appendFeedback_(sh, record) {
+  if (!ensureFeedbackHeaders_(sh)) throw new Error('找不到意見箱工作表');
+  var headers = sheetHeadersBySheet_(sh);
+  var row = headers.map(function (h) {
+    var value = record[h] === undefined || record[h] === null ? '' : record[h];
+    return typeof value === 'boolean' ? (value ? 'TRUE' : 'FALSE') : String(value);
+  });
+  var rowIndex = sh.getLastRow() + 1;
+  var range = sh.getRange(rowIndex, 1, 1, row.length);
+  range.setNumberFormat('@');
+  range.setValues([row]);
+}
+function normalizeFeedbackRecord_(row) {
+  return {
+    id: String(row.id || ''),
+    refCode: String(row.refCode || ''),
+    createdAt: String(row.createdAt || ''),
+    category: String(row.category || ''),
+    message: String(row.message || ''),
+    wantReply: feedbackBool_(row.wantReply),
+    contactName: String(row.contactName || ''),
+    contactType: String(row.contactType || ''),
+    contact: String(row.contact || ''),
+    dcOnly: feedbackBool_(row.dcOnly),
+    status: String(row.status || 'new'),
+  };
+}
+function feedbackReadRows_(sh) {
+  if (!sh) return [];
+  var values = sh.getDataRange().getValues();
+  if (values.length < 2) return [];
+  var headers = values[0].map(function (h) { return String(h || '').trim(); });
+  return values.slice(1).map(function (row) {
+    var obj = {};
+    headers.forEach(function (h, i) { if (h) obj[h] = row[i]; });
+    return obj;
+  });
+}
+function feedbackRecordsFromSheet_(sh, dcOnly) {
+  if (!sh) return [];
+  return feedbackReadRows_(sh).filter(function (r) {
+    return feedbackBool_(r.dcOnly) === !!dcOnly;
+  }).map(normalizeFeedbackRecord_).sort(function (a, b) {
+    return String(b.createdAt).localeCompare(String(a.createdAt));
+  }).slice(0, 1000);
+}
+function submitDistrictFeedback_(b) {
+  var locked = guardLocked_(); if (locked) return locked;
+  var category = String(b.category || '').trim().toLowerCase();
+  if (category !== 'opinion' && category !== 'support') return err('留言類別不正確');
+  var message = feedbackText_(b.message, 2000);
+  if (message === null || message.length < 10) return err('留言內容須為 10 至 2000 字');
+  var wantReply = feedbackBool_(b.wantReply);
+  var dcOnly = feedbackBool_(b.dcOnly);
+  var contactName = '', contactType = '', contact = '';
+  if (wantReply) {
+    contactName = feedbackText_(b.contactName, 100);
+    contactType = String(b.contactType || '').trim().toLowerCase();
+    contact = feedbackText_(b.contact, 200);
+    if (contactName === null || contact === null) return err('聯絡資料太長');
+    if (['phone', 'email', 'ig', 'fb'].indexOf(contactType) < 0 || !contact) {
+      return err('選擇需要回覆時，請提供有效的聯絡方式及帳號');
+    }
+  }
+  var id = Utilities.getUuid();
+  var refCode = 'FB-' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyMMdd')
+    + '-' + Utilities.getUuid().replace(/-/g, '').slice(0, 6).toUpperCase();
+  var now = new Date().toISOString();
+  var record = {
+    id: id, refCode: refCode, createdAt: now, category: category, message: message,
+    wantReply: wantReply ? 'TRUE' : 'FALSE', contactName: contactName,
+    contactType: contactType, contact: contact, dcOnly: dcOnly ? 'TRUE' : 'FALSE',
+    source: 'member-portal', districtCode: districtCode_(), status: 'new',
+  };
+  try {
+    if (dcOnly) {
+      // 每次私密收件前確認存放檔仍是私人且分享範圍符合目前有效 DC 名單；不符合時 fail closed。
+      if (!dcFeedbackReady_()) return err('DC 保密意見箱尚未安全就緒，請聯絡系統管理員');
+      var dcSheet = getDCFeedbackSheet_();
+      if (!dcSheet) return err('DC 保密意見箱尚未設定，請聯絡系統管理員');
+      appendFeedback_(dcSheet, record);
+      notifyDCFeedback_(record);
+    } else {
+      var mainSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.FEEDBACK);
+      if (!mainSheet) return err('一般意見箱尚未設定，請聯絡系統管理員');
+      appendFeedback_(mainSheet, record);
+    }
+    return ok({ id: id, refCode: refCode, dcOnly: dcOnly });
+  } catch (e) {
+    console.error('submitDistrictFeedback failed: ' + e);
+    return err('暫時未能提交留言，請稍後再試');
+  }
+}
+function getDistrictFeedback_(token) {
+  var t = requireCardView_(token, 'feedback'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.FEEDBACK);
+  if (!sh) return err('找不到一般意見箱工作表');
+  return ok(feedbackRecordsFromSheet_(sh, false));
+}
+function getDCFeedback_(token) {
+  var t = checkToken_(token);
+  if (!t.valid) return err('登入已過期');
+  // 即使 Perms 被誤改，也只向現時仍啟用的 DC 或最高層級超管開放。
+  var isMaintenanceSuper = isMaintenanceSuper_(t.email, t.role);
+  var current = readSheet_(SHEET.USERS).filter(function (u) {
+    return String(u.email || '').trim().toLowerCase() === String(t.email || '').trim().toLowerCase();
+  })[0];
+  if (!isMaintenanceSuper && (!current || String(current.active || '').toUpperCase() === 'FALSE')) return err('帳戶不存在或已停用');
+  var currentRole = current ? String(current.role || '').trim().toUpperCase() : String(t.role || '').trim().toUpperCase();
+  var currentLevel = isMaintenanceSuper ? LEVEL_SUPER : levelOfUser_(t.email, currentRole);
+  if (currentRole !== DC_ROLE && currentLevel !== LEVEL_SUPER) return err('只有區總監或超級管理員可以查看保密留言');
+  if (!dcFeedbackReady_()) return err('DC 保密意見箱尚未安全就緒');
+  var sh = getDCFeedbackSheet_();
+  if (!sh) return err('DC 保密意見箱尚未設定');
+  return ok(feedbackRecordsFromSheet_(sh, true));
+}
 
 function submitActivityNotice_(b) {
   if (!isFeature_('activity')) return err('服務暫未開放');
@@ -6753,14 +6914,14 @@ function showNewApiKey() { regenerateApiKeyMenu(); }
 function protectSensitiveSheets_(ss) {
   var me = '';
   try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { me = ''; }
-  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ, SHEET.DEBIT_NOTES].forEach(function (name) {
+  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ, SHEET.DEBIT_NOTES, SHEET.FEEDBACK].forEach(function (name) {
     try {
       var sh = ss.getSheetByName(name);
       if (!sh) return;
       sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(function (p) {
         if (p.getDescription().indexOf('童軍區統一後台') === 0) p.remove();
       });
-      var prot = sh.protect().setDescription('童軍區統一後台：保護敏感設定（API_KEY_HASH / 密碼雜湊）');
+      var prot = sh.protect().setDescription('童軍區統一後台：保護系統敏感資料（禁止直接編輯）');
       if (me) {
         prot.addEditor(me);
         prot.getEditors().forEach(function (ed) {
@@ -6772,6 +6933,159 @@ function protectSensitiveSheets_(ss) {
   });
 }
 
+function dcEmails_() {
+  return readSheet_(SHEET.USERS).filter(function (u) {
+    return String(u.role || '').trim().toUpperCase() === DC_ROLE
+      && String(u.active || '').trim().toUpperCase() !== 'FALSE'
+      && String(u.email || '').trim();
+  }).map(function (u) { return String(u.email).trim().toLowerCase(); }).filter(function (email, i, list) {
+    return list.indexOf(email) === i;
+  });
+}
+function feedbackPrivilegedEmails_() {
+  var privileged = readSheet_(SHEET.USERS).filter(function (u) {
+    var role = String(u.role || '').trim().toUpperCase();
+    return (role === DC_ROLE || role === SYSADMIN_ROLE)
+      && String(u.active || '').trim().toUpperCase() !== 'FALSE'
+      && String(u.email || '').trim();
+  }).map(function (u) { return String(u.email).trim().toLowerCase(); });
+  if (MASTER_EMAIL) privileged.push(String(MASTER_EMAIL).trim().toLowerCase());
+  return privileged.filter(function (email, i, list) { return email && list.indexOf(email) === i; });
+}
+function getDCFeedbackSpreadsheet_() {
+  var id = String(getConfigValue_('DC_CONFIDENTIAL_SHEET_ID') || '').trim();
+  if (!id) return null;
+  try { return SpreadsheetApp.openById(id); } catch (e) { return null; }
+}
+function getDCFeedbackSheet_() {
+  var dcSS = getDCFeedbackSpreadsheet_();
+  return dcSS ? dcSS.getSheetByName(SHEET.DC_FEEDBACK) : null;
+}
+function feedbackSheetHasHeaders_(sh) {
+  if (!sh) return false;
+  var h = sheetHeadersBySheet_(sh);
+  return FEEDBACK_HEADERS.every(function (name) { return h.indexOf(name) >= 0; });
+}
+function feedbackReady_() {
+  return feedbackSheetHasHeaders_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.FEEDBACK));
+}
+function dcFeedbackSharingReady_() {
+  try {
+    var id = String(getConfigValue_('DC_CONFIDENTIAL_SHEET_ID') || '').trim();
+    if (!id) return false;
+    var file = DriveApp.getFileById(id);
+    if (file.getSharingAccess && file.getSharingAccess() !== DriveApp.Access.PRIVATE) return false;
+    var allowed = dcEmails_();
+    if (!allowed.length) return false;
+    var owner = file.getOwner();
+    var ownerEmail = owner ? String(owner.getEmail() || '').trim().toLowerCase() : '';
+    if (!ownerEmail || feedbackPrivilegedEmails_().indexOf(ownerEmail) < 0) return false;
+    var editors = file.getEditors().map(function (u) { return String(u.getEmail() || '').trim().toLowerCase(); })
+      .filter(function (email) { return email && email !== ownerEmail; });
+    if (editors.length) return false;
+    var viewers = file.getViewers().map(function (u) { return String(u.getEmail() || '').trim().toLowerCase(); })
+      .filter(function (email) { return email && email !== ownerEmail; });
+    if (viewers.some(function (email) { return allowed.indexOf(email) < 0; })) return false;
+    return allowed.every(function (email) { return email === ownerEmail || viewers.indexOf(email) >= 0; });
+  } catch (e) { return false; }
+}
+function dcFeedbackReady_() {
+  return feedbackSheetHasHeaders_(getDCFeedbackSheet_()) && dcFeedbackSharingReady_();
+}
+function protectDCFeedbackSheet_(sh) {
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) {}
+  var protection = null;
+  try {
+    var protections = sh.getProtections(SpreadsheetApp.ProtectionType.SHEET) || [];
+    protections.forEach(function (p) {
+      if (String(p.getDescription() || '') === 'DC Confidential: protected data') protection = p;
+    });
+    if (!protection) protection = sh.protect().setDescription('DC Confidential: protected data');
+    if (me) {
+      protection.addEditor(me);
+      protection.getEditors().forEach(function (ed) {
+        var email = String(ed.getEmail() || '').toLowerCase();
+        if (email && email !== me.toLowerCase()) { try { protection.removeEditor(ed); } catch (e) {} }
+      });
+    }
+    if (protection.canDomainEdit && protection.canDomainEdit()) protection.setDomainEdit(false);
+    return true;
+  } catch (e) { return false; }
+}
+function enforceDCFeedbackSharing_(fileId) {
+  var allowed = dcEmails_();
+  var okShare = true;
+  try {
+    var file = DriveApp.getFileById(fileId);
+    var owner = file.getOwner();
+    var ownerEmail = owner ? String(owner.getEmail() || '').trim().toLowerCase() : '';
+    if (!ownerEmail || feedbackPrivilegedEmails_().indexOf(ownerEmail) < 0) okShare = false;
+    file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
+    file.getEditors().forEach(function (user) {
+      var email = String(user.getEmail() || '').trim().toLowerCase();
+      if (email && email !== ownerEmail) {
+        try { file.removeEditor(user); } catch (e) { okShare = false; }
+      }
+    });
+    file.getViewers().forEach(function (user) {
+      var email = String(user.getEmail() || '').trim().toLowerCase();
+      if (email && email !== ownerEmail && allowed.indexOf(email) < 0) {
+        try { file.removeViewer(user); } catch (e) { okShare = false; }
+      }
+    });
+    allowed.forEach(function (email) {
+      if (!email || email === ownerEmail) return;
+      try { file.addViewer(email); } catch (e) { okShare = false; }
+    });
+    if (!allowed.length) okShare = false;
+  } catch (e) { okShare = false; }
+  return okShare;
+}
+function ensureDCFeedbackStore_(ss) {
+  try {
+    var id = String(getConfigValue_('DC_CONFIDENTIAL_SHEET_ID') || '').trim();
+    var dcSS = null;
+    if (id) {
+      // 已設定 ID 但無法開啟時 fail closed；不可默默換新檔，避免把既有留言留在舊檔而失去設定。
+      dcSS = SpreadsheetApp.openById(id);
+      if (!dcSS) return false;
+    } else {
+      dcSS = SpreadsheetApp.create('DC Confidential Feedback - ' + districtCode_());
+      id = dcSS.getId();
+      setConfigTextValue_('DC_CONFIDENTIAL_SHEET_ID', id, 'DC 保密留言獨立試算表 ID');
+    }
+    var sh = dcSS.getSheetByName(SHEET.DC_FEEDBACK);
+    if (!sh) {
+      var sheets = dcSS.getSheets();
+      if (sheets.length === 1 && sheets[0].getLastRow() === 0) {
+        sh = sheets[0];
+        sh.setName(SHEET.DC_FEEDBACK);
+      } else {
+        sh = dcSS.insertSheet(SHEET.DC_FEEDBACK);
+      }
+    }
+    ensureFeedbackHeaders_(sh);
+    var protectedOk = protectDCFeedbackSheet_(sh);
+    var sharedOk = enforceDCFeedbackSharing_(id);
+    return protectedOk && sharedOk && feedbackSheetHasHeaders_(sh);
+  } catch (e) {
+    console.error('ensureDCFeedbackStore failed: ' + e);
+    return false;
+  }
+}
+function notifyDCFeedback_(record) {
+  var to = String(getConfigValue_('DC_NOTIFY_EMAIL') || '').trim();
+  if (!to) return;
+  try {
+    MailApp.sendEmail(to,
+      '收到新的 DC 保密留言（' + record.refCode + '）',
+      '系統已安全收妥一則新的 DC 保密留言。\n參考編號：' + record.refCode + '\n\n請登入區統一後台「DC 保密留言」查看。電郵不包含留言內容。');
+  } catch (e) {
+    console.error('DC feedback notification failed: ' + e);
+  }
+}
+
 // ===================== 健康檢查 =====================
 
 function getHealthCheck_() {
@@ -6781,6 +7095,8 @@ function getHealthCheck_() {
     r.districtName = getConfigValue_('districtName') || '';
     r.districtCode = districtCode_();
     r.apiKeySet = !!getConfigValue_('API_KEY_HASH');
+    r.feedbackReady = feedbackReady_();
+    r.dcFeedbackReady = dcFeedbackReady_();
     r.sheetId = ss.getId();
     r.sheets = ss.getSheets().map(function (s) { return s.getName(); });
   } catch (e) { r.ok = false; r.error = e.toString(); }
@@ -6794,6 +7110,8 @@ function healthCheckMenu() {
     '區名：' + (h.districtName || '（未填）') + '\n'
     + '區碼：' + (h.districtCode || '（未填）') + '\n'
     + 'API Key：' + (h.apiKeySet ? '已設定 ✅' : '未設定 ❌') + '\n'
+    + '一般意見箱：' + (h.feedbackReady ? '就緒 ✅' : '未就緒 ❌') + '\n'
+    + 'DC 保密意見箱：' + (h.dcFeedbackReady ? '就緒（獨立檔案／DC 分享）✅' : '未就緒 ❌') + '\n'
     + '缺少的工作表：' + (missing.length ? missing.join('、') : '無 ✅')
     + (missing.length ? '\n\n→ 執行選單「🧱 補建缺失表」' : ''));
 }
@@ -6862,6 +7180,8 @@ function blueprint_() {
     P.push(row('circulars', circularsEdit()));
     P.push(row('fps', ALL_EDIT));
     P.push(row('debitNote', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'edit', STAFF: 'edit' }));
+    P.push(row('feedback', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'view', DDC_TRAINING: 'view', STAFF: 'view' }));
+    P.push(row('dcFeedback', { DC: 'edit', SYSADMIN: 'edit' }));
     P.push(row('rooms', ALL_VIEW));
     P.push(row('orgchart', ALL_VIEW));
     P.push(row('ymis', ALL_VIEW));
@@ -6878,6 +7198,8 @@ function blueprint_() {
       ['API_KEY_HASH', '', 'setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。'],
       ['TROOP_LIST', '', '旅號清單（逗號分隔），活動知會表用'],
       ['NOTIFY_STAFF_EMAIL', '', '新申請通知收件人'],
+      ['DC_CONFIDENTIAL_SHEET_ID', '', 'setup 自動建立；DC 保密留言獨立試算表 ID（只分享予 Users 表內有效 DC）'],
+      ['DC_NOTIFY_EMAIL', '', '（選填）DC 保密留言通知收件人；只寄通知，不在電郵內包含留言內容'],
       // 借場一條龍（Teamup + 通通鎖 TTLock）
       ['TEAMUP_API_KEY', '', 'Teamup API Token（兼容舊欄名 teamupApiKey）'],
       ['TEAMUP_CALENDAR_KEY', '', 'Teamup 分享金鑰 ks...（兼容舊 teamupCalendarId）'],
@@ -6973,6 +7295,8 @@ function blueprint_() {
       ['rooms', '地域房間使用情況', '🏢', 'builtin', '/rooms', '17／18／19 樓逐間房睇用途時段 · 今日總覽', 15, 'TRUE', 'FALSE', 'core', 'done'],
       ['orgchart', '地域及總會架構', '🏛', 'builtin', '/orgchart', '港島地域總監架構 · 總會領導層，自動跟官網更新', 16, 'TRUE', 'FALSE', 'core', 'done'],
       ['debitNote', 'DEBIT NOTE 生成', '🧾', 'builtin', '/debit-note', '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出', 17, 'TRUE', 'FALSE', 'core', 'done'],
+      ['feedback', '你講我聽｜意見箱', '💬', 'builtin', '/feedback-inbox', '查閱一般意見及支援留言', 18, 'TRUE', 'FALSE', 'core', 'done'],
+      ['dcFeedback', 'DC 保密留言', '🔒', 'builtin', '/dc-feedback', '只限區總監及超級管理員查閱', 19, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
 
     { name: SHEET.UNITS, headerColor: '#bbf7d0', rows: [
@@ -7030,6 +7354,9 @@ function blueprint_() {
     ] },
     { name: SHEET.CONTACT_NAMES, rows: [
       ['key', 'name', 'updatedAt', 'updatedBy'],
+    ] },
+    { name: SHEET.FEEDBACK, headerColor: '#e0f2fe', rows: [
+      FEEDBACK_HEADERS.slice(),
     ] },
     { name: SHEET.AWARDS, headerColor: '#fde68a', frozenCols: 1, rows: [
       AWARD_FIXED_COLS.concat(awardTypeSeed_().map(function (r) { return r[0]; })).concat(AWARD_TAIL_COLS),
@@ -7135,6 +7462,7 @@ function setupSheets() {
   patchPermsRows_(ss);
   ensureRoleLevels_(ss);
   ensurePresetUsers_(ss);
+  var dcFeedbackStoreReady = ensureDCFeedbackStore_(ss);
   protectSensitiveSheets_(ss);
 
   var key = generateApiKey_(ss);
@@ -7143,13 +7471,16 @@ function setupSheets() {
     '★ 只補缺失表／欄／Config 列，唔清空、唔覆寫已填格。\n\n'
     + '新建工作表：' + (created.length ? created.join('、') : '無') + '\n'
     + '補上欄位：' + (patched.length ? patched.join('、') : '無') + '\n'
-    + 'API Key：' + (key ? '已新生成（下一個視窗顯示）' : '原有設定保持不變') + '\n\n'
+    + 'API Key：' + (key ? '已新生成（下一個視窗顯示）' : '原有設定保持不變') + '\n'
+    + '一般意見箱：' + (feedbackReady_() ? '就緒 ✅' : '未就緒 ❌') + '\n'
+    + 'DC 保密試算表：' + (dcFeedbackStoreReady ? '已建立並限制分享 ✅' : '未完成；請檢查 Drive 權限、有效 DC 及 DC／SYSADMIN 檔案擁有者 ❌') + '\n\n'
     + '示範密碼：' + DEFAULT_PASSWORD + '\n\n'
     + '下一步：\n'
-    + '1. Config 填 districtName / districtCode\n'
-    + '2. 借場一條龍：Config 填 TEAMUP_*（Teamup）同 ttlock*（通通鎖）金鑰\n'
-    + '3. 部署為 Web App（存取：任何人）→ 複製 /exec\n'
-    + '4. 同一個 API Key 設定去兩個 Vercel 環境變數：\n'
+    + '1. Config 填 districtName / districtCode；檔案擁有者須為 Users 內啟用的 DC／SYSADMIN，試算表只分享予有效 DC\n'
+    + '2. （選填）Config 填 DC_NOTIFY_EMAIL；通知信不包含留言內容\n'
+    + '3. 借場一條龍：Config 填 TEAMUP_*（Teamup）同 ttlock*（通通鎖）金鑰\n'
+    + '4. 部署為 Web App（存取：任何人）→ 複製 /exec\n'
+    + '5. 同一個 API Key 設定去兩個 Vercel 環境變數：\n'
     + '   PORTAL_{區碼}_APIKEY 同 MEMBER_{區碼}_APIKEY');
 
   if (key) showKeyDialog_('🔑 你的 API Key（只顯示一次）', key,

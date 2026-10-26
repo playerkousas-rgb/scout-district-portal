@@ -10,7 +10,7 @@ import type {
   CourseLink, Venue, VenueLockInfo, VenueLockConfigStatus, VenueLockConfigInput, VenueApproveResult, BackendHealthInfo,
   VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
-  Circular, CircularsBoard, CircularStatus, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
+  Circular, CircularsBoard, CircularStatus, DistrictFeedback, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
   CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec, HubCoursesResult,
 } from './types.ts';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers.ts';
@@ -390,6 +390,12 @@ export const api = {
     callPost('updateIncidentReport', { token, id, patch }),
   deleteIncidentReport: (token: string, id: string): Promise<ApiResult<{ deleted: boolean }>> =>
     callPost('deleteIncidentReport', { token, id }),
+
+  // 「你講我聽」意見箱：DC 私密留言由後端再做 DC／超管角色檢查
+  getDistrictFeedback: (token: string): Promise<ApiResult<DistrictFeedback[]>> =>
+    callGet('getDistrictFeedback', { token }),
+  getDCFeedback: (token: string): Promise<ApiResult<DistrictFeedback[]>> =>
+    callGet('getDCFeedback', { token }),
 
   // ── v4.5.0 外部同步（/api/external）──
   /** 港島地域職員直線電話（hkirscout.org.hk 專業領袖及受薪職員） */

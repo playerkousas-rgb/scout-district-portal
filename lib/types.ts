@@ -415,7 +415,24 @@ export interface BackendHealthInfo {
   lockIdSet?: boolean;
   ttlockDisabled?: boolean;
   timestamp?: string;
+  feedbackReady?: boolean;
+  dcFeedbackReady?: boolean;
 }
+
+export interface DistrictFeedback {
+  id: string;
+  refCode: string;
+  createdAt: string;
+  category: 'opinion' | 'support';
+  message: string;
+  wantReply: boolean;
+  contactName: string;
+  contactType: 'phone' | 'email' | 'ig' | 'fb' | '';
+  contact: string;
+  dcOnly: boolean;
+  status: string;
+}
+
 export interface VenueBooking {
   id: string;
   refCode?: string;
