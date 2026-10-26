@@ -114,12 +114,10 @@ export default function HomePage() {
   }, [districtCode]);
 
   function moveCard(from: number, to: number) {
-    setCards(prev => {
-      const next = moveInList(prev, from, to);
-      if (next === prev) return prev;
-      if (session) setCardOrder(persistOrder(next, session.email || ''));
-      return next;
-    });
+    const next = moveInList(cards, from, to);
+    if (next === cards) return;
+    setCards(next);
+    if (session) setCardOrder(persistOrder(next, session.email || ''));
   }
 
   function resetCardOrder() {
@@ -413,7 +411,7 @@ export default function HomePage() {
         <>
           <div className="card-order-bar">
             <span className="muted" style={{ fontSize: 12 }}>
-              ✋ 拖拽或者用 ▲▼ 排自己鍾意嘅次序（只影響呢部機／呢個帳號）
+              ✋ 所有卡片均可拖拽、用 ▲▼ 或選「第幾位」排列；自動儲存於此瀏覽器，按區及帳戶分開記住
             </span>
             {Object.keys(cardOrder).length > 0 && (
               <button className="linkish" onClick={resetCardOrder}>↺ 還原預設次序</button>
@@ -429,6 +427,7 @@ export default function HomePage() {
                 canReorder
                 first={i === 0}
                 last={i === cards.length - 1}
+                position={i} total={cards.length} onMoveTo={to => moveCard(i, to)}
                 onMoveUp={() => moveCard(i, i - 1)}
                 onMoveDown={() => moveCard(i, i + 1)}
                 dragProps={dragProps(i)}

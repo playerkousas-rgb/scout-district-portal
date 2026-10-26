@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.29.1
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.30.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -245,7 +245,7 @@ var SYSADMIN_ROLE = 'SYSADMIN';
 function isAdminRole_(role) { return role === DC_ROLE || role === SYSADMIN_ROLE; }
 function canViewYmisRole_(role) {
   role = String(role || '').trim().toUpperCase();
-  return role === DC_ROLE || role === 'DDC_ADMIN' || role === 'DDC_TRAINING'
+  return role === SYSADMIN_ROLE || role === DC_ROLE || role === 'DDC_ADMIN' || role === 'DDC_TRAINING'
     || role === 'ADC_SCOUT' || role === 'ADC_CUBS' || role === 'ADC_GH'
     || role === 'ADC_ROVER' || role === 'ADC_VENTURE' || role === 'STAFF';
 }
@@ -380,7 +380,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.29.1',
+      version: '4.30.0',
       feedbackReady: feedbackReady_(),
       dcFeedbackReady: dcFeedbackReady_(),
       districtName: getConfigValue_('districtName') || '',
@@ -530,7 +530,7 @@ function doPost(e) {
       case 'saveDebitNote':       return json(saveDebitNote_(b.token, b.note || b.debitNote || {}));
       case 'importDebitNotes':    return json(importDebitNotes_(b.token, b.rows));
       case 'saveUnits':           return json(saveUnits_(b.token, b.units));
-      case 'saveUnitSections':    return json(saveUnitSections_(b.token, b.rows || b.unitSections));
+      case 'saveUnitSections':    return json(saveUnitSections_(b.token, b.rows || b.unitSections, b.troop));
       case 'saveAnnouncement':      return json(saveAnnouncement_(b.token, b.announcement || b.news || b));
       case 'deleteAnnouncement':    return json(deleteAnnouncement_(b.token, b.id));
       case 'restoreAnnouncement':   return json(restoreAnnouncement_(b.token, b.id));
@@ -1969,7 +1969,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.29.1',
+    version: '4.30.0',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -3878,7 +3878,7 @@ function publicUnitLabel_(section, unitCode) {
   if (!code) return base + '團';
   if (code.charAt(0) === 'A') return '空' + base + '團';
   if (code.charAt(0) === 'S') return '海' + base + '團';
-  return base + '團';
+  return base + '團（第' + code + '團）';
 }
 
 /** UnitSections 表一列 → 結構化列（內部 active/publicVisible 保留俾管理端，公開端另做過濾）。 */
@@ -3965,11 +3965,11 @@ function listDistrictTroops_() {
 }
 
 /**
- * 整份覆寫 UnitSections 表（同 saveUnits 一樣嘅全表重寫模式）。
+ * v4.30.0 傳 scopeTroop 時只替換該旅，保留其他旅及欄位；省略則相容舊版全表模式。
  * 需要 visit 卡 edit 權限；dup key＝troop|section|unitCode；網址同團代號伺服器端驗證。
  * 傳空陣列＝清空維護資料，公開名錄回落自動骨架。
  */
-function saveUnitSections_(token, rows) {
+function saveUnitSections_(token, rows, scopeTroop) {
   var t = requireCardEdit_(token, 'visit'); if (t.error) return err(t.error);
   if (!Array.isArray(rows) || rows.length > 1000) return err('支部團資料格式錯誤（最多 1000 團）');
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -3978,17 +3978,21 @@ function saveUnitSections_(token, rows) {
 
   var knownTroops = {};
   visitUnits_().forEach(function (u) { knownTroops[u.troop] = true; });
+  var scoped = scopeTroop !== undefined;
+  scopeTroop = String(scopeTroop || '').trim();
+  if (scoped && !knownTroops[scopeTroop]) return err('找不到該旅團');
   var seen = {}, out = [];
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
     if (!r || typeof r !== 'object' || Array.isArray(r)) return err('支部團資料格式錯誤');
     var troop = String(r.troop == null ? '' : r.troop).trim();
     var section = visitSection_(r.section);
+    if (scoped && troop !== scopeTroop) return err('只可儲存所選旅的團資料');
     if (!troop || !section || !knownTroops[troop]) return err('請填寫有效旅號及支部');
     if (['active', 'publicVisible'].some(function (k) { return r[k] !== undefined && typeof r[k] !== 'boolean'; })) return err('啟用及公開顯示必須是布林值');
     var unitCode = String(r.unitCode == null ? '' : r.unitCode).trim().toUpperCase();
-    if (unitCode && !/^[AS]\d{1,2}$/.test(unitCode)) {
-      return err('旅團 ' + troop + ' 嘅團代號格式錯誤（應為 A1／S1 呢類，常規團留空）');
+    if (unitCode && !/^(?:[AS])?\d{1,2}$/.test(unitCode)) {
+      return err('旅團 ' + troop + ' 嘅團代號格式錯誤（單一常規團留空；多個常規團填 1／2，空團 A1、海團 S1）');
     }
     var key = troop + '|' + section + '|' + unitCode;
     if (seen[key]) {
@@ -4009,6 +4013,26 @@ function saveUnitSections_(token, rows) {
       r.active === false ? 'FALSE' : 'TRUE',
       r.publicVisible === false ? 'FALSE' : 'TRUE',
     ]);
+  }
+
+  if (scoped) {
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(10000)) return err('其他人正在儲存，請稍後再試');
+    try {
+      var headers = sheetHeadersBySheet_(sh);
+      if (UNIT_SECTION_HEADER.some(function (h) { return headers.indexOf(h) < 0; })) return err('請先執行 setupSheets() 補齊 UnitSections 欄位');
+      var values = sh.getDataRange().getValues();
+      var troopCol = headers.indexOf('troop');
+      for (var n = values.length - 1; n >= 1; n--) {
+        if (String(values[n][troopCol] || '').trim() === scopeTroop) sh.deleteRow(n + 1);
+      }
+      out.forEach(function (row) {
+        var record = {};
+        UNIT_SECTION_HEADER.forEach(function (h, i) { record[h] = row[i]; });
+        appendRowObj_(sh, record);
+      });
+      return ok({ saved: true, troop: scopeTroop, count: out.length });
+    } finally { lock.releaseLock(); }
   }
 
   sh.clear();
@@ -4085,6 +4109,7 @@ function getVisitBoard_(token, from, to) {
     units: visitUnits_(),
     publicTroopFieldsReady: publicTroopFieldsReady,
     unitSectionsReady: unitSectionsReady,
+    unitSectionsScopedSave: true,
     unitSections: unitSections,
     visits: visits,
     years: Object.keys(years).map(Number).sort(function (a, b) { return b - a; }),
@@ -6626,7 +6651,9 @@ function notifyStaff_(subject, body) {
 
 function normalizeCard_(c) {
   return {
-    cardId: String(c.cardId).trim(), title: c.title, icon: c.icon, type: c.type, url: c.url,
+    cardId: String(c.cardId).trim(), title: c.title, icon: c.icon,
+    type: String(c.cardId).trim() === 'ymis' ? 'builtin' : c.type,
+    url: String(c.cardId).trim() === 'ymis' ? '/ymis' : c.url,
     description: String(c.cardId).trim() === 'dcFeedback'
       ? '只限區總監查閱（系統超級管理員亦可）'
       : c.description,
@@ -6653,7 +6680,7 @@ function getCards_(token) {
   var staffPermissions = staffPerms_(t.email, effRole);
   var scopeOverride = u && u.cards ? splitList_(u.cards) : null;
   var cards = readSheet_(SHEET.CARDS).map(normalizeCard_).filter(function (c) {
-    // YMIS 帳密按明確角色白名單開放；層級 0 維護超管亦不可見。
+    // YMIS 帳密按明確角色白名單開放，包括已驗證的 SYSADMIN。
     if (c.cardId === 'ymis' && !canViewYmisRole_(effRole)) return false;
     // 業務操作卡片須同時具備底層操作權，不可由舊 Perms 的 view/edit 格放寬。
     if (c.cardId === 'venueReg' && !staffPermissions.canVenue) return false;
@@ -6665,7 +6692,7 @@ function getCards_(token) {
     if (c.cardId === 'rooms' && c.enabled) { c.access = 'view'; return true; }
     // 隱藏卡片（enabled=FALSE）：只有層級 0 超管見到（用嚟私下加功能／升級），其他人一律睇唔到
     if (!c.enabled && !isSuper) return false;
-    if (isSuper) { c.access = 'edit'; return true; }
+    if (isSuper) { c.access = c.cardId === 'ymis' ? 'view' : 'edit'; return true; }
     if (scopeOverride && scopeOverride.indexOf(c.cardId) < 0) return false;
     var access = (perms[c.cardId] || {})[effRole] || '';
     c.access = access;
@@ -8081,7 +8108,7 @@ function applyPassword_(email, newPassword) {
 // ===================== YMIS 會員核實帳戶（舊版相容） =====================
 function getYmisCredentials_(token) {
   var t = checkToken_(token);
-  if (!t.valid || t.source !== 'users') return err('登入已過期');
+  if (!t.valid || (t.source !== 'users' && !(t.source === 'proxy' && isMaintenanceSuper_(t.email, t.role)))) return err('登入已過期');
   if (!canViewYmisRole_(t.role)) return err('此帳戶不可查看 YMIS 帳密');
   var auth = requireCardView_(token, 'ymis');
   if (auth.error) return err(auth.error);
@@ -8089,7 +8116,7 @@ function getYmisCredentials_(token) {
     return String(u.email || '').trim().toLowerCase() === String(t.email || '').trim().toLowerCase()
       && String(u.active || '').toUpperCase() !== 'FALSE';
   })[0];
-  if (!user || isTrue_(user.mustChangePassword) || String(user.mustChangePassword).toUpperCase() !== 'FALSE') return err('請先完成帳戶密碼設定');
+  if (t.source !== 'proxy' && (!user || !canViewYmisRole_(user.role) || isTrue_(user.mustChangePassword) || String(user.mustChangePassword).toUpperCase() !== 'FALSE')) return err('請先完成帳戶密碼設定');
   var props = PropertiesService.getScriptProperties();
   var username = String(props.getProperty('YMIS_VERIFY_USERNAME') || '').trim();
   var password = String(props.getProperty('YMIS_VERIFY_PASSWORD') || '');

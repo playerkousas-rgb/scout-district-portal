@@ -16,9 +16,11 @@ export function loadCardOrder(districtCode: string, email: string): CardOrderMap
     const raw = localStorage.getItem(cardOrderKey(districtCode, email));
     if (!raw) return {};
     const obj = JSON.parse(raw);
-    if (!obj || typeof obj !== 'object') return {};
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
     const out: CardOrderMap = {};
     Object.entries(obj).forEach(([k, v]) => { if (typeof v === 'number' && Number.isFinite(v)) out[k] = v; });
+    if (out.ymis === undefined && out.ymisWebsiteShortcut !== undefined) out.ymis = out.ymisWebsiteShortcut;
+    delete out.ymisWebsiteShortcut;
     return out;
   } catch { return {}; }
 }

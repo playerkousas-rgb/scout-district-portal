@@ -64,10 +64,10 @@ check('示範權限矩陣：rooms 全員可看，審批卡唔畀 ADC；mockAdmin
 });
 
 check('YMIS：卡片只給總監級／職員；示範按掣只回完全虛構登入資料', () => {
-  for (const role of ['DC', 'DDC_ADMIN', 'DDC_TRAINING', 'ADC_SCOUT', 'ADC_GH', 'STAFF']) {
+  for (const role of ['SYSADMIN', 'DC', 'DDC_ADMIN', 'DDC_TRAINING', 'ADC_SCOUT', 'ADC_GH', 'STAFF']) {
     assert.strictEqual(canViewYmisRole(role), true);
   }
-  for (const role of ['SYSADMIN', 'DL', 'LEADER', 'AL', '']) assert.strictEqual(canViewYmisRole(role), false);
+  for (const role of ['DL', 'LEADER', 'AL', '']) assert.strictEqual(canViewYmisRole(role), false);
   const matrix = demoDefaultMatrix();
   assert.strictEqual(matrix.ymis.ADC_SCOUT, 'view');
   assert.strictEqual(matrix.ymis.STAFF, 'view');

@@ -304,13 +304,13 @@ check('getCards：一般登入者／個別卡片範圍仍見 rooms；未獲借�
   assert.ok(ids(staff).includes('rooms'));
 });
 
-check('舊 Sheet 升級新增 YMIS 卡；預設只限 DC／DDC／ADC／職員，領袖不可見', () => {
+check('舊 Sheet 升級新增 YMIS 卡；DC／DDC／ADC／職員及超管可用，領袖不可見', () => {
   const card = ctx.readSheet_('Cards').find(c => c.cardId === 'ymis');
   assert.ok(card && card.url === '/ymis' && card.enabled === 'TRUE');
   const perms = ctx.readPerms_().ymis;
-  ['DC', 'DDC_ADMIN', 'DDC_TRAINING', 'ADC_SCOUT', 'ADC_CUBS', 'ADC_GH', 'ADC_ROVER', 'ADC_VENTURE', 'STAFF']
+  ['SYSADMIN', 'DC', 'DDC_ADMIN', 'DDC_TRAINING', 'ADC_SCOUT', 'ADC_CUBS', 'ADC_GH', 'ADC_ROVER', 'ADC_VENTURE', 'STAFF']
     .forEach(role => assert.strictEqual(perms[role], 'view', `${role} 應有查閱權`));
-  ['SYSADMIN', 'DL', 'LEADER', 'AL'].forEach(role => assert.strictEqual(perms[role], undefined, `${role} 不可見`));
+  ['DL', 'LEADER', 'AL'].forEach(role => assert.strictEqual(perms[role], undefined, `${role} 不可見`));
 
   const adc = ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12);
   const staff = ctx.makeToken_('staff@x.org', 'STAFF', 12);
@@ -321,7 +321,7 @@ check('舊 Sheet 升級新增 YMIS 卡；預設只限 DC／DDC／ADC／職員，
   assert.ok(ids(staff).includes('ymis'), '就算 Staff.canVenue=FALSE，都可查 YMIS：兩種權限分開');
   assert.ok(!ids(ctx.makeToken_('staff@x.org', 'STAFF', 12, 'staff')).includes('ymis'), '同電郵的 Staff 舊登入不可冒充 Users 帳戶');
   assert.ok(!ids(leader).includes('ymis'));
-  assert.ok(!ids(sysadmin).includes('ymis'), '超管不屬於區總監／副總監／助總監／職員，不能直接讀 YMIS');
+  assert.ok(ids(sysadmin).includes('ymis'), '超管可進入既有 YMIS 帳密內頁');
   sheets.Staff.appendRow(['only-old-staff@x.org', '舊職員', '', '', 'STAFF', 'FALSE', 'TRUE', '', '', 'TRUE']);
   assert.ok(!ids(ctx.makeToken_('only-old-staff@x.org', 'STAFF', 12, 'staff')).includes('ymis'), 'Staff 舊表帳戶無初始密碼檢查，不可查看 YMIS');
 
@@ -363,7 +363,7 @@ check('Token 簽署密鑰缺失時拒絕 token；sheep 只接受 Vercel HMAC 一
   assert.strictEqual(ctx.checkToken_(master.data.token).source, 'proxy');
   assert.strictEqual(ctx.verify_(master.data.token).ok, true);
   assert.ok(ctx.getCards_(master.data.token).data.some(c => c.cardId === 'venueReg'), 'maintenance session keeps superadmin portal access');
-  assert.strictEqual(ctx.getYmisCredentials_(master.data.token).ok, false, 'maintenance account remains excluded from YMIS credentials');
+  assert.strictEqual(ctx.getYmisCredentials_(master.data.token).ok, true, '已簽署維護超管可使用原有 YMIS 帳密功能');
   assert.strictEqual(ctx.proxyMasterLogin_(grant, sig).ok, false, 'signed assertion replay must be rejected');
   assert.strictEqual(ctx.checkToken_(ctx.makeToken_('sheep', 'SYSADMIN', 12)).valid, false,
     'pre-bridge master tokens must be rejected');
@@ -378,7 +378,6 @@ check('YMIS 密碼只在明確要求／有效帳戶／卡片授權之下讀取 S
   assert.strictEqual(ctx.getYmisCredentials_('bad-token').ok, false);
   assert.strictEqual(ctx.getYmisCredentials_(leader).ok, false);
   assert.strictEqual(ctx.getYmisCredentials_(ctx.makeToken_('staff@x.org', 'STAFF', 12, 'staff')).ok, false);
-  assert.strictEqual(ctx.getYmisCredentials_(ctx.makeToken_('sysadmin@x.org', 'SYSADMIN', 12)).ok, false);
   assert.strictEqual(propertyReads, before, '未獲授權唔可以讀 YMIS 相關 Properties');
 
   const missing = ctx.getYmisCredentials_(adc);
@@ -393,6 +392,12 @@ check('YMIS 密碼只在明確要求／有效帳戶／卡片授權之下讀取 S
   assert.strictEqual(granted.data.username, 'fake-test-account');
   assert.strictEqual(granted.data.password, 'fake-test-password');
   assert.strictEqual(ctx.getYmisCredentials_(dc).ok, true);
+  const adminRow = sheets.Users._data.findIndex(r => r[0] === 'sysadmin@x.org') + 1;
+  ctx.setCellByHeader_(sheets.Users, adminRow, 'mustChangePassword', 'FALSE');
+  assert.strictEqual(ctx.getYmisCredentials_(ctx.makeToken_('sysadmin@x.org', 'SYSADMIN', 12)).ok, true);
+  scriptProps.YMIS_VERIFY_PASSWORD = 'fake-rotated-password';
+  assert.strictEqual(ctx.getYmisCredentials_(adc).data.password, 'fake-rotated-password', '更新 Script Properties 後每次讀取均取得新值');
+  scriptProps.YMIS_VERIFY_PASSWORD = 'fake-test-password';
   assert.ok(!JSON.stringify(ctx.getCards_(adc)).includes('fake-test-password'), '卡片清單不得洩漏帳密');
 
   const user = sheets.Users, adcRow = user._data.findIndex(r => r[0] === 'adc@x.org');
@@ -679,11 +684,11 @@ check('舊 UnitSections 自訂欄位及既有集會資料升級保留，重跑�
 });
 
 check('現行發布快照與開發源一致，原 v4.29.0 凍結快照保留', () => {
-  const current = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.29.1.gs'), 'utf8');
+  const current = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.30.0.gs'), 'utf8');
   assert.strictEqual(current, code);
   const frozen = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.29.0.gs'), 'utf8');
   assert.ok(frozen.includes("version: '4.29.0'"));
-  assert.ok(code.includes("version: '4.29.1'"));
+  assert.ok(code.includes("version: '4.30.0'"));
 });
 
 check('前端可下載的完整 Code.gs 與後台原始檔完全一致', () => {

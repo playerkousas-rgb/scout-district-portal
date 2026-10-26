@@ -389,9 +389,9 @@ check('DC 保密留言卡清楚標示區總監及系統超管存取範圍', () =
   assert.strictEqual(card.description, '只限區總監查閱（系統超級管理員亦可）');
 });
 
-check('健康檢查版本 4.29.1', () => {
+check('健康檢查版本 4.30.0', () => {
   const parsed = JSON.parse(ctx.doGet({ parameter: { action: 'getHealthCheck' } }));
-  assert.strictEqual(parsed.data.version, '4.29.1');
+  assert.strictEqual(parsed.data.version, '4.30.0');
 });
 
 console.log(`\n全部通過（${pass} 項）✓`);

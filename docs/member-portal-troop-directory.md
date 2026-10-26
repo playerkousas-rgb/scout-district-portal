@@ -108,3 +108,9 @@ v4.29.0 將名錄由「每旅一張卡」升級為對齊[港島總會筲箕灣�
 - `node --experimental-strip-types scripts/test-demo-engine.ts`：28 項通過。
 - `scripts/test-*-gs.js` 共 14 組，13 組通過；唯一失敗為原有 `test-district-hq-gs.js:62`（舊 getDistrictHqBookings route 測試）。以變更前 `HEAD:gs/Code.gs` 重跑亦重現相同失敗，非本次名錄同步新增；未改動該月曆功能或掩蓋該測試。
 - 旅團資料／YMIS 快捷卡及卡片門禁測試通過。未執行真實部署或外部服務驗證。
+
+## v4.30.0 按旅、按支部維護
+
+「旅團資料」最上方改為先選旅，再顯示各支部獨立編輯卡；第82旅會預列五個支部，各自填寫集會時間、地點、IG／FB／網站，已有資料及公開開關保留，不自動複製旅層資料。新增數字團代號 1／2 以分開維護同支部多個常規團，空團 A1、海團 S1 及舊空代號仍相容。
+
+新管理端提交 `{ token, troop, rows }`：GS 驗證所有列屬於所選旅後，只替換該旅的列，不動其他旅、自訂欄及表頭；使用 ScriptLock 避免按旅儲存互相交錯。沒有 `troop` 的舊客戶端保留全表儲存語義。公開 `listDistrictTroops` 格式不變。`getVisitBoard` 新增 `unitSectionsScopedSave: true`；新編輯器要求此能力才開放儲存，避免配舊 GS 時覆寫其他旅。切換旅前若有未存修改會提示，選旅記在頁面 query 以便儲存後保留。
