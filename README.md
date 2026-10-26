@@ -3,7 +3,7 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
-> **正式 Apps Script 尚未部署本分支 v4.26.1；此修補尚未合併 MAIN，亦未在真實 Apps Script／Sheet／外部服務驗證。** 合併後仍須先備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，由區方自行更新原有 Apps Script；助手不會部署正式 GS。修補新增認證與角色門禁，並保留 DC 保密意見分頁設計；Sheet 分頁保護不是檢視隔離。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
+> **GS v4.26.1 認證修補已於 PR #45 合併 MAIN；正式 Apps Script 尚未部署本版本，亦未在真實 Apps Script／Sheet／外部服務驗證。** 更新原有 GS 前仍須先備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，正式 GS 由區方自行更新；助手不會代部署。修補新增認證與角色門禁，並保留 DC 保密意見分頁設計；Sheet 分頁保護不是檢視隔離。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
 >
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 

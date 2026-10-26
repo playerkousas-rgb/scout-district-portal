@@ -174,7 +174,7 @@
 
 > 更新：2026-10-26
 > 用家語言：香港中文  
-> 狀態：**GS v4.26.1 認證修補由此分支提供；是否已合併 MAIN 請以 GitHub 為準。正式 Apps Script 未由助手部署，須由用家自行更新。** Node／mock 測試不等同 Apps Script、Sheet ACL 或外部服務驗證。
+> 狀態：**GS v4.26.1 認證修補已由 PR #45 合併 MAIN；正式 Apps Script 未由助手部署，須由用家自行更新。** Node／mock 測試不等同 Apps Script、Sheet ACL 或外部服務驗證。
 > 本檔唔寫、唔問、唔貼任何 Secret（Client Secret、鎖密碼、Lock 密碼、API Key 明文）。
 
 ---

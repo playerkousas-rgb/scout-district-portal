@@ -17,7 +17,7 @@
 
 ## 登入及 YMIS 保障（僅日後決定部署本倉 v4.26.1 才適用）
 
-- **目前正式 4.18.0 毋須設定** `PORTAL_TOKEN_SECRET`；不要因本倉尚未合併／部署的安全修補而直接覆蓋正式 GS。v4.26.1 的 `setupSheets()` 在缺少有效（至少 32 字元）值時會自動建立每專案獨立密鑰；管理員亦可先私下設定。首次建立／更換會令舊登入／重設連結失效。**房間卡更新本身不要求更新 GS。**
+- **目前正式 4.18.0 毋須設定** `PORTAL_TOKEN_SECRET`；本倉 v4.26.1 安全修補雖已合併但尚未部署；不要未備份、未核對 API Key 與 Script Properties 就直接覆蓋正式 GS。v4.26.1 的 `setupSheets()` 在缺少有效（至少 32 字元）值時會自動建立每專案獨立密鑰；管理員亦可先私下設定。首次建立／更換會令舊登入／重設連結失效。**房間卡更新本身不要求更新 GS。**
 - **選設** `PORTAL_MASTER_PASSWORD`：至少 12 字元長密碼，未設則維護帳號不能登入；舊原始碼示範密碼已不能使用。
 - **YMIS 卡啟用時**，先輪換先前披露的 YMIS 密碼及全部預設 DC／DDC／ADC／STAFF 區系統登入密碼，再私密設定 `YMIS_VERIFY_USERNAME`、`YMIS_VERIFY_PASSWORD`。詳見 [`YMIS 人工登入卡部署指引`](ymis-verification-feasibility.md)。勿將上述私密值交到 Git、Google Sheet、對話或公開環境變數。
 
