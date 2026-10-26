@@ -187,8 +187,13 @@ export function parseUnitPaste(text: string, existing: ScoutUnit[] = []): ScoutU
       label: /旅/.test(cells[0]) ? cells[0] : (prev?.label || `港島第${troop}旅`),
       org: cells[1] || prev?.org || '',
       sections,
-      active: true,
+      active: prev?.active !== false,
       note: prev?.note || '',
+      meetingTime: prev?.meetingTime || '',
+      instagramUrl: prev?.instagramUrl || '',
+      facebookUrl: prev?.facebookUrl || '',
+      websiteUrl: prev?.websiteUrl || '',
+      publicVisible: prev?.publicVisible !== false,
     });
   });
   return out;

@@ -775,6 +775,7 @@ function UnitsTab({ board, canEdit, token, reload, flash, setError }: {
   const [rows, setRows] = useState<ScoutUnit[]>(() => sortUnits(board.units));
   const [paste, setPaste] = useState('');
   const [saving, setSaving] = useState(false);
+  const publicFieldsReady = board.publicTroopFieldsReady === true;
 
   function setCell(i: number, patch: Partial<ScoutUnit>) {
     setRows(prev => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
@@ -783,7 +784,10 @@ function UnitsTab({ board, canEdit, token, reload, flash, setError }: {
     setRows(prev => prev.map((r, idx) => idx === i ? { ...r, sections: { ...r.sections, [key]: value } } : r));
   }
   function addRow() {
-    setRows(prev => [...prev, { troop: '', label: '', org: '', sections: { gh: '', cub: '', scout: '', venture: '', rover: '' }, active: true }]);
+    setRows(prev => [...prev, {
+      troop: '', label: '', org: '', meetingTime: '', instagramUrl: '', facebookUrl: '', websiteUrl: '',
+      sections: { gh: '', cub: '', scout: '', venture: '', rover: '' }, active: true, publicVisible: true,
+    }]);
   }
   function doPaste() {
     const parsed = parseUnitPaste(paste, rows);
@@ -804,11 +808,17 @@ function UnitsTab({ board, canEdit, token, reload, flash, setError }: {
 
   return (
     <>
+      {!publicFieldsReady && (
+        <div className="info-card" style={{ borderLeft: '4px solid #f59e0b' }}>
+          <strong>公開資料欄位尚未啟用</strong>
+          <p className="fps-help">請區方先把 GS v4.28.0 更新至 Apps Script 並執行 setupSheets()；完成後這些欄位才可編輯及公開。</p>
+        </div>
+      )}
       <div className="info-card">
         <div className="section-head">
           <div>
-            <h3>全區旅團名單（{rows.length}）</h3>
-            <p>預設跟港島地域官網「筲箕灣區旅團一覽表」。改咗之後，「活動知會」同「聯絡簿」嘅旅號清單都會一齊更新。</p>
+            <h3>全區旅團名單及公開資料（{rows.length}）</h3>
+            <p>旅號、主辦機構及支部資料沿用現有名單；補上集會時間、Instagram、Facebook、旅團網頁後，成員系統「區內旅團」詳情會顯示已填欄位，空白欄位會隱藏。取消「公開顯示」可暫時從成員端名錄隱藏。</p>
           </div>
           {canEdit && (
             <div style={{ display: 'flex', gap: 8 }}>
@@ -824,6 +834,7 @@ function UnitsTab({ board, canEdit, token, reload, flash, setError }: {
               <tr>
                 <th>旅號</th><th>旅團名稱</th><th>主辦機構</th>
                 {SECTIONS.map(k => <th key={k}>{SECTION_LABEL[k]}</th>)}
+                <th>旅團啟用</th><th>成員名錄</th><th>集會時間</th><th>Instagram 網址</th><th>Facebook 網址</th><th>旅團網頁</th>
               </tr>
             </thead>
             <tbody>
@@ -841,13 +852,19 @@ function UnitsTab({ board, canEdit, token, reload, flash, setError }: {
                       />
                     </td>
                   ))}
+                  <td style={{ textAlign: 'center' }}><input type="checkbox" checked={u.active !== false} disabled={!canEdit} onChange={e => setCell(i, { active: e.target.checked })} aria-label={`${u.label || u.troop} 旅團啟用`} /></td>
+                  <td style={{ textAlign: 'center' }}><input type="checkbox" checked={u.publicVisible !== false} disabled={!canEdit || !publicFieldsReady} onChange={e => setCell(i, { publicVisible: e.target.checked })} aria-label={`${u.label || u.troop} 在成員系統名錄顯示`} /></td>
+                  <td><input value={u.meetingTime || ''} disabled={!canEdit || !publicFieldsReady} maxLength={200} onChange={e => setCell(i, { meetingTime: e.target.value })} style={{ width: 180 }} placeholder="例如：星期六 19:30" /></td>
+                  <td><input type="url" value={u.instagramUrl || ''} disabled={!canEdit || !publicFieldsReady} onChange={e => setCell(i, { instagramUrl: e.target.value })} style={{ width: 210 }} placeholder="https://instagram.com/…" /></td>
+                  <td><input type="url" value={u.facebookUrl || ''} disabled={!canEdit || !publicFieldsReady} onChange={e => setCell(i, { facebookUrl: e.target.value })} style={{ width: 210 }} placeholder="https://facebook.com/…" /></td>
+                  <td><input type="url" value={u.websiteUrl || ''} disabled={!canEdit || !publicFieldsReady} onChange={e => setCell(i, { websiteUrl: e.target.value })} style={{ width: 210 }} placeholder="https://…" /></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         <p className="fps-help" style={{ marginTop: 8 }}>
-          支部格入面填「團數」（例如 1、2、1+A1）；留空 = 冇開嗰個支部，探訪頁就唔會列出。
+          支部格入面填「團數」（例如 1、2、1+A1）；留空 = 冇開嗰個支部，探訪頁就唔會列出。「旅團啟用」沿用原有探訪統計狀態；「成員名錄」獨立控制公開顯示。社交平台／網頁請貼完整 http:// 或 https:// 網址；空白即隱藏。
         </p>
       </div>
 

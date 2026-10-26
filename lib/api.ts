@@ -12,6 +12,7 @@ import type {
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, ScoutUnit,
   Circular, CircularsBoard, CircularStatus, DistrictFeedback, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
   CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec, HubCoursesResult,
+  DistrictTroopDirectory,
 } from './types.ts';
 import type { BudgetRow, BudgetSummary, DeptContact, OrgGroup, OrgMember, StaffRow } from './externalParsers.ts';
 import type { DebitNoteDraft, DebitNoteRecord } from './debitNote.ts';
@@ -347,6 +348,9 @@ export const api = {
     callPost('saveDebitNote', { token, note }),
   importDebitNotes: (token: string, rows: Array<DebitNoteDraft & { sourceRow?: number }>):
     Promise<ApiResult<DebitNoteImportSummary>> => callPost('importDebitNotes', { token, rows }),
+
+  /** 成員系統公開讀取區內旅團名錄；Apps Script API Key 仍只在伺服器端 proxy。 */
+  listDistrictTroops: (): Promise<ApiResult<DistrictTroopDirectory>> => callGet('listDistrictTroops'),
 
   getVisitBoard: (token: string, from?: string, to?: string): Promise<ApiResult<VisitBoard>> =>
     callGet('getVisitBoard', { token, ...(from ? { from } : {}), ...(to ? { to } : {}) }),

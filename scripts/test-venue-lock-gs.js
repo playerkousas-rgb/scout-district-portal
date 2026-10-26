@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.27.0）
+ * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.28.0）
  *
  * 涵蓋：
  *  1. 跨區自動探測（api.sciener.com 10003 → 自動切換 euapi.ttlock.com + 852 電話帳號相容）
@@ -423,7 +423,7 @@ function callPost(action, body = {}) {
   return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action, apiKey, ...body }) } }));
 }
 
-console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.27.0)');
+console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (v4.28.0)');
 
 // 1. 登入超管／DC 並檢查初始健康狀態
 const assertion = JSON.stringify({ email: 'sheep', exp: Date.now() + 30_000, nonce: crypto.randomBytes(16).toString('hex') });
@@ -436,12 +436,12 @@ const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.27.0');
+assert.strictEqual(h0.data.version, '4.28.0');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
 assert.strictEqual(h0.data.feedbackReady, true, 'DistrictFeedback should be ready after setup');
 assert.strictEqual(h0.data.dcFeedbackReady, true, 'DCConfidential should be ready after setup');
-console.log('  ✓ getHealthCheck 回傳版本 4.27.0、意見箱就緒及電子鎖初始狀態');
+console.log('  ✓ getHealthCheck 回傳版本 4.28.0、意見箱就緒及電子鎖初始狀態');
 assert.strictEqual(h0.data.tokenSecretSet, true, 'setup should create a private token signing secret');
 assert.strictEqual(h0.data.masterProxyBridgeSet, true, 'setup should create the Vercel-to-Apps-Script bridge secret');
 assert.ok(props.PORTAL_TOKEN_SECRET && props.PORTAL_TOKEN_SECRET.length >= 32, 'token secret should be stored in Script Properties');

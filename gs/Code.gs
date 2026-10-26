@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.27.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.28.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -379,7 +379,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.27.0',
+      version: '4.28.0',
       feedbackReady: feedbackReady_(),
       dcFeedbackReady: dcFeedbackReady_(),
       districtName: getConfigValue_('districtName') || '',
@@ -420,6 +420,7 @@ function doGet(e) {
       case 'listCourseParams':    return json(ok(listCourseParams_()));
       case 'listActivityNotices': return json(ok(listActivityNotices_(p)));
       case 'listAnnouncements':   return json(ok(listAnnouncements_(p)));
+      case 'listDistrictTroops':  return json(listDistrictTroops_());
 
       // ---------- 管理系統（角色制） ----------
       case 'verify':              return json(verify_(p.token));
@@ -1966,7 +1967,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.27.0',
+    version: '4.28.0',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -3814,6 +3815,11 @@ function unitRow_(r) {
     troop: String(r.troop == null ? '' : r.troop).trim(),
     label: String(r.label || '').trim() || ('港島第' + String(r.troop || '').trim() + '旅'),
     org: String(r.org || '').trim(),
+    meetingTime: String(r.meetingTime || '').trim(),
+    instagramUrl: String(r.instagramUrl || '').trim(),
+    facebookUrl: String(r.facebookUrl || '').trim(),
+    websiteUrl: String(r.websiteUrl || '').trim(),
+    publicVisible: String(r.publicVisible).toUpperCase() !== 'FALSE',
     sections: sections,
     active: String(r.active).toUpperCase() !== 'FALSE',
     note: String(r.note || '').trim(),
@@ -3826,8 +3832,29 @@ function visitUnits_() {
   return unitSeed_().map(function (a) {
     var sections = {};
     VISIT_SECTIONS.forEach(function (k, i) { sections[k] = a[3 + i]; });
-    return { troop: a[0], label: a[1], org: a[2], sections: sections, active: true, note: '' };
+    return { troop: a[0], label: a[1], org: a[2], meetingTime: '', instagramUrl: '', facebookUrl: '', websiteUrl: '', publicVisible: true, sections: sections, active: true, note: '' };
   });
+}
+
+/** 成員系統公開名錄只回傳旅團公開欄位；空值保留為空字串，由前端隱藏欄位。 */
+function listDistrictTroops_() {
+  var troops = visitUnits_().filter(function (u) { return u.active && u.publicVisible; }).map(function (u) {
+    return {
+      troop: u.troop,
+      label: u.label,
+      organizer: u.org,
+      meetingTime: u.meetingTime || '',
+      instagramUrl: u.instagramUrl || '',
+      facebookUrl: u.facebookUrl || '',
+      websiteUrl: u.websiteUrl || '',
+    };
+  });
+  return ok({ districtCode: districtCode_(), districtName: getConfigValue_('districtName') || '', troops: troops });
+}
+function validPublicUnitUrl_(value) {
+  var url = String(value == null ? '' : value).trim();
+  if (!url) return '';
+  return url.length <= 500 && /^https?:\/\/[^\s]+$/i.test(url) ? url : null;
 }
 
 function visitRow_(r) {
@@ -3868,6 +3895,11 @@ function getVisitBoard_(token, from, to) {
   var tt = visitDate_(to) || (today.slice(0, 4) + '-12-31');
   if (f > tt) { var tmp = f; f = tt; tt = tmp; }
 
+  var unitSheet = ss.getSheetByName(SHEET.UNITS);
+  var unitHeaders = unitSheet ? sheetHeadersBySheet_(unitSheet) : [];
+  var publicTroopFieldsReady = ['meetingTime', 'instagramUrl', 'facebookUrl', 'websiteUrl', 'publicVisible'].every(function (h) {
+    return unitHeaders.indexOf(h) >= 0;
+  });
   var all = readSheet_(SHEET.VISITS).map(visitRow_).filter(function (v) { return !!v.troop && !!v.visitDate; });
   var visits = all.filter(function (v) { return v.visitDate >= f && v.visitDate <= tt; });
   visits.sort(function (a, b) { return a.visitDate < b.visitDate ? 1 : a.visitDate > b.visitDate ? -1 : 0; });
@@ -3881,6 +3913,7 @@ function getVisitBoard_(token, from, to) {
     from: f, to: tt, today: today,
     districtName: getConfigValue_('districtName') || '',
     units: visitUnits_(),
+    publicTroopFieldsReady: publicTroopFieldsReady,
     visits: visits,
     years: Object.keys(years).map(Number).sort(function (a, b) { return b - a; }),
     sections: VISIT_SECTIONS.map(function (k) { return { key: k, label: VISIT_SECTION_LABEL[k] }; }),
@@ -3979,6 +4012,14 @@ function saveUnits_(token, units) {
     if (seen[troop]) return err('旅號重複：' + troop);
     seen[troop] = true;
     var sec = u.sections || {};
+    var instagramUrl = validPublicUnitUrl_(u.instagramUrl);
+    var facebookUrl = validPublicUnitUrl_(u.facebookUrl);
+    var websiteUrl = validPublicUnitUrl_(u.websiteUrl);
+    if (instagramUrl === null) return err('旅團 ' + troop + ' 的 Instagram 網址必須以 http:// 或 https:// 開頭，且不可含空白');
+    if (facebookUrl === null) return err('旅團 ' + troop + ' 的 Facebook 網址必須以 http:// 或 https:// 開頭，且不可含空白');
+    if (websiteUrl === null) return err('旅團 ' + troop + ' 的網頁網址必須以 http:// 或 https:// 開頭，且不可含空白');
+    var meetingTime = String(u.meetingTime || '').trim();
+    if (meetingTime.length > 200) return err('旅團 ' + troop + ' 的集會時間最多 200 字');
     var row = [
       troop,
       String(u.label || '').trim() || ('港島第' + troop + '旅'),
@@ -3987,12 +4028,13 @@ function saveUnits_(token, units) {
     VISIT_SECTIONS.forEach(function (k) { row.push(String(sec[k] == null ? '' : sec[k]).trim()); });
     row.push(u.active === false ? 'FALSE' : 'TRUE');
     row.push(String(u.note || '').trim());
+    row.push(meetingTime, instagramUrl, facebookUrl, websiteUrl, u.publicVisible === false ? 'FALSE' : 'TRUE');
     out.push(row);
     troops.push(troop);
   }
   if (!out.length) return err('旅團名單唔可以空');
 
-  var header = ['troop', 'label', 'org'].concat(VISIT_SECTIONS).concat(['active', 'note']);
+  var header = ['troop', 'label', 'org'].concat(VISIT_SECTIONS).concat(['active', 'note', 'meetingTime', 'instagramUrl', 'facebookUrl', 'websiteUrl', 'publicVisible']);
   sh.clear();
   sh.getRange(1, 1, 1, header.length).setValues([header]);
   sh.getRange(1, 1, 1, header.length).setFontWeight('bold').setBackground('#bbf7d0');
@@ -7359,8 +7401,8 @@ function blueprint_() {
     ] },
 
     { name: SHEET.UNITS, headerColor: '#bbf7d0', rows: [
-      ['troop', 'label', 'org', 'gh', 'cub', 'scout', 'venture', 'rover', 'active', 'note'],
-    ].concat(unitSeed_().map(function (a) { return a.concat(['TRUE', '']); })) },
+      ['troop', 'label', 'org', 'gh', 'cub', 'scout', 'venture', 'rover', 'active', 'note', 'meetingTime', 'instagramUrl', 'facebookUrl', 'websiteUrl', 'publicVisible'],
+    ].concat(unitSeed_().map(function (a) { return a.concat(['TRUE', '', '', '', '', '', 'TRUE']); })) },
 
     { name: SHEET.VISITS, rows: [
       // v4.10.0 加咗總會匯報四欄（leaderMet/method/officerCount/support）喺尾，舊表跑 setupSheets 自動補

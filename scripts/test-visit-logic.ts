@@ -159,10 +159,17 @@ check('貼上名單：官網嗰種「港島第206旅 主辦機構 各支部團�
   assert.strictEqual(rows[1].sections.cub, '');
 });
 
-check('貼上名單：淨係旅號都得，原有資料唔會冇咗', () => {
-  const rows = parseUnitPaste('206\n17', units);
+check('貼上名單：淨係旅號都得，原有支部及公開資料唔會冇咗', () => {
+  const existing = { ...unit('206', { scout: '1' }), meetingTime: '星期六 19:30', instagramUrl: 'https://instagram.com/troop206', facebookUrl: 'https://facebook.com/troop206', websiteUrl: 'https://example.org/206', publicVisible: false, active: false };
+  const rows = parseUnitPaste('206\n17', [existing]);
   assert.strictEqual(rows[0].label, '港島第206旅');
   assert.strictEqual(rows[0].sections.scout, '1');   // 沿用原本支部設定
+  assert.strictEqual(rows[0].meetingTime, '星期六 19:30');
+  assert.strictEqual(rows[0].instagramUrl, 'https://instagram.com/troop206');
+  assert.strictEqual(rows[0].facebookUrl, 'https://facebook.com/troop206');
+  assert.strictEqual(rows[0].websiteUrl, 'https://example.org/206');
+  assert.strictEqual(rows[0].publicVisible, false);
+  assert.strictEqual(rows[0].active, false);
   assert.strictEqual(rows[1].troop, '17');
 });
 

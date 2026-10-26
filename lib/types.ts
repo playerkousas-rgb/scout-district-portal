@@ -688,10 +688,31 @@ export interface ActivityNotice {
 export type VisitSection = 'gh' | 'cub' | 'scout' | 'venture' | 'rover';
 export type VisitKind = 'general' | 'inspection' | 'meeting' | 'section' | 'event' | 'other';
 
+export interface DistrictTroopPublic {
+  troop: string;
+  label: string;
+  organizer: string;
+  meetingTime: string;
+  instagramUrl: string;
+  facebookUrl: string;
+  websiteUrl: string;
+}
+
+export interface DistrictTroopDirectory {
+  districtCode: string;
+  districtName: string;
+  troops: DistrictTroopPublic[];
+}
+
 export interface ScoutUnit {
   troop: string;                              // 旅號，例如 "206"
   label: string;                              // 港島第206旅
-  org?: string;                               // 主辦機構
+  org?: string;                               // 主辦機構／公開名錄中的 organizer
+  meetingTime?: string;                       // 公開集會時間
+  instagramUrl?: string;                      // 公開 Instagram 網址
+  facebookUrl?: string;                       // 公開 Facebook 網址
+  websiteUrl?: string;                        // 公開網站
+  publicVisible?: boolean;                     // 成員系統名錄顯示（獨立於旅團 active 狀態）
   sections: Record<VisitSection, string>;     // 各支部團數（"" = 冇該支部）
   active?: boolean;
   note?: string;
@@ -724,6 +745,7 @@ export interface VisitBoard {
   to: string;
   today: string;
   districtName?: string;    // 區會名（Config districtName，總會匯報表頭用）
+  publicTroopFieldsReady?: boolean; // GS v4.28.0 Units 公開資料欄已補齊
   units: ScoutUnit[];
   visits: Visit[];
   years: number[];
