@@ -381,13 +381,15 @@ member-portal 借場表提交
 | `TEAMUP_APPROVED_SUBCAL_ID` | **確認借用**子日曆（批准轉色） |
 | `TEAMUP_REJECTED_SUBCAL_ID` | 選填：拒絕／取消 |
 
+**重疊設定（v4.25.4）**：Teamup Settings → Calendars → 藍色「申請中」子日曆，開啟 **Allow Overlapping Events**，令未批申請可以重疊；紅色「確認借用」子日曆則保持關閉。Teamup 的防重疊設定只在同一子日曆內生效；GS 會另外查紅色已批事件，重疊時回覆「該時段已有已批借用」，不建事件、不新增 pending 列。紅色日曆查詢失敗會拒絕提交，避免誤當空檔。
+
 健康檢查 `?action=getHealthCheck`（免 Key）會回：
 
 ```json
-{ "version": "4.25.3", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
+{ "version": "4.25.4", "teamupReady": true, "teamupPendingSet": true, "teamupApprovedSet": true }
 ```
 
-確認改動已部署後，health check 應回傳 `version: "4.25.3"`。
+確認改動已部署後，health check 應回傳 `version: "4.25.4"`。
 
 ## 部署
 

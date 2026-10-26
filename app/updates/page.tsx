@@ -5,6 +5,16 @@ export default function UpdatesPage() {
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。</p>
       <div className="info-card">
+        <h3>v4.25.4 — 🗓 候批申請可重疊，已批時段自動攔截</h3>
+        <p>提交申請前由後端只查 Teamup 紅色「已批」子日曆，避免把跨日曆的已批時段誤當空檔；藍色申請中不會互相阻擋。</p>
+        <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.25.4</a></p>
+        <ul>
+          <li>🟦 藍色「申請中」事件可以互相重疊，讓多位申請人同時候批；Teamup 藍色子日曆需在 Settings → Calendars 將 <b>Allow Overlapping Events</b> 開啟。</li>
+          <li>🟥 紅色「已批」事件會在伺服器端以香港時間逐分鐘區間檢查；有重疊就顯示「該時段已有已批借用」，不建立藍色事件，也不新增 pending 表格列。職員批核前亦會再檢查，避免兩筆候批申請最後都獲批重疊。</li>
+          <li>🔒 Teamup 查詢紅色日曆失敗時採 fail-closed：不收件、不寫表，要求稍後再試；API Token 只留在伺服器端。</li>
+        </ul>
+      </div>
+      <div className="info-card">
         <h3>v4.25.3 — 🔐 阻止 TTLock 既有 ID 假成功、Teamup 安全換紅色事件</h3>
         <p>針對正式借場回報加強 TTLock 新建確認，並依指定方式以「建立紅色事件 → 刪除舊藍色事件」完成批核。</p>
         <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.25.3</a></p>
