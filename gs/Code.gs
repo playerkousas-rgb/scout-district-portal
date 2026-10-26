@@ -39,8 +39,8 @@
  *
  * ──「你講我聽」區務意見箱（v4.26.0）────────────────────
  * member-portal POST submitDistrictFeedback（匿名／支援／DC 保密直達）。
- * DistrictFeedback 留在主 Sheet；DCConfidential 用獨立 Google 試算表分享予 DC，
- * 不把保密資料放入全區職員可讀的主 Sheet。前端列表權限由 feedback / dcFeedback 卡及本檔重複檢查。
+ * DistrictFeedback 與 DCConfidential 均為主 Sheet 分頁；DCConfidential 卡只授予 DC／超管，
+ * 後端列表 API 亦重複驗證角色。主 Sheet 的直接檢視者仍可直接讀取該分頁（不做分頁級閱讀隔離）。
  *
  * ── 訓練班收費 FPS QR（v4.3.0）───────────────────────────
  * 管理系統「訓練班管理」按每班 fee 生成 FPS QR，saveCourseLink 寫入
@@ -166,7 +166,7 @@ var SHEET = {
   NEWS: 'News',                  // 消息發佈（管理系統主控台頂發 → 成員系統首頁置頂顯示）
   CONTACT_NAMES: 'ContactNames', // 聯絡簿：地域職員姓名區方自訂（電話唔變人會轉）
   FEEDBACK: 'DistrictFeedback', // 一般「你講我聽」意見（主試算表）
-  DC_FEEDBACK: 'DCConfidential', // DC 私密意見（獨立試算表，並非此主試算表分頁）
+  DC_FEEDBACK: 'DCConfidential', // DC 意見管理分頁（主試算表；前端卡片及 API 角色受限）
   AWARDS: 'Awards',              // 獎勵提名名冊（一人一行，每個獎一欄＝獲獎年份）
   UNITS: 'Units',                // 全區旅團名單（旅號、主辦機構、各支部團數）
   VISITS: 'Visits',              // 旅團探訪登記（一次探訪一行）
@@ -6914,7 +6914,7 @@ function showNewApiKey() { regenerateApiKeyMenu(); }
 function protectSensitiveSheets_(ss) {
   var me = '';
   try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { me = ''; }
-  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ, SHEET.DEBIT_NOTES, SHEET.FEEDBACK].forEach(function (name) {
+  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ, SHEET.DEBIT_NOTES, SHEET.FEEDBACK, SHEET.DC_FEEDBACK].forEach(function (name) {
     try {
       var sh = ss.getSheetByName(name);
       if (!sh) return;
@@ -6933,33 +6933,8 @@ function protectSensitiveSheets_(ss) {
   });
 }
 
-function dcEmails_() {
-  return readSheet_(SHEET.USERS).filter(function (u) {
-    return String(u.role || '').trim().toUpperCase() === DC_ROLE
-      && String(u.active || '').trim().toUpperCase() !== 'FALSE'
-      && String(u.email || '').trim();
-  }).map(function (u) { return String(u.email).trim().toLowerCase(); }).filter(function (email, i, list) {
-    return list.indexOf(email) === i;
-  });
-}
-function feedbackPrivilegedEmails_() {
-  var privileged = readSheet_(SHEET.USERS).filter(function (u) {
-    var role = String(u.role || '').trim().toUpperCase();
-    return (role === DC_ROLE || role === SYSADMIN_ROLE)
-      && String(u.active || '').trim().toUpperCase() !== 'FALSE'
-      && String(u.email || '').trim();
-  }).map(function (u) { return String(u.email).trim().toLowerCase(); });
-  if (MASTER_EMAIL) privileged.push(String(MASTER_EMAIL).trim().toLowerCase());
-  return privileged.filter(function (email, i, list) { return email && list.indexOf(email) === i; });
-}
-function getDCFeedbackSpreadsheet_() {
-  var id = String(getConfigValue_('DC_CONFIDENTIAL_SHEET_ID') || '').trim();
-  if (!id) return null;
-  try { return SpreadsheetApp.openById(id); } catch (e) { return null; }
-}
 function getDCFeedbackSheet_() {
-  var dcSS = getDCFeedbackSpreadsheet_();
-  return dcSS ? dcSS.getSheetByName(SHEET.DC_FEEDBACK) : null;
+  return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.DC_FEEDBACK);
 }
 function feedbackSheetHasHeaders_(sh) {
   if (!sh) return false;
@@ -6969,106 +6944,17 @@ function feedbackSheetHasHeaders_(sh) {
 function feedbackReady_() {
   return feedbackSheetHasHeaders_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.FEEDBACK));
 }
-function dcFeedbackSharingReady_() {
-  try {
-    var id = String(getConfigValue_('DC_CONFIDENTIAL_SHEET_ID') || '').trim();
-    if (!id) return false;
-    var file = DriveApp.getFileById(id);
-    if (file.getSharingAccess && file.getSharingAccess() !== DriveApp.Access.PRIVATE) return false;
-    var allowed = dcEmails_();
-    if (!allowed.length) return false;
-    var owner = file.getOwner();
-    var ownerEmail = owner ? String(owner.getEmail() || '').trim().toLowerCase() : '';
-    if (!ownerEmail || feedbackPrivilegedEmails_().indexOf(ownerEmail) < 0) return false;
-    var editors = file.getEditors().map(function (u) { return String(u.getEmail() || '').trim().toLowerCase(); })
-      .filter(function (email) { return email && email !== ownerEmail; });
-    if (editors.length) return false;
-    var viewers = file.getViewers().map(function (u) { return String(u.getEmail() || '').trim().toLowerCase(); })
-      .filter(function (email) { return email && email !== ownerEmail; });
-    if (viewers.some(function (email) { return allowed.indexOf(email) < 0; })) return false;
-    return allowed.every(function (email) { return email === ownerEmail || viewers.indexOf(email) >= 0; });
-  } catch (e) { return false; }
-}
 function dcFeedbackReady_() {
-  return feedbackSheetHasHeaders_(getDCFeedbackSheet_()) && dcFeedbackSharingReady_();
-}
-function protectDCFeedbackSheet_(sh) {
-  var me = '';
-  try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) {}
-  var protection = null;
-  try {
-    var protections = sh.getProtections(SpreadsheetApp.ProtectionType.SHEET) || [];
-    protections.forEach(function (p) {
-      if (String(p.getDescription() || '') === 'DC Confidential: protected data') protection = p;
-    });
-    if (!protection) protection = sh.protect().setDescription('DC Confidential: protected data');
-    if (me) {
-      protection.addEditor(me);
-      protection.getEditors().forEach(function (ed) {
-        var email = String(ed.getEmail() || '').toLowerCase();
-        if (email && email !== me.toLowerCase()) { try { protection.removeEditor(ed); } catch (e) {} }
-      });
-    }
-    if (protection.canDomainEdit && protection.canDomainEdit()) protection.setDomainEdit(false);
-    return true;
-  } catch (e) { return false; }
-}
-function enforceDCFeedbackSharing_(fileId) {
-  var allowed = dcEmails_();
-  var okShare = true;
-  try {
-    var file = DriveApp.getFileById(fileId);
-    var owner = file.getOwner();
-    var ownerEmail = owner ? String(owner.getEmail() || '').trim().toLowerCase() : '';
-    if (!ownerEmail || feedbackPrivilegedEmails_().indexOf(ownerEmail) < 0) okShare = false;
-    file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
-    file.getEditors().forEach(function (user) {
-      var email = String(user.getEmail() || '').trim().toLowerCase();
-      if (email && email !== ownerEmail) {
-        try { file.removeEditor(user); } catch (e) { okShare = false; }
-      }
-    });
-    file.getViewers().forEach(function (user) {
-      var email = String(user.getEmail() || '').trim().toLowerCase();
-      if (email && email !== ownerEmail && allowed.indexOf(email) < 0) {
-        try { file.removeViewer(user); } catch (e) { okShare = false; }
-      }
-    });
-    allowed.forEach(function (email) {
-      if (!email || email === ownerEmail) return;
-      try { file.addViewer(email); } catch (e) { okShare = false; }
-    });
-    if (!allowed.length) okShare = false;
-  } catch (e) { okShare = false; }
-  return okShare;
+  return feedbackSheetHasHeaders_(getDCFeedbackSheet_());
 }
 function ensureDCFeedbackStore_(ss) {
   try {
-    var id = String(getConfigValue_('DC_CONFIDENTIAL_SHEET_ID') || '').trim();
-    var dcSS = null;
-    if (id) {
-      // 已設定 ID 但無法開啟時 fail closed；不可默默換新檔，避免把既有留言留在舊檔而失去設定。
-      dcSS = SpreadsheetApp.openById(id);
-      if (!dcSS) return false;
-    } else {
-      dcSS = SpreadsheetApp.create('DC Confidential Feedback - ' + districtCode_());
-      id = dcSS.getId();
-      setConfigTextValue_('DC_CONFIDENTIAL_SHEET_ID', id, 'DC 保密留言獨立試算表 ID');
-    }
-    var sh = dcSS.getSheetByName(SHEET.DC_FEEDBACK);
-    if (!sh) {
-      var sheets = dcSS.getSheets();
-      if (sheets.length === 1 && sheets[0].getLastRow() === 0) {
-        sh = sheets[0];
-        sh.setName(SHEET.DC_FEEDBACK);
-      } else {
-        sh = dcSS.insertSheet(SHEET.DC_FEEDBACK);
-      }
-    }
+    // DCConfidential is a tab in the existing main spreadsheet. Create only if missing;
+    // never clear or replace existing rows. Read access in the management app/API is role restricted.
+    var sh = ss.getSheetByName(SHEET.DC_FEEDBACK);
+    if (!sh) sh = ss.insertSheet(SHEET.DC_FEEDBACK);
     ensureFeedbackHeaders_(sh);
-    var protectedOk = protectDCFeedbackSheet_(sh);
-    var sharedOk = enforceDCFeedbackSharing_(id);
-    return protectedOk && sharedOk && feedbackSheetHasHeaders_(sh);
+    return feedbackSheetHasHeaders_(sh);
   } catch (e) {
     console.error('ensureDCFeedbackStore failed: ' + e);
     return false;
@@ -7198,7 +7084,6 @@ function blueprint_() {
       ['API_KEY_HASH', '', 'setup 自動生成；API_KEY 的 SHA-256 雜湊值。明文不會儲存在此。'],
       ['TROOP_LIST', '', '旅號清單（逗號分隔），活動知會表用'],
       ['NOTIFY_STAFF_EMAIL', '', '新申請通知收件人'],
-      ['DC_CONFIDENTIAL_SHEET_ID', '', 'setup 自動建立；DC 保密留言獨立試算表 ID（只分享予 Users 表內有效 DC）'],
       ['DC_NOTIFY_EMAIL', '', '（選填）DC 保密留言通知收件人；只寄通知，不在電郵內包含留言內容'],
       // 借場一條龍（Teamup + 通通鎖 TTLock）
       ['TEAMUP_API_KEY', '', 'Teamup API Token（兼容舊欄名 teamupApiKey）'],
@@ -7358,6 +7243,9 @@ function blueprint_() {
     { name: SHEET.FEEDBACK, headerColor: '#e0f2fe', rows: [
       FEEDBACK_HEADERS.slice(),
     ] },
+    { name: SHEET.DC_FEEDBACK, headerColor: '#f3e8ff', rows: [
+      FEEDBACK_HEADERS.slice(),
+    ] },
     { name: SHEET.AWARDS, headerColor: '#fde68a', frozenCols: 1, rows: [
       AWARD_FIXED_COLS.concat(awardTypeSeed_().map(function (r) { return r[0]; })).concat(AWARD_TAIL_COLS),
     ] },
@@ -7473,10 +7361,10 @@ function setupSheets() {
     + '補上欄位：' + (patched.length ? patched.join('、') : '無') + '\n'
     + 'API Key：' + (key ? '已新生成（下一個視窗顯示）' : '原有設定保持不變') + '\n'
     + '一般意見箱：' + (feedbackReady_() ? '就緒 ✅' : '未就緒 ❌') + '\n'
-    + 'DC 保密試算表：' + (dcFeedbackStoreReady ? '已建立並限制分享 ✅' : '未完成；請檢查 Drive 權限、有效 DC 及 DC／SYSADMIN 檔案擁有者 ❌') + '\n\n'
+    + 'DC 保密意見分頁：' + (dcFeedbackStoreReady ? '就緒 ✅' : '未就緒 ❌') + '\n\n'
     + '示範密碼：' + DEFAULT_PASSWORD + '\n\n'
     + '下一步：\n'
-    + '1. Config 填 districtName / districtCode；檔案擁有者須為 Users 內啟用的 DC／SYSADMIN，試算表只分享予有效 DC\n'
+    + '1. 確認 Users 的 DC 帳戶已啟用；Cards／Perms 只向 DC／超管顯示 DC 保密留言卡\n'
     + '2. （選填）Config 填 DC_NOTIFY_EMAIL；通知信不包含留言內容\n'
     + '3. 借場一條龍：Config 填 TEAMUP_*（Teamup）同 ttlock*（通通鎖）金鑰\n'
     + '4. 部署為 Web App（存取：任何人）→ 複製 /exec\n'

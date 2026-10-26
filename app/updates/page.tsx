@@ -9,12 +9,13 @@ export default function UpdatesPage() {
         <p>配合 member-portal 的公開留言提交合約，支援意見／支援分類、可選聯絡回覆，以及 DC 專用保密提交。</p>
         <p><a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">⬇ 下載完整後台 Code.gs v4.26.0</a></p>
         <ul>
-          <li>🗂 一般留言寫入主試算表 <code>DistrictFeedback</code>；管理後台的「你講我聽｜意見箱」只由 Perms 授權的 ops 角色查閱。</li>
-          <li>🔒 DC 保密留言寫入 setup 自動建立的獨立 <code>DCConfidential</code> 試算表，分享名單只同步 Users 表內有效 DC；讀取 API 亦會獨立核對目前啟用的 DC／超管身份。</li>
+          <li>🗂 一般留言寫入主試算表 <code>DistrictFeedback</code>；管理後台意見箱由 Perms 授權的 ops 角色查閱。</li>
+          <li>🔒 DC 留言寫入同一主試算表的 <code>DCConfidential</code> 分頁；管理平台卡片只授權 DC／SYSADMIN，讀取 API 亦直接核對目前角色。</li>
+          <li>ℹ️ 權限限制適用於管理平台／API；主試算表的其他檢視者仍可直接閱讀 DC 分頁，因 Google Sheets 不提供分頁級閱讀權限。</li>
           <li>✉️ <code>DC_NOTIFY_EMAIL</code> 選填。通知信只含參考編號，不含留言或聯絡資料；未填仍正常收件及儲存。</li>
-          <li>🛡️ <code>setupSheets()</code> 只補建欄位及試算表，不清除既有資料；健康檢查新增 <code>feedbackReady</code>、<code>dcFeedbackReady</code>。</li>
+          <li>🛡️ <code>setupSheets()</code> 只補建分頁及欄位、不清除既有資料；健康檢查新增 <code>feedbackReady</code>、<code>dcFeedbackReady</code>。</li>
         </ul>
-        <p><b>部署提示：</b>下載檔尚未部署到正式 Apps Script。更新前依只追加升級指引備份；執行 <code>setupSheets()</code> 時需授權 Drive 存取，並確認 DC 帳戶電郵正確。</p>
+        <p><b>部署提示：</b>下載檔尚未部署到正式 Apps Script。更新前依只追加升級指引備份；確認 Users／Perms 的 DC 帳戶及卡片權限正確。</p>
       </div>
       <div className="info-card">
         <h3>v4.25.4 — 🗓 候批申請可重疊，已批時段自動攔截</h3>

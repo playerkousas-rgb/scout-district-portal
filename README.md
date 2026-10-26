@@ -3,7 +3,7 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
-> **正式 Apps Script 尚未部署 v4.26.0，仍以區方現行部署版本為準。** 本倉 v4.26.0 `gs/Code.gs` 要求先依下文完成 token secret 遷移；更新前必須備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，不可直接覆蓋未驗收的正式後台。此版本新增獨立 DC 保密留言試算表；助手只交付檔案與驗證結果，不會代區方部署。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
+> **正式 Apps Script 尚未部署 v4.26.0，仍以區方現行部署版本為準。** 本倉 v4.26.0 `gs/Code.gs` 要求先依下文完成 token secret 遷移；更新前必須備份並閱讀[GS 只追加升級步驟](docs/gs-upgrade-no-data-loss.md)，不可直接覆蓋未驗收的正式後台。此版本在主試算表新增 DC 留言分頁；助手只交付檔案與驗證結果，不會代區方部署。房間讀取改用 Vercel 公開唯讀 Teamup ICS，見[房間設定](docs/venue-booking-flow.md)。
 >
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
@@ -54,10 +54,10 @@
 領袖姓名及職位使用 Teamup 內建 `who` 欄位；參加人數使用 `custom` 內的欄位 key（目前日曆事件回應為 `"1"`，Config 填 `1`）。成員系統不需要 Teamup API Token。`setupSheets()` 只追加缺少欄位／Config key，不會清除既有資料。
 
 ### v4.26.0「你講我聽」意見箱
-- 一般留言儲存在主試算表 `DistrictFeedback`；DC 保密留言寫到**獨立**的 `DCConfidential` Google 試算表，不依賴分頁保護實現閱讀隔離。
-- `setupSheets()` 會補建／重用 `DC_CONFIDENTIAL_SHEET_ID` 指向的檔案，並把 Drive 檢視權限同步為 Users 表內**有效 DC 角色帳戶**；其他既有編輯者／檢視者會被移除。執行時須授權 Apps Script 使用 Drive，並在完成後核對獨立檔案分享名單。檔案擁有者（Apps Script 執行帳戶）必須是 Users 表內啟用的 DC／SYSADMIN；擁有者本身無法從自己的 Drive 檔案移除。
-- 只有在 `DC_NOTIFY_EMAIL` 有值時才寄通知；通知不包括留言或聯絡資料。留空不影響留言儲存。
-- 一般列表以 `feedback` 卡片 Perms 讀取；保密列表的後端 API 另行強制目前啟用的 DC／超管身份，即使前端被繞過或 Perms 誤設也不會向其他角色回傳內容。詳見 [`docs/district-feedback.md`](docs/district-feedback.md)。
+- 一般留言儲存在主試算表 `DistrictFeedback`；DC 留言新增同一主試算表的 `DCConfidential` 分頁（只需多開一個分頁）。
+- 管理平台的 `feedback` 卡由 Perms 授權 ops 角色；`dcFeedback` 卡只授權 DC／SYSADMIN。DC 列表 API 亦在後端驗證目前角色，避免只靠前端藏卡。
+- 這是管理平台／API 層面的讀取限制，不是 Google Sheet 分頁級閱讀權限：有主試算表檢視權的人仍可直接打開 `DCConfidential` 分頁。若需要阻止此情況，必須把私密資料放在獨立試算表或限制整份主試算表的分享。
+- 只有在 `DC_NOTIFY_EMAIL` 有值時才寄通知；通知不包括留言或聯絡資料。留空不影響留言儲存。詳見 [`docs/district-feedback.md`](docs/district-feedback.md)。
 
 > 唔記得 Key 喺邊度攞 → 睇 [`docs/keys-checklist.md`](docs/keys-checklist.md) 逐條倒返出嚟＋驗證。
 > ℹ️ 借場/借物資規則（VENUE_RULES_URL / VENUE_TERMS_URL / STOCK_RULES_URL）已改由成員系統內建，後台唔使再填。
