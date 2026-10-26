@@ -30,7 +30,7 @@
    - **只有全新 Config 或舊 Config 缺少 `API_KEY_HASH` 整行**，才生成新 API Key（只顯示一次，請私下複製）；已有行連空白值都不覆寫。空白時須由區方另外明確生成 Key 並同步前端，未完成勿部署。
 4. `setupSheets()` 會在 Script Properties 缺少有效 `PORTAL_TOKEN_SECRET` 時自動建立每專案獨立的高熵密鑰（至少 32 字元）；亦會自動建立 Vercel→Apps Script 機器橋接密鑰。確認 `getHealthCheck` 顯示 `tokenSecretSet: true` 及 `masterProxyBridgeSet: true`。首次更換 token 密鑰會令舊 session／重設連結失效。
 5. `sheep` 維護帳戶密碼只存在 Vercel：設定 `PORTAL_{區碼}_MASTER_PASSWORD`（例如 `PORTAL_SKW_MASTER_PASSWORD`），建議先在 Vercel 設好新密碼再升級；密碼可自行選長短；短密碼較易被猜中，建議用可記住的長 passphrase（此登入流程沒有跨 Vercel instance 的分散式限速）。Apps Script 不讀取舊維護密碼；`setupSheets()` 會移除舊 `PORTAL_MASTER_PASSWORD` Script Property。Vercel 環境變數更新後需重新部署，變更才會生效；已簽發的 sheep session 最遲 12 小時到期，改密碼不會即時撤銷現有 session。
-6. 在 Apps Script 試算表選單「🔐 顯示 Vercel 維護橋接密鑰」，將顯示的機器密鑰設為對應 `PORTAL_{區碼}_MASTER_BRIDGE_SECRET`（例如 `PORTAL_SKW_MASTER_BRIDGE_SECRET`）。此值不是登入密碼、不需記憶；共用 API Key 單獨不能簽發維護 token。正式 Apps Script 更新仍由區方自行貼上／部署。不可提交任何密鑰或密碼。
+6. 在 Apps Script 試算表選單「🔐 顯示 Vercel 維護橋接密鑰」，複製顯示的密鑰，設為對應的 Vercel 環境變數 `PORTAL_{區碼}_MASTER_BRIDGE_SECRET`（例如 `PORTAL_SKW_MASTER_BRIDGE_SECRET`）。共用 API Key 單獨不能簽發維護 token。正式 Apps Script 更新仍由區方自行貼上／部署。不可提交任何密鑰或密碼。
 7. 新版拒絕共享初始密碼 `1234`／`scout1234`。**既有系統不會自動補預設 Users／Staff 帳戶**；只有全新空白試算表才建立隨機未知的臨時密碼帳戶，須由管理員另行重設。停用不再使用的帳戶；啟用 YMIS 卡前確認合資格 Users 帳戶已啟用。`MASTER_EMAIL` 只是帳號名稱，密碼不可寫入 Code.gs。
 8. **全新區**：部署 → 新增部署 → 網頁應用程式（執行身分：我自己；存取：**任何人**）→ 攞 `/exec` 網址。**已有區**：管理部署 → 編輯**原有** Web App → 新版本；沿用舊 `/exec`。
 

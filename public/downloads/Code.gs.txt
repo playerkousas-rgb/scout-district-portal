@@ -203,7 +203,7 @@ function ensureTokenSecret_() {
   PropertiesService.getScriptProperties().setProperty(TOKEN_SECRET_PROPERTY, value);
   return true;
 }
-/** Vercel → Apps Script 專用高熵橋接密鑰；不是人類登入密碼。 */
+/** Vercel → Apps Script 專用高熵橋接密鑰。 */
 function getMasterProxySecret_() {
   try {
     var value = String(PropertiesService.getScriptProperties().getProperty(MASTER_PROXY_SECRET_PROPERTY) || '');
@@ -7049,7 +7049,7 @@ function showKeyDialog_(title, key, note) {
   var prompt = isApiKey ? '請即刻複製下面嘅 API Key：' : '請複製下面嘅橋接密鑰（可再次從選單顯示）：';
   var footer = isApiKey
     ? '同一個 Key 要設定去兩個 Vercel 環境變數：PORTAL_{區碼}_APIKEY 同 MEMBER_{區碼}_APIKEY。'
-    : '此為機器橋接密鑰，不是 sheep 登入密碼；只需保存在 Vercel 環境變數。';
+    : '請將密鑰複製並保存在 Vercel 環境變數。';
   if (!ui) {
     var msg = '\n╔══════════════════════════════════════╗\n'
       + '  ' + title + '\n'
@@ -7223,7 +7223,7 @@ function showMasterProxySecretMenu() {
   if (!secret) { uiAlert_('錯誤', '無法讀取維護登入橋接密鑰，請先執行 setupSheets()。'); return; }
   var code = districtCode_() || '區碼';
   showKeyDialog_('🔐 Vercel 維護登入橋接密鑰', secret,
-    '請將此機器密鑰設為 Vercel 環境變數 PORTAL_' + code + '_MASTER_BRIDGE_SECRET；此值不是 sheep 密碼。');
+    '請將此密鑰設為 Vercel 環境變數 PORTAL_' + code + '_MASTER_BRIDGE_SECRET。');
 }
 
 function onOpen() {
