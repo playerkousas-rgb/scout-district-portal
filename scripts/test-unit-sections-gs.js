@@ -61,7 +61,7 @@ function buildContext() {
   const sheets = {
     Config: makeSheet('Config', [['key', 'value', '說明'],
       ['districtCode', 'SKW', ''], ['districtName', '筲箕灣區', ''], ['TROOP_LIST', '', '']]),
-    Perms: makeSheet('Perms', [['cardId', 'DC', 'AL'], ['visit', 'edit', 'view']]),
+    Perms: makeSheet('Perms', [['cardId', 'DC', 'AL'], ['visit', 'edit', 'view'], ['troopDirectory', 'edit', 'view']]),
     Users: makeSheet('Users', [['email', 'role', 'active', 'displayName'],
       ['dc@x.org', 'DC', 'TRUE', '陳區總監'], ['al@x.org', 'AL', 'TRUE', '助理區領袖']]),
     Roles: makeSheet('Roles', [['role', 'label', 'protected', 'level'],

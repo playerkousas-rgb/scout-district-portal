@@ -3,7 +3,7 @@
 ## 資料來源及管理方式
 
 - 唯一後台來源：區管理系統 Apps Script 的 `Units`（旅）及 `UnitSections`（團）分頁；初始筲箕灣區 28 個旅團沿用現有名單及主辦機構，依據[港島地域官方筲箕灣區旅團列表](https://www.hkirscout.org.hk/tc/districts_groups/groups/skw/index.html)（檢視日期 2026-03-31）。
-- 管理介面：區管理系統 「旅團資料」卡 → `/visit?tab=units`。區方可編輯主辦機構、集會時間、Instagram、Facebook、旅團網頁及是否在成員系統公開顯示。
+- 管理介面：區管理系統「旅團」卡 →「旅團資料」分頁（`/troop?tab=directory`；舊 `/visit?tab=units` 會轉向）。區方可編輯主辦機構、集會時間、Instagram、Facebook、旅團網頁及是否在成員系統公開顯示。
 - 社交／網頁欄位可留空；空白代表不顯示該項。只接受 `http://` 或 `https://` 網址。未勾選公開顯示的旅團不會出現在公開 API。
 - `Units` 沿用原旅資料；`UnitSections` 僅存各支部團詳情，成員端不提供編輯功能。
 
@@ -79,7 +79,7 @@ v4.29.0 將名錄由「每旅一張卡」升級為對齊[港島總會筲箕灣�
 - 骨架回落：某旅喺 `UnitSections` 完全冇維護列時，後台按 `Units` 團數字串自動拆出 `units`（純數字＝常規團，每支部 cap 9；`A`／`S` 前綴＝變體；無法辨識嘅代號丟棄），詳情全部空白，由成員端回落旅層級資料並標示。
 - 維護覆蓋：一旅有任何維護列，公開名錄只回該旅啟用＋公開的維護列（全部隱藏時 `units: []`，不重生骨架）（停用／非公開嘅團唔出現）。
 
-### 管理 action：`saveUnitSections`（POST，需 visit 卡 edit 權限）
+### 管理 action：`saveUnitSections`（POST，需 Perms `troopDirectory` 子分頁 edit 權限）
 
 - Payload：`{ token, rows: UnitSection[] }`（相容別名 `unitSections`，最多 1000 團），全表覆寫（同 `saveUnits` 模式）；空陣列＝清空，公開名錄回落骨架。
 - 伺服器端驗證：`troop`＋`section` 必填、`unitCode` 須為空或 `A1`／`S1` 格式、dup key（`troop|section|unitCode`）拒絕、網址須為 `http(s)` 且無空白。
@@ -141,3 +141,9 @@ v4.29.0 將名錄由「每旅一張卡」升級為對齊[港島總會筲箕灣�
 - `node scripts/check-member-alignment.js /path/to/latest-member-portal`：最新 MAIN 的 action／proxy／公開 sanitizer 合約通過。
 - 14 組 GS suites 中 13 組通過；仍只有原有 `test-district-hq-gs.js:62` 的月曆配置基線失敗，未改動該功能或掩蓋測試。
 - 原 v4.30.0 快照及 YMIS 舊頁保持不變；沒有合併 MAIN、部署 GS、改動正式 Sheet 或提交成員端 repo。
+
+## v4.32.0 旅團合併卡＋聯絡區會（取代上節 v4.31.0 固定政策描述）
+
+- 管理端「旅團資料」已併入「旅團」卡（`/troop?tab=directory` 的「旅團資料」分頁，只放公開資料）；讀寫權限由 Perms 表 `troopDirectory` 子分頁行決定（唔再係寫死政策），公開合約 `listDistrictTroops`（v1.3 shape）不變。
+- 新增成員端入口「聯絡區會」：公開 POST `submitVisitRequest`（申請探訪／邀請出席；回覆聯絡可選，同「你講我聽」模式），欄位合約見 [`member-gs-handshake.md`](member-gs-handshake.md) 尾節。申請只入 `VisitRequests` 待區方跟進，不會直接變探訪紀錄。
+- 旅團領袖私人聯絡存在管理端私隠表 `TroopContacts`，只喺管理端「聯絡簿 → 旅團」按 `troopContacts` 子權限顯示；任何公開回應都不會包含，成員端不需要亦不應讀取。

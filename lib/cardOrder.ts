@@ -23,6 +23,15 @@ export function loadCardOrder(districtCode: string, email: string): CardOrderMap
     delete out.ymisWebsiteShortcut;
     if (out.troopDirectory === undefined && out.troopDirectoryShortcut !== undefined) out.troopDirectory = out.troopDirectoryShortcut;
     delete out.troopDirectoryShortcut;
+    // v4.32.0：visit＋troopDirectory＋activity 合併做 troop — 沿用三者之中較前嘅個人位置
+    if (out.troop === undefined) {
+      const legacy = [out.visit, out.troopDirectory, out.activity].filter((v): v is number => v !== undefined);
+      if (legacy.length) out.troop = Math.min(...legacy);
+    }
+    delete out.visit;
+    delete out.troopDirectory;
+    delete out.activity;
+    delete out.unit;
     return out;
   } catch { return {}; }
 }

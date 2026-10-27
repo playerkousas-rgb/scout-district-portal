@@ -208,8 +208,8 @@ async function login(email) {
   console.log('  ✓ 無效批次整批 rollback；後端自行驗證金額及 Ref，唔信 client');
 
   const health = await get('getHealthCheck');
-  assert.equal(health.data.version, '4.31.0');
-  console.log('  ✓ setupSheets 補卡及 DebitNotes 帳簿成功，健康檢查版本 4.31.0');
+  assert.equal(health.data.version, '4.32.0');
+  console.log('  ✓ setupSheets 補卡及 DebitNotes 帳簿成功，健康檢查版本 4.32.0');
   console.log('\n全部後台門禁及帳簿整合測試通過 ✓');
 })().catch(error => {
   console.error(error);

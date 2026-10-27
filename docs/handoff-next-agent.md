@@ -129,7 +129,7 @@
 > 純邏輯喺 `lib/visits.ts`（`troopStats`／`coverage`／`visitorStats`／`rangePresets`／`parseUnitPaste`）。
 > ⚠️ vm 測試提醒：`v instanceof Date` 跨 realm 會 false，所以 `visitDate_` 改用 `Object.prototype.toString.call(v)`。
 > 🧪 本機預覽用 `node scripts/mock-gs-server.js`（in-repo，sandbox 重置都唔會冇；apiKey 固定 `dev`，登入 sheep/LOCAL_MOCK_LOGIN_NOT_FOR_REAL_USE；mock 啟動時列出配套 Vercel 假環境變數，純假資料）。
-> 🛑 **委任系統／旅團管理系統暫時 hold**：用戶話委任資料難搞；旅團管理佢自己另有一套系統，日後先接，仲要處理私隱。
+> 🛑 **委任系統暫時 hold；旅團管理系統已刪除**：委任資料難搞；用戶已決定不再保留 `unit` 佔位卡／頁面／Perms 行，唔好自行加返。
 > ⏭ **用戶未來想要**：全區領袖「委任年期 list」——有新委任就登記入去，令「無 → GSA（服務滿 7 年）」呢級真正計得準。
 > 而家係靠 `Awards.serviceStart` 逐個人填；下一步可以考慮同 Staff／成員系統委任資料對接，或者做一張 `Appointments` 表。
 > 用戶自己喺「年期設定」改得，所以千祈唔好 hardcode 返落程式。

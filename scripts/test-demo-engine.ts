@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert';
 import { demoCall, demoExternal, resetDemoData } from '../lib/demo/engine.ts';
-import { DEMO_TOKEN, demoDefaultMatrix } from '../lib/demo/seed.ts';
+import { DEMO_TOKEN, demoDefaultMatrix, freshDemoDb } from '../lib/demo/seed.ts';
 import { canViewYmisRole } from '../lib/accountRoles.ts';
 
 let pass = 0;
@@ -32,11 +32,21 @@ check('login：任何電郵密碼都入到同一個 ADC 示範身份（權限全
 });
 
 // ── 2. 卡片 ──
-check('getCards：權限全開 — 17 張卡全部 edit；冇 news；連成人獎勵（awards）都收起；壞 token 被擋', () => {
+check('getCards：權限全開 — 主卡全部 edit + 5 張子權限偽卡；冇 news／unit；連成人獎勵（awards）都收起；壞 token 被擋', () => {
   const r = demoCall('getCards', { token: T.adc }, 'GET');
   assert.ok(r.ok);
   const ids = r.data.map((c: any) => c.cardId);
-  assert.strictEqual(ids.length, 17);
+  const mainCards = r.data.filter((c: any) => !c.subPerm);
+  const subCards = r.data.filter((c: any) => c.subPerm);
+  assert.strictEqual(mainCards.length, 14, '刪 unit、activity 入旅團後主卡再少兩張（兼收起 awards）');
+  assert.strictEqual(freshDemoDb().schemaVersion, 7, '新示範資料用 schema v7');
+  assert.strictEqual(subCards.length, 5);
+  assert.deepStrictEqual(subCards.map((c: any) => c.cardId).sort(), ['activity', 'troopContacts', 'troopDirectory', 'troopRequests', 'visit']);
+  assert.ok(subCards.filter((c: any) => c.cardId !== 'troopContacts').every((c: any) => c.parentId === 'troop'));
+  assert.strictEqual(subCards.find((c: any) => c.cardId === 'troopContacts').parentId, 'contacts');
+  assert.ok(!mainCards.some((c: any) => c.cardId === 'activity' || c.cardId === 'unit'));
+  assert.strictEqual(ids.indexOf('unit'), -1, '旅團管理系統已刪');
+  assert.ok(mainCards.some((c: any) => c.cardId === 'troop' && c.url === '/troop'), '只有一張旅團入口卡');
   assert.ok(ids.indexOf('circulars') >= 0, '區通告卡要喺示範版出現');
   assert.ok(ids.indexOf('debitNote') >= 0, 'DEBIT NOTE 要喺示範版提供虛構預覽');
   assert.ok(r.data.every((c: any) => c.access === 'edit'));
@@ -53,6 +63,14 @@ check('示範權限矩陣：rooms 全員可看，審批卡唔畀 ADC；mockAdmin
   assert.strictEqual(matrix.visit.DDC_ADMIN, 'edit');
   assert.strictEqual(matrix.troopDirectory.ADC_SCOUT, 'edit');
   assert.strictEqual(matrix.troopDirectory.STAFF, 'view');
+  assert.strictEqual(matrix.troopContacts.ADC_SCOUT, 'view', '私隱聯絡：ADC 預設唯讀');
+  assert.strictEqual(matrix.troopContacts.STAFF, 'edit');
+  assert.strictEqual(matrix.troopRequests.ADC_SCOUT, 'edit');
+  assert.strictEqual(matrix.activity.ADC_SCOUT, 'view', '活動知會：ADC 預設唯讀');
+  assert.strictEqual(matrix.activity.STAFF, 'edit');
+  assert.strictEqual(matrix.activity.DDC_TRAINING, 'edit');
+  assert.strictEqual(matrix.activity.SYSADMIN, 'edit');
+  assert.strictEqual(matrix.unit, undefined, '已刪卡不留權限行');
   assert.strictEqual(matrix.rooms.ADC_SCOUT, 'view');
   assert.strictEqual(matrix.rooms.STAFF, 'view');
   assert.strictEqual(matrix.venueReg.ADC_SCOUT, '');
@@ -176,6 +194,30 @@ check('v4.29.0 團階層：getVisitBoard 帶 unitSectionsReady＋示範列；sav
   const after = demoCall('getVisitBoard', { token: T.adc }, 'GET');
   assert.strictEqual(after.data.unitSections.length, 1);
   assert.strictEqual(after.data.unitSections[0].troop, '17');
+  resetDemoData();
+});
+
+check('🔒 旅團聯絡／📨 聯絡區會（示範）：seed 資料、新增聯絡、公開提交申請及處理狀態', () => {
+  const perms = demoCall('getPerms', { token: T.adc }, 'GET');
+  assert.strictEqual(perms.data.subPerms.length, 5, 'getPerms 要帶子分頁清單');
+  assert.strictEqual(perms.data.subPerms.find((x: any) => x.id === 'activity').parentId, 'troop');
+  assert.strictEqual(perms.data.subPerms.find((x: any) => x.id === 'troopContacts').parentId, 'contacts');
+  const board = demoCall('getTroopContacts', { token: T.adc }, 'GET');
+  assert.ok(board.ok);
+  assert.strictEqual(board.data.contacts.length, 4);
+  assert.strictEqual(board.data.scopeSection, '', '示範 mockAdmin 無支部範圍');
+  assert.ok(board.data.canEdit);
+  const saved = demoCall('saveTroopContact', { token: T.adc, contact: { troop: '17', contactRole: 'leader', section: 'scout', name: '新委任童軍團長（示範）', phone: '9000 1111', email: '' } }, 'POST');
+  assert.ok(saved.ok);
+  assert.strictEqual(demoCall('getTroopContacts', { token: T.adc }, 'GET').data.contacts.length, 5);
+  assert.ok(demoCall('deleteTroopContact', { token: T.adc, id: saved.data.id }, 'POST').ok);
+  const req = demoCall('submitVisitRequest', { type: 'invite', troop: '206', section: 'scout', activityName: '示範檢閱', purpose: '誠邀區幹部出席主禮', wantReply: false, contact: '唔應該保存' }, 'POST');
+  assert.ok(req.ok && /^TR-/.test(req.data.refCode), '公開提交毋須登入');
+  const inbox = demoCall('getVisitRequests', { token: T.adc }, 'GET');
+  const mine = inbox.data.requests.find((x: any) => x.id === req.data.id);
+  assert.ok(mine);
+  assert.strictEqual(mine.contact, '', '唔要回覆就唔存聯絡方式');
+  assert.ok(demoCall('setVisitRequestStatus', { token: T.adc, id: req.data.id, patch: { status: 'done' } }, 'POST').ok);
   resetDemoData();
 });
 

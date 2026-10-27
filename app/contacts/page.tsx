@@ -10,10 +10,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api';
-import { useRequireCard } from '@/lib/cardAccess';
+import { checkCardAccess, useRequireCard } from '@/lib/cardAccess';
 import { useDistrict } from '@/lib/useDistrict';
 import { levelOf, LEVEL_ADC } from '@/lib/levels';
 import BackLink, { BackBar } from '@/components/BackLink';
+import TroopContactsPanel from '@/components/TroopContactsPanel';
 import { SOURCES } from '@/lib/externalSources';
 import {
   HQ_GROUPS, HQ_OFFICE, REGION_GROUPS, REGION_OFFICE, TROOP_ROWS, applyContactNames, staffEmailFor, type ContactGroup, type ContactRow,
@@ -127,6 +128,7 @@ export default function ContactsPage() {
   const [tab, setTab] = useState<Tab>(initial && TABS.some(t => t.id === initial) ? initial : 'troop');
   const [q, setQ] = useState('');
   const [troopList, setTroopList] = useState<string[]>([]);
+  const [showTroopContacts, setShowTroopContacts] = useState(false);
   const [regionGroups, setRegionGroups] = useState<ContactGroup[]>(REGION_GROUPS);
   const [regionSync, setRegionSync] = useState<LiveState>({ live: false, updated: REGION_OFFICE.updated });
   const [hqGroups, setHqGroups] = useState<ContactGroup[]>(HQ_GROUPS);
@@ -136,6 +138,16 @@ export default function ContactsPage() {
   const [nameOverrides, setNameOverrides] = useState<Record<string, string>>({});
   const [editingName, setEditingName] = useState<{ row: ContactRow & { nameKey?: string; nameCustom?: boolean }; value: string } | null>(null);
   const [nameBusy, setNameBusy] = useState(false);
+
+  // 🔒 私隱旅團聯絡歸「聯絡簿」：先過 contacts 卡門禁，再按 troopContacts 子權限決定顯示。
+  useEffect(() => {
+    if (!session) { setShowTroopContacts(false); return; }
+    let cancelled = false;
+    checkCardAccess(session.token, 'troopContacts').then(result => {
+      if (!cancelled) setShowTroopContacts(result.status === 'allowed');
+    });
+    return () => { cancelled = true; };
+  }, [session]);
 
   // 旅號清單：先讀 Config TROOP_LIST（活動知會表同一份）
   useEffect(() => {
@@ -265,6 +277,7 @@ export default function ContactsPage() {
               </div>
             )}
           </section>
+          {showTroopContacts && <TroopContactsPanel token={session.token} />}
         </>
       )}
 

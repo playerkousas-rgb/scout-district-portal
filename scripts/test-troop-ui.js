@@ -15,7 +15,7 @@ function load(file) {
   if (cache.has(file)) return cache.get(file).exports;
   const mod = { exports: {} }; cache.set(file, mod);
   let source = fs.readFileSync(file, 'utf8');
-  if (file.endsWith('/app/visit/page.tsx')) source += '\nexport { BoardTab, VisitModal };';
+  if (file.endsWith('/components/VisitPanel.tsx')) source += '\nexport { BoardTab, VisitModal };';
   const js = ts.transpileModule(source, { compilerOptions: {
     jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020,
   } }).outputText;
@@ -49,7 +49,7 @@ const board = { units: [troop], visits: [visit], today: '2026-10-26', from: '202
   unitSections: [{ troop: '1745', section: 'venture', unitCode: '', meetingTime: '舊深資資料' }],
   permissions: { version: 1, canRegister: true, canEditRecords: false }, canEdit: false, permissionsVersion: 1 };
 const props = { board, token: 'test', reload: async () => {}, flash() {}, setError() {} };
-const { BoardTab, VisitModal } = load(path.join(root, 'app/visit/page.tsx'));
+const { BoardTab, VisitModal } = load(path.join(root, 'components/VisitPanel.tsx'));
 const html = render(React.createElement(BoardTab, { ...props, section: '', canEdit: false, canRegister: true }));
 assert.ok(html.includes('儲存登記') && html.includes('✎ 詳細'), 'view users can open new detail form and register');
 assert.ok(!html.includes('>編輯<') && !html.includes('>刪除<'), 'existing own record not editable');

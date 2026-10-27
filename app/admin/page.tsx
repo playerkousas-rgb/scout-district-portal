@@ -48,9 +48,16 @@ export default function AdminPage() {
   function cellVal(c: string, r: string): AccessLevel {
     return (matrix[c] && matrix[c][r]) || '';
   }
-  const isFixedFeature = (id: string) => id === 'visit' || id === 'troopDirectory';
+  // 「旅團」入口卡本身冇 Perms 行，由下面屬於旅團嘅子權限行推導（有任一行權限就入得卡）
+  const isDerivedEntry = (id: string) => id === 'troop' && !!bundle?.subPerms?.length;
+  function derivedAccess(parentId: string, role: string): AccessLevel {
+    const subs = (bundle?.subPerms || []).filter(sp => sp.parentId === parentId);
+    if (subs.some(sp => cellVal(sp.id, role) === 'edit')) return 'edit';
+    if (subs.some(sp => cellVal(sp.id, role) === 'view')) return 'view';
+    return '';
+  }
   function toggle(c: string, r: string) {
-    if (isFixedFeature(c)) return;
+    if (isDerivedEntry(c)) return;
     setMsg('');
     setMatrix(prev => {
       const cur = (prev[c] && prev[c][r]) || '';
@@ -59,7 +66,7 @@ export default function AdminPage() {
     });
   }
   function setRow(c: string, v: AccessLevel) {
-    if (isFixedFeature(c)) return;
+    if (isDerivedEntry(c)) return;
     if (!bundle) return;
     setMsg('');
     setMatrix(prev => {
@@ -194,7 +201,7 @@ export default function AdminPage() {
 
           {/* 權限矩陣 */}
           <p className="fps-help" style={{ marginBottom: 10 }}>💡 點擊任何格子自由切換：<b>—</b> 不可見 → <b>👁</b> 可看（唯讀） → <b>✏️</b> 可管理（新增／修改／批核），改完記得按「💾 儲存權限」。</p>
-          <p className="fps-help">旅團資料及旅團探訪採固定、獨立權限，不可在此矩陣轉授：資料 ADC+ 可修改；探訪人人可新增、DDC+ 才可修改／刪除。探訪的 👁 表示仍可新增。</p>
+          <p className="fps-help">「旅團」卡內每個小分頁（旅團探訪／旅團資料／📨 申請邀請／🗓 活動知會）喺下面各有一行子權限；🔒 旅團聯絡已歸入「聯絡簿」，亦有獨立一行。全部喺呢張表用 👁／✏️ 設定；旅團入口卡一行只係顯示推導結果。旅團探訪嘅 👁 表示可新增探訪，✏️ 先可改／刪紀錄。</p>
           <div className="toolbar">
             <button className="btn-sm" onClick={save} disabled={saving}>{saving ? '儲存中…' : '💾 儲存權限'}</button>
             {msg && <span className="ok-msg">{msg}</span>}
@@ -210,33 +217,58 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {bundle.cards.slice().sort((a, b) => a.order - b.order).map(c => (
-                  <tr key={c.cardId}>
-                    <td className="sticky-col card-name">
-                      <span>{c.icon}</span> {c.title}
-                      <small className={`badge-type ${c.type}`}>{c.type}</small>
-                    </td>
-                    {bundle.roles.map(r => {
-                      const v = cellVal(c.cardId, r.role);
-                      return <td key={r.role} title={isFixedFeature(c.cardId) ? '固定角色政策（探訪唯讀者仍可新增）' : undefined} className={`pcell ${CELL[v].cls}`} onClick={() => toggle(c.cardId, r.role)}>{CELL[v].txt}</td>;
-                    })}
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      <button className="mini-btn" disabled={isFixedFeature(c.cardId)} onClick={() => setRow(c.cardId, 'view')}>👁</button>{' '}
-                      <button className="mini-btn" disabled={isFixedFeature(c.cardId)} onClick={() => setRow(c.cardId, 'edit')}>✏️</button>{' '}
-                      <button className="mini-btn danger" disabled={isFixedFeature(c.cardId)} onClick={() => setRow(c.cardId, '')}>✕</button>
-                    </td>
-                    <td>
-                      <button
-                        className={`mini-btn ${c.enabled ? '' : 'danger'}`}
-                        disabled={roleBusy === 'card:' + c.cardId}
-                        onClick={() => toggleCard(c.cardId, !c.enabled)}
-                        title={c.enabled ? '點擊關閉此卡片' : '點擊開啟此卡片'}
-                      >
-                        {c.enabled ? '🟢 開啟' : '🙈 隱藏'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {bundle.cards.slice().sort((a, b) => a.order - b.order).flatMap(c => {
+                  const derived = isDerivedEntry(c.cardId);
+                  const cardRow = (
+                    <tr key={c.cardId}>
+                      <td className="sticky-col card-name">
+                        <span>{c.icon}</span> {c.title}
+                        <small className={`badge-type ${c.type}`}>{c.type}</small>
+                        {derived && <small className="badge-type">入口卡（由子權限推導）</small>}
+                      </td>
+                      {bundle.roles.map(r => {
+                        const v = derived ? derivedAccess(c.cardId, r.role) : cellVal(c.cardId, r.role);
+                        return <td key={r.role} title={derived ? '由下面子分頁權限推導，唔使直接設定' : undefined} className={`pcell ${CELL[v].cls}`} onClick={() => toggle(c.cardId, r.role)}>{CELL[v].txt}</td>;
+                      })}
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <button className="mini-btn" disabled={derived} onClick={() => setRow(c.cardId, 'view')}>👁</button>{' '}
+                        <button className="mini-btn" disabled={derived} onClick={() => setRow(c.cardId, 'edit')}>✏️</button>{' '}
+                        <button className="mini-btn danger" disabled={derived} onClick={() => setRow(c.cardId, '')}>✕</button>
+                      </td>
+                      <td>
+                        <button
+                          className={`mini-btn ${c.enabled ? '' : 'danger'}`}
+                          disabled={roleBusy === 'card:' + c.cardId}
+                          onClick={() => toggleCard(c.cardId, !c.enabled)}
+                          title={c.enabled ? '點擊關閉此卡片' : '點擊開啟此卡片'}
+                        >
+                          {c.enabled ? '🟢 開啟' : '🙈 隱藏'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                  const subRows = (bundle.subPerms || [])
+                    .filter(sp => sp.parentId === c.cardId)
+                    .map(sp => (
+                      <tr key={sp.id}>
+                        <td className="sticky-col card-name" style={{ paddingLeft: 26 }}>
+                          <span>└ {sp.icon}</span> {sp.title}
+                          <small className="badge-type">子分頁</small>
+                        </td>
+                        {bundle.roles.map(r => {
+                          const v = cellVal(sp.id, r.role);
+                          return <td key={r.role} className={`pcell ${CELL[v].cls}`} onClick={() => toggle(sp.id, r.role)}>{CELL[v].txt}</td>;
+                        })}
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <button className="mini-btn" onClick={() => setRow(sp.id, 'view')}>👁</button>{' '}
+                          <button className="mini-btn" onClick={() => setRow(sp.id, 'edit')}>✏️</button>{' '}
+                          <button className="mini-btn danger" onClick={() => setRow(sp.id, '')}>✕</button>
+                        </td>
+                        <td><span className="fps-help">跟入口卡</span></td>
+                      </tr>
+                    ));
+                  return [cardRow, ...subRows];
+                })}
               </tbody>
             </table>
           </div>

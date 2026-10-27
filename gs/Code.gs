@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.31.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.32.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -171,6 +171,8 @@ var SHEET = {
   UNITS: 'Units',                // 全區旅團名單（旅號、主辦機構、各支部團數）
   UNIT_SECTIONS: 'UnitSections', // v4.29.0 旅→團階層：每個團（支部單位）一列嘅集會時間／地點／社交帳戶
   VISITS: 'Visits',              // 旅團探訪登記（一次探訪一行）
+  TROOP_CONTACTS: 'TroopContacts', // v4.32.0 旅團聯絡（個人資料；Perms 獨立行 troopContacts，不經公開 API）
+  VISIT_REQUESTS: 'VisitRequests', // v4.32.0 成員端聯絡區會：請求探訪／邀請出席（Perms 獨立行 troopRequests）
   AWARD_TYPES: 'AwardTypes',     // 獎項及年期設定（可喺管理系統改，唔使改程式）
   INCIDENT_REQ: 'IncidentReports', // 意外報告（HKSA ACC-RPT 2019/07 欄位）
   COURSE_LINKS: 'CourseLinks',   // 訓練班目錄（單一資料來源）
@@ -380,9 +382,11 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.31.0',
+      version: '4.32.0',
       feedbackReady: feedbackReady_(),
       dcFeedbackReady: dcFeedbackReady_(),
+      troopContactsReady: troopContactsReady_(),
+      visitRequestsReady: visitRequestsReady_(),
       districtName: getConfigValue_('districtName') || '',
       districtCode: getConfigValue_('districtCode') || '',
       apiKeySet: !!getConfigValue_('API_KEY_HASH'),
@@ -440,6 +444,8 @@ function doGet(e) {
       case 'getAwardsBoard':      return json(getAwardsBoard_(p.token));
       case 'getTroopDirectoryBoard': return json(getTroopDirectoryBoard_(p.token));
       case 'getVisitBoard':       return json(getVisitBoard_(p.token, p.from, p.to));
+      case 'getTroopContacts':    return json(getTroopContacts_(p.token));
+      case 'getVisitRequests':    return json(getVisitRequests_(p.token));
       case 'getAnnouncements':    return json(getAnnouncements_(p.token));
       case 'getCirculars':         return json(getCirculars_(p.token));
       case 'getAllRecords':       return json(getAllRecords_(p.token));
@@ -485,6 +491,7 @@ function doPost(e) {
       case 'submitActivityNotice': return json(submitActivityNotice_(b));
       case 'submitCourseReg':      return json(submitCourseReg_(b));
       case 'submitDistrictFeedback': return json(submitDistrictFeedback_(b));
+      case 'submitVisitRequest':   return json(submitVisitRequest_(b));
 
       // ---------- 登入 ----------
       case 'proxyMasterLogin':     return json(proxyMasterLogin_(b.assertion, b.signature));
@@ -530,6 +537,9 @@ function doPost(e) {
       case 'deleteVisit':         return json(deleteVisit_(b.token, b.id));
       case 'saveDebitNote':       return json(saveDebitNote_(b.token, b.note || b.debitNote || {}));
       case 'importDebitNotes':    return json(importDebitNotes_(b.token, b.rows));
+      case 'saveTroopContact':    return json(saveTroopContact_(b.token, b.contact || b));
+      case 'deleteTroopContact':  return json(deleteTroopContact_(b.token, b.id));
+      case 'setVisitRequestStatus': return json(setVisitRequestStatus_(b.token, b.id, b.patch || b));
       case 'saveUnits':           return json(saveUnits_(b.token, b.units));
       case 'saveUnitSections':    return json(saveUnitSections_(b.token, b.rows || b.unitSections, b.troop));
       case 'saveAnnouncement':      return json(saveAnnouncement_(b.token, b.announcement || b.news || b));
@@ -1216,13 +1226,28 @@ function requirePermRead_(token, perm, cardId) {
   }
   return { error: '你沒有此功能嘅權限' };
 }
-/** 固定且互相獨立的旅團權限；不能由舊 Perms／Users.cards 誤授權放寬。 */
-function districtFeatureAccess_(role, cardId) {
-  role = String(role || '').trim().toUpperCase();
-  var ddcUp = role === 'SYSADMIN' || role === 'DC' || /^DDC(_|$)/.test(role);
-  if (cardId === 'visit') return ddcUp ? 'edit' : 'view';
-  if (cardId === 'troopDirectory') return ddcUp || /^ADC(_|$)/.test(role) ? 'edit' : 'view';
+/**
+ * v4.32.0 卡片子權限（Perms 表獨立行，由超管喺權限矩陣用 👁／✏️ 統管）：
+ * 「旅團」入口卡包含探訪／公開資料／申請邀請／活動知會；私隠旅團聯絡歸「聯絡簿」。
+ * 每個子分頁各自查自己嗰行 Perms，唔再用硬編角色白名單。
+ * 預設值同 v4.31.0 固定政策一致（見 blueprint_ 嘅 permRows）。
+ */
+var CARD_SUB_PERMS = [
+  { id: 'visit', parentId: 'troop', title: '旅團探訪', icon: '🏕' },
+  { id: 'troopDirectory', parentId: 'troop', title: '旅團資料', icon: '🧭' },
+  { id: 'troopRequests', parentId: 'troop', title: '旅團申請／邀請', icon: '📨' },
+  { id: 'activity', parentId: 'troop', title: '活動知會', icon: '🗓' },
+  { id: 'troopContacts', parentId: 'contacts', title: '旅團聯絡（私隱）', icon: '🔒' },
+];
+function cardSubPermDef_(cid) {
+  var id = String(cid || '').trim();
+  for (var i = 0; i < CARD_SUB_PERMS.length; i++) if (CARD_SUB_PERMS[i].id === id) return CARD_SUB_PERMS[i];
   return null;
+}
+/** 支部 ADC 角色 → 負責支部（聯絡／申請嘅支部範圍過濾用）；其他角色回 ''（不限支部） */
+function troopScopeSection_(role) {
+  var map = { ADC_GH: 'gh', ADC_CUBS: 'cub', ADC_SCOUT: 'scout', ADC_VENTURE: 'venture', ADC_ROVER: 'rover' };
+  return map[String(role || '').trim().toUpperCase()] || '';
 }
 
 /** 實時讀取某帳戶對某張卡片嘅 Perms 權限（'' | 'view' | 'edit'） */
@@ -1235,8 +1260,18 @@ function cardAccessOf_(t, cardId) {
     return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
   })[0];
   if (!u || String(u.active).toUpperCase() === 'FALSE') return '';
-  var featureAccess = districtFeatureAccess_(u.role || t.role, cid);
-  if (featureAccess !== null) return featureAccess;
+  // 「旅團」入口卡冇自己嘅 Perms 行：有任何屬於旅團嘅子分頁權限就入得（取最高嗰級）。
+  // troopContacts 已歸聯絡簿，唔計入旅團入口卡。
+  if (cid === 'troop') {
+    var best = '';
+    CARD_SUB_PERMS.forEach(function (d) {
+      if (d.parentId !== 'troop') return;
+      var a = cardAccessOf_(t, d.id);
+      if (a === 'edit') best = 'edit';
+      else if (a === 'view' && best !== 'edit') best = 'view';
+    });
+    return best;
+  }
   if (levelOfUser_(t.email, t.role) === LEVEL_SUPER) return 'edit';
   if (cid === 'awards' && levelOfUser_(t.email, u.role || t.role) > LEVEL_DDC) return '';
   if (u.cards && splitList_(u.cards).indexOf(cid) < 0) return '';
@@ -1981,7 +2016,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.31.0',
+    version: '4.32.0',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -3747,7 +3782,7 @@ function saveAwardTypes_(token, types) {
 var VISIT_SECTIONS = ['gh', 'cub', 'scout', 'venture', 'rover'];
 var VISIT_SECTION_LABEL = { gh: '小童軍', cub: '幼童軍', scout: '童軍', venture: '深資童軍', rover: '樂行童軍' };
 // 角色 → 一入去預設睇邊個支部（其他角色 = 全部）
-var VISIT_ROLE_SECTION = { ADC_GH: 'gh', ADC_CUBS: 'cub', ADC_SCOUT: 'scout' };
+var VISIT_ROLE_SECTION = { ADC_GH: 'gh', ADC_CUBS: 'cub', ADC_SCOUT: 'scout', ADC_VENTURE: 'venture', ADC_ROVER: 'rover' };
 var VISIT_KINDS = ['general', 'inspection', 'meeting', 'section', 'event', 'other'];
 
 function visitSection_(v) {
@@ -4270,6 +4305,299 @@ function saveUnits_(token, units) {
   sh.getRange(2, 1, out.length, header.length).setValues(out);
   setConfigValue_('TROOP_LIST', troops.join(','));
   return ok({ saved: true, count: out.length });
+}
+
+
+// ===================== 旅團聯絡 TroopContacts（v4.32.0） =====================
+// 個人資料（旅長／支部團長／副團長姓名・電話・電郵）：獨立一張表、獨立 API、
+// Perms 獨立行 troopContacts（👁 睇／✏️ 改，由超管喺權限表決定）。
+// 公開 listDistrictTroops 永不包含此表任何欄位，成員系統睇唔到。
+// 支部 ADC（ADC_GH 等）只睇到自己支部：該旅有該支部團長 → 睇該支部聯絡；
+// 冇團長 → 退而睇旅長。其他角色按 Perms 行睇全部（支部過濾只套用於支部 ADC）。
+
+var TROOP_CONTACT_ROLES = ['gsl', 'leader', 'assistant', 'other'];
+var TROOP_CONTACT_HEADER = ['id', 'troop', 'section', 'unitCode', 'contactRole', 'name', 'phone', 'email', 'note', 'active', 'createdAt', 'updatedAt', 'updatedBy'];
+var VISIT_REQUEST_TYPES = ['visit', 'invite'];
+var VISIT_REQUEST_STATUSES = ['new', 'accepted', 'declined', 'done', 'cancelled'];
+var VISIT_REQUEST_HEADER = ['id', 'refCode', 'districtCode', 'createdAt', 'type', 'troop', 'section', 'activityName',
+  'preferredDate', 'preferredTime', 'location', 'purpose', 'attendeeCount',
+  'wantReply', 'contactName', 'contactType', 'contact',
+  'status', 'assignedTo', 'districtNote', 'updatedBy', 'updatedAt', 'source'];
+
+function troopContactsReady_() {
+  try { return !!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.TROOP_CONTACTS); } catch (e) { return false; }
+}
+function visitRequestsReady_() {
+  try { return !!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VISIT_REQUESTS); } catch (e) { return false; }
+}
+/** 文字欄長度上限（超長回 null，同 feedbackText_ 模式） */
+function troopText_(value, maxLength) {
+  var text = String(value == null ? '' : value).trim();
+  return text.length > maxLength ? null : text;
+}
+function troopNumberSort_(a, b) {
+  var na = Number(String(a).match(/\d+/) ? String(a).match(/\d+/)[0] : Number.MAX_SAFE_INTEGER);
+  var nb = Number(String(b).match(/\d+/) ? String(b).match(/\d+/)[0] : Number.MAX_SAFE_INTEGER);
+  return na - nb || String(a).localeCompare(String(b));
+}
+
+function troopContactRow_(r) {
+  return {
+    id: String(r.id || '').trim(),
+    troop: String(r.troop == null ? '' : r.troop).trim(),
+    section: visitSection_(r.section),
+    unitCode: String(r.unitCode || '').trim().toUpperCase(),
+    contactRole: TROOP_CONTACT_ROLES.indexOf(String(r.contactRole || '').trim().toLowerCase()) >= 0
+      ? String(r.contactRole).trim().toLowerCase() : 'other',
+    name: String(r.name || '').trim(),
+    phone: String(r.phone || '').trim(),
+    email: String(r.email || '').trim(),
+    note: String(r.note == null ? '' : r.note).trim(),
+    active: String(r.active).toUpperCase() !== 'FALSE',
+    createdAt: String(r.createdAt || ''),
+    updatedAt: String(r.updatedAt || ''),
+    updatedBy: String(r.updatedBy || ''),
+  };
+}
+function readTroopContacts_() {
+  if (!troopContactsReady_()) return [];
+  return readSheet_(SHEET.TROOP_CONTACTS).map(troopContactRow_)
+    .filter(function (c) { return !!c.id && !!c.troop && !!c.name; });
+}
+/**
+ * 按支部範圍過濾聯絡。scopeSection=''（非支部 ADC）回全部（含停用，管理用）；
+ * 有支部範圍時只回啟用中嘅：每旅先睇自己支部，有團長就回該支部全部聯絡，冇團長才回旅長。
+ */
+function filterTroopContactsFor_(rows, scopeSection) {
+  var sorted = rows.slice().sort(function (a, b) {
+    return troopNumberSort_(a.troop, b.troop)
+      || (VISIT_SECTIONS.indexOf(a.section) - VISIT_SECTIONS.indexOf(b.section))
+      || String(a.name).localeCompare(String(b.name));
+  });
+  if (!scopeSection) return sorted;
+  var active = sorted.filter(function (c) { return c.active; });
+  var byTroop = {};
+  active.forEach(function (c) { (byTroop[c.troop] = byTroop[c.troop] || []).push(c); });
+  var out = [];
+  Object.keys(byTroop).sort(troopNumberSort_).forEach(function (troop) {
+    var list = byTroop[troop];
+    var mine = list.filter(function (c) { return c.section === scopeSection; });
+    var hasLeader = mine.some(function (c) { return c.contactRole === 'leader'; });
+    if (hasLeader) out = out.concat(mine);
+    else out = out.concat(list.filter(function (c) { return c.contactRole === 'gsl'; }));
+  });
+  return out;
+}
+
+function getTroopContacts_(token) {
+  var t = requireCardView_(token, 'troopContacts'); if (t.error) return err(t.error);
+  if (!troopContactsReady_()) return err('尚未執行 setupSheets()（缺 TroopContacts 表）');
+  var scope = troopScopeSection_(t.role);
+  return ok({
+    contacts: filterTroopContactsFor_(readTroopContacts_(), scope),
+    canEdit: t.access === 'edit',
+    scopeSection: scope,
+    permissionsVersion: 2,
+    units: visitUnits_(),
+  });
+}
+
+function saveTroopContact_(token, c) {
+  var t = requireCardEdit_(token, 'troopContacts'); if (t.error) return err(t.error);
+  c = c || {};
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.TROOP_CONTACTS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 TroopContacts 表）');
+  var troop = String(c.troop == null ? '' : c.troop).trim();
+  if (!troop) return err('請揀旅團');
+  var known = {};
+  visitUnits_().forEach(function (u) { known[u.troop] = true; });
+  if (!known[troop]) return err('找不到該旅團：' + troop);
+  var role = String(c.contactRole || '').trim().toLowerCase();
+  if (TROOP_CONTACT_ROLES.indexOf(role) < 0) return err('聯絡職銜不正確');
+  var section = role === 'gsl' ? '' : visitSection_(c.section);
+  if (role !== 'gsl' && !section) return err('支部團長／副團長要揀支部');
+  var scope = troopScopeSection_(t.role);
+  if (scope && section !== scope) return err('你只可以修改自己支部的聯絡資料');
+  var name = troopText_(c.name, 100);
+  var phone = troopText_(c.phone, 60);
+  var email = troopText_(c.email, 200);
+  var note = troopText_(c.note, 500);
+  var unitCode = troopText_(String(c.unitCode || '').toUpperCase(), 3);
+  if (name === null || phone === null || email === null || note === null || unitCode === null) return err('聯絡資料太長');
+  if (!name) return err('請填姓名');
+  if (!phone && !email) return err('請填電話或電郵（至少一樣）');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return err('電郵格式不正確');
+  if (unitCode && !/^(?:[AS])?\d{1,2}$/.test(unitCode)) return err('團代號格式錯誤（單團留空；多團 1／2，空團 A1、海團 S1）');
+
+  var id = String(c.id || '').trim();
+  var now = new Date().toISOString();
+  var existing = id ? readTroopContacts_().filter(function (x) { return x.id === id; })[0] : null;
+  if (id && !existing) return err('找不到該聯絡紀錄');
+  if (scope && existing && existing.section !== scope) return err('你只可以修改自己支部的聯絡資料');
+  var record = {
+    id: id || genId_('tc'), troop: troop, section: section, unitCode: unitCode,
+    contactRole: role, name: name, phone: phone, email: email, note: note,
+    active: c.active === false ? 'FALSE' : 'TRUE',
+    createdAt: existing ? existing.createdAt : now, updatedAt: now, updatedBy: visitorName_(t.email),
+  };
+  if (!existing) {
+    appendRowObj_(sh, record);
+  } else {
+    var idx = rowIndexByCol_(sh, 'id', id);
+    if (idx < 0) return err('找不到該聯絡紀錄');
+    TROOP_CONTACT_HEADER.forEach(function (h) { if (h !== 'id') setCellByHeader_(sh, idx, h, record[h]); });
+  }
+  return ok({ saved: true, id: record.id });
+}
+
+function deleteTroopContact_(token, id) {
+  var t = requireCardEdit_(token, 'troopContacts'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.TROOP_CONTACTS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 TroopContacts 表）');
+  var target = readTroopContacts_().filter(function (x) { return x.id === String(id || '').trim(); })[0];
+  if (!target) return err('找不到該聯絡紀錄');
+  var scope = troopScopeSection_(t.role);
+  if (scope && target.section !== scope) return err('你只可以修改自己支部的聯絡資料');
+  var idx = rowIndexByCol_(sh, 'id', target.id);
+  if (idx < 0) return err('找不到該聯絡紀錄');
+  sh.deleteRow(idx);
+  return ok({ deleted: true, id: target.id });
+}
+
+// ===================== 聯絡區會 VisitRequests（v4.32.0） =====================
+// 成員系統公開提交（唔使登入，經成員端 proxy 白名單）：請求區幹部探訪／邀請出席活動。
+// 回覆聯絡資料同「你講我聽」一樣係自願填：wantReply=FALSE 時後端清走所有聯絡欄。
+// 申請同已完成探訪（Visits）分開儲存；幹部喺「旅團 → 申請／邀請」跟進狀態，
+// 完成探訪後照舊喺探訪登記入 Visits，唔會污染總會匯報來源。
+
+function visitRequestRow_(r) {
+  return {
+    id: String(r.id || '').trim(),
+    refCode: String(r.refCode || '').trim(),
+    districtCode: String(r.districtCode || '').trim() || districtCode_(),
+    createdAt: String(r.createdAt || ''),
+    type: VISIT_REQUEST_TYPES.indexOf(String(r.type || '').trim().toLowerCase()) >= 0 ? String(r.type).trim().toLowerCase() : 'visit',
+    troop: String(r.troop == null ? '' : r.troop).trim(),
+    section: visitSection_(r.section),
+    activityName: String(r.activityName || '').trim(),
+    preferredDate: visitDate_(r.preferredDate),
+    preferredTime: String(r.preferredTime || '').trim(),
+    location: String(r.location || '').trim(),
+    purpose: String(r.purpose || '').trim(),
+    attendeeCount: Number(r.attendeeCount) > 0 ? Math.floor(Number(r.attendeeCount)) : '',
+    wantReply: feedbackBool_(r.wantReply),
+    contactName: String(r.contactName || '').trim(),
+    contactType: String(r.contactType || '').trim().toLowerCase(),
+    contact: String(r.contact || '').trim(),
+    status: VISIT_REQUEST_STATUSES.indexOf(String(r.status || 'new').trim().toLowerCase()) >= 0 ? String(r.status).trim().toLowerCase() : 'new',
+    assignedTo: String(r.assignedTo || '').trim(),
+    districtNote: String(r.districtNote == null ? '' : r.districtNote).trim(),
+    updatedBy: String(r.updatedBy || ''),
+    updatedAt: String(r.updatedAt || ''),
+  };
+}
+
+function submitVisitRequest_(b) {
+  var locked = guardLocked_(); if (locked) return locked;
+  b = b || {};
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VISIT_REQUESTS);
+  if (!sh) return err('聯絡區會服務尚未就緒，請聯絡區會職員');
+  var type = String(b.type || '').trim().toLowerCase();
+  if (VISIT_REQUEST_TYPES.indexOf(type) < 0) return err('申請類別不正確（請求探訪／邀請出席）');
+  var troop = String(b.troop == null ? '' : b.troop).trim();
+  if (!troop) return err('請揀旅團');
+  var known = {};
+  visitUnits_().forEach(function (u) { if (u.active) known[u.troop] = true; });
+  if (!known[troop]) return err('找不到該旅團');
+  var purpose = troopText_(b.purpose, 2000);
+  if (purpose === null || purpose.length < 5) return err('請簡單說明目的（5 至 2000 字）');
+  var activityName = troopText_(b.activityName, 120);
+  if (activityName === null) return err('活動名稱太長');
+  if (type === 'invite' && !activityName) return err('邀請出席請填活動名稱');
+  var preferredDate = visitDate_(b.preferredDate);
+  if (String(b.preferredDate || '').trim() && !preferredDate) return err('日期格式不正確');
+  var attendeeCount = '';
+  if (String(b.attendeeCount == null ? '' : b.attendeeCount).trim() !== '') {
+    var n = Number(b.attendeeCount);
+    if (!isFinite(n) || Math.floor(n) !== n || n < 1 || n > 9999) return err('參加人數須為 1 至 9999 的整數');
+    attendeeCount = n;
+  }
+  // 是否需要回覆由申請人決定（同「你講我聽」一致）：唔使回覆就唔收聯絡資料
+  var wantReply = feedbackBool_(b.wantReply);
+  var contactName = '', contactType = '', contact = '';
+  if (wantReply) {
+    contactName = troopText_(b.contactName, 100);
+    contactType = String(b.contactType || '').trim().toLowerCase();
+    contact = troopText_(b.contact, 200);
+    if (contactName === null || contact === null) return err('聯絡資料太長');
+    if (['phone', 'email', 'ig', 'fb'].indexOf(contactType) < 0 || !contact) {
+      return err('選擇需要回覆時，請提供有效的聯絡方式及帳號');
+    }
+  }
+  var id = genId_('vr');
+  var refCode = genRef_('TR');
+  var now = new Date().toISOString();
+  appendRowObj_(sh, {
+    id: id, refCode: refCode, districtCode: districtCode_(), createdAt: now,
+    type: type, troop: troop, section: visitSection_(b.section),
+    activityName: activityName, preferredDate: preferredDate,
+    preferredTime: troopText_(b.preferredTime, 60) || '', location: troopText_(b.location, 200) || '',
+    purpose: purpose, attendeeCount: attendeeCount,
+    wantReply: wantReply ? 'TRUE' : 'FALSE', contactName: contactName,
+    contactType: contactType, contact: contact,
+    status: 'new', assignedTo: '', districtNote: '', updatedBy: '', updatedAt: '',
+    source: 'member-portal',
+  });
+  notifyStaff_('📨 新旅團' + (type === 'invite' ? '邀請' : '探訪申請') + ' ' + refCode,
+    '旅團：' + troop + '\n類別：' + (type === 'invite' ? '邀請區幹部出席活動' : '請求區幹部探訪')
+    + (activityName ? '\n活動：' + activityName : '')
+    + (preferredDate ? '\n日期：' + preferredDate : '')
+    + '\n請到幹部系統「旅團 → 旅團探訪 → 申請／邀請」跟進。');
+  return ok({ id: id, refCode: refCode });
+}
+
+function getVisitRequests_(token) {
+  var t = requireCardView_(token, 'troopRequests'); if (t.error) return err(t.error);
+  if (!visitRequestsReady_()) return err('尚未執行 setupSheets()（缺 VisitRequests 表）');
+  var scope = troopScopeSection_(t.role);
+  var rows = readSheet_(SHEET.VISIT_REQUESTS).map(visitRequestRow_)
+    .filter(function (r) { return !!r.id && !!r.troop; })
+    .filter(function (r) { return !scope || r.section === scope || r.section === ''; })
+    .sort(function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); });
+  return ok({ requests: rows, canEdit: t.access === 'edit', scopeSection: scope, permissionsVersion: 2, units: visitUnits_() });
+}
+
+function setVisitRequestStatus_(token, id, patch) {
+  var t = requireCardEdit_(token, 'troopRequests'); if (t.error) return err(t.error);
+  patch = patch || {};
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VISIT_REQUESTS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 VisitRequests 表）');
+  var targetId = String(id || patch.id || '').trim();
+  var target = readSheet_(SHEET.VISIT_REQUESTS).map(visitRequestRow_)
+    .filter(function (r) { return r.id === targetId; })[0];
+  if (!target) return err('找不到該申請');
+  var scope = troopScopeSection_(t.role);
+  if (scope && target.section !== scope && target.section !== '') return err('你只可以跟進自己支部的申請');
+  var idx = rowIndexByCol_(sh, 'id', targetId);
+  if (idx < 0) return err('找不到該申請');
+  if (Object.prototype.hasOwnProperty.call(patch, 'status')) {
+    var status = String(patch.status || '').trim().toLowerCase();
+    if (VISIT_REQUEST_STATUSES.indexOf(status) < 0) return err('狀態不正確');
+    setCellByHeader_(sh, idx, 'status', status);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'assignedTo')) {
+    var assignedTo = troopText_(patch.assignedTo, 100);
+    if (assignedTo === null) return err('負責幹部名稱太長');
+    setCellByHeader_(sh, idx, 'assignedTo', assignedTo);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, 'districtNote')) {
+    var districtNote = troopText_(patch.districtNote, 1000);
+    if (districtNote === null) return err('區會備註太長');
+    setCellByHeader_(sh, idx, 'districtNote', districtNote);
+  }
+  setCellByHeader_(sh, idx, 'updatedBy', visitorName_(t.email));
+  setCellByHeader_(sh, idx, 'updatedAt', new Date().toISOString());
+  return ok({ saved: true, id: targetId });
 }
 
 // ===================== 意外／應變：意外報告（v4.3.0） =====================
@@ -6723,14 +7051,30 @@ function getCards_(token) {
     if (c.cardId === 'rooms' && c.enabled) { c.access = 'view'; return true; }
     // 隱藏卡片（enabled=FALSE）：只有層級 0 超管見到（用嚟私下加功能／升級），其他人一律睇唔到
     if (!c.enabled && !isSuper) return false;
-    var featureAccess = districtFeatureAccess_(effRole, c.cardId);
-    if (featureAccess !== null) { c.access = featureAccess; return true; }
+    // v4.32.0「旅團」入口卡：access 由子分頁 Perms 行推導（有任何一行就入得）
+    if (c.cardId === 'troop') {
+      var troopAccess = cardAccessOf_(t, 'troop');
+      if (!troopAccess) return false;
+      c.access = troopAccess;
+      return true;
+    }
     if (isSuper) { c.access = c.cardId === 'ymis' ? 'view' : 'edit'; return true; }
     if (scopeOverride && scopeOverride.indexOf(c.cardId) < 0) return false;
     var access = (perms[c.cardId] || {})[effRole] || '';
     c.access = access;
     return access === 'edit' || access === 'view';
   }).sort(function (a, b) { return a.order - b.order; });
+  // v4.32.0：子分頁權限以「偽卡」形式附喺清單尾（前端卡片門禁可直接查；
+  // 主控台會按 subPerm 旗標過濾，唔會渲染成卡片）
+  CARD_SUB_PERMS.forEach(function (d) {
+    var a = cardAccessOf_(t, d.id);
+    if (a !== 'view' && a !== 'edit') return;
+    cards.push({
+      cardId: d.id, title: d.title, icon: d.icon, type: 'subperm', url: '',
+      description: '', order: 999, enabled: true, embed: false, source: 'core',
+      category: 'done', access: a, subPerm: true, parentId: d.parentId,
+    });
+  });
   return ok(cards);
 }
 function setCardEnabled_(token, cardId, enabled) {
@@ -6776,8 +7120,6 @@ function readPerms_() {
     var cid = String(v[i][0]).trim(); if (!cid) continue;
     out[cid] = {};
     for (var j = 0; j < roles.length; j++) {
-      var featureAccess = districtFeatureAccess_(roles[j], cid);
-      if (featureAccess !== null) { out[cid][roles[j]] = featureAccess; continue; }
       var val = String(v[i][j + 1] || '').trim().toLowerCase();
       if (cid === 'ymis') {
         if (canViewYmisRole_(roles[j]) && (val === 'edit' || val === 'view')) out[cid][roles[j]] = 'view';
@@ -6795,23 +7137,23 @@ function getPerms_(token) {
     var role = String(r.role).trim();
     return { role: role, label: r.label || role, protected: String(r.protected).toUpperCase() === 'TRUE', level: levelOfRole_(role) };
   });
-  return ok({ cards: cards, roles: roles, matrix: readPerms_() });
+  return ok({ cards: cards, roles: roles, matrix: readPerms_(), subPerms: CARD_SUB_PERMS });
 }
 function savePerms_(token, matrix) {
   var t = requireAdmin_(token); if (t.error) return err(t.error);
   if (!matrix) return err('沒有資料');
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var roles = readSheet_(SHEET.ROLES).map(function (r) { return String(r.role).trim(); });
-  var cards = readSheet_(SHEET.CARDS).map(function (c) { return String(c.cardId).trim(); });
+  var cards = readSheet_(SHEET.CARDS).map(function (c) { return String(c.cardId).trim(); })
+    .filter(function (cid) { return cid && cid !== 'troop'; }); // troop 入口卡由子權限推導，冇自己一行
+  CARD_SUB_PERMS.forEach(function (d) { if (cards.indexOf(d.id) < 0) cards.push(d.id); });
   var header = ['cardId'].concat(roles);
   var rows = [header];
   cards.forEach(function (cid) {
     var row = [cid];
     roles.forEach(function (role) {
       var v = ((matrix[cid] || {})[role] || '').toString().toLowerCase();
-      var featureAccess = districtFeatureAccess_(role, cid);
-      if (featureAccess !== null) row.push(featureAccess);
-      else if (cid === 'ymis') row.push(canViewYmisRole_(role) ? 'view' : '');
+      if (cid === 'ymis') row.push(canViewYmisRole_(role) ? 'view' : '');
       else row.push(v === 'edit' || v === 'view' ? v : '');
     });
     rows.push(row);
@@ -7355,7 +7697,7 @@ function showNewApiKey() { regenerateApiKeyMenu(); }
 function protectSensitiveSheets_(ss, newlyCreatedNames) {
   var me = '';
   try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { me = ''; }
-  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ, SHEET.DEBIT_NOTES, SHEET.FEEDBACK, SHEET.DC_FEEDBACK].forEach(function (name) {
+  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ, SHEET.DEBIT_NOTES, SHEET.FEEDBACK, SHEET.DC_FEEDBACK, SHEET.TROOP_CONTACTS, SHEET.VISIT_REQUESTS].forEach(function (name) {
     if (Array.isArray(newlyCreatedNames) && newlyCreatedNames.indexOf(name) < 0) return;
     try {
       var sh = ss.getSheetByName(name);
@@ -7506,18 +7848,22 @@ function blueprint_() {
     function trainingEdit() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
     function circularsEdit() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; m.ADC_ROVER = 'edit'; m.ADC_VENTURE = 'edit'; m.ADC_SCOUT = 'edit'; m.ADC_CUBS = 'edit'; m.ADC_GH = 'edit'; m.STAFF = 'edit'; return m; }
     var P = [['cardId'].concat(ROLE_LIST)];
-    var visitAccess = {}, directoryAccess = {};
-    ROLE_LIST.forEach(function (role) { visitAccess[role] = districtFeatureAccess_(role, 'visit'); directoryAccess[role] = districtFeatureAccess_(role, 'troopDirectory'); });
-    P.push(row('visit', visitAccess));
-    P.push(row('troopDirectory', directoryAccess));
+    // v4.32.0 旅團子權限預設（同 v4.31.0 固定政策一致；之後由超管喺 Perms 表自行調整）
+    function visitDefault() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
+    function directoryDefault() { var m = visitDefault(); m.ADC_ROVER = 'edit'; m.ADC_VENTURE = 'edit'; m.ADC_SCOUT = 'edit'; m.ADC_CUBS = 'edit'; m.ADC_GH = 'edit'; return m; }
+    function contactsDefault() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = ''; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; m.STAFF = 'edit'; m.ADC_ROVER = 'view'; m.ADC_VENTURE = 'view'; m.ADC_SCOUT = 'view'; m.ADC_CUBS = 'view'; m.ADC_GH = 'view'; return m; }
+    function requestsDefault() { var m = contactsDefault(); m.ADC_ROVER = 'edit'; m.ADC_VENTURE = 'edit'; m.ADC_SCOUT = 'edit'; m.ADC_CUBS = 'edit'; m.ADC_GH = 'edit'; return m; }
+    P.push(row('visit', visitDefault()));
+    P.push(row('troopDirectory', directoryDefault()));
+    P.push(row('troopContacts', contactsDefault()));
+    P.push(row('troopRequests', requestsDefault()));
+    P.push(row('activity', opsEdit()));
     P.push(row('contacts', ALL_EDIT));
     P.push(row('awards', ddcUp()));
     P.push(row('budget', adminEdit()));
     P.push(row('committee', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'edit' }));
-    P.push(row('unit', adminEdit()));
     P.push(row('venueReg', opsEdit()));
     P.push(row('stockReg', opsEdit()));
-    P.push(row('activity', opsEdit()));
     // v4.9.0：消息發佈搬咗去主控台頂（ADC+ 直接編輯），news 卡片已移除
     P.push(row('incident', ALL_VIEW));
     P.push(row('training', trainingEdit()));
@@ -7621,18 +7967,15 @@ function blueprint_() {
 
     { name: SHEET.CARDS, rows: [
       ['cardId', 'title', 'icon', 'type', 'url', 'description', 'order', 'enabled', 'embed', 'source', 'category'],
-      ['visit', '旅團探訪', '🏕', 'builtin', '/visit', '一撳登記探訪 · 未探旅團紅燈 · 季度報告', 1, 'TRUE', 'FALSE', 'core', 'done'],
-      ['troopDirectory', '旅團資料', '🧭', 'builtin', '/troop-directory', '各旅及已開設支部資料 · ADC 或以上可修改', 1.1, 'TRUE', 'FALSE', 'core', 'done'],
+      ['troop', '旅團', '🏕', 'builtin', '/troop', '旅團探訪 · 旅團資料 · 活動知會（各分頁權限喺權限表分行設定）', 1, 'TRUE', 'FALSE', 'core', 'done'],
       ['contacts', '聯絡簿', '📇', 'builtin', '/contacts', '聯絡電話：旅團 · 港島地域 · 總會（職員姓名區方可改）', 2, 'TRUE', 'FALSE', 'core', 'done'],
       ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '獎勵名冊 · 自動計夠期可提名 · 年期自訂', 3, 'TRUE', 'FALSE', 'core', 'done'],
       ['circulars', '區通告', '📜', 'builtin', '/circulars', '開班資料自動帶入 · 傳統通告列印 PDF 上載區網', 4, 'TRUE', 'FALSE', 'core', 'done'],
       ['budget', '區年度預算', '📑', 'builtin', '/budget', '直讀區方預算 Sheet · 按月／支部 · 資助合計', 5, 'TRUE', 'FALSE', 'core', 'done'],
       ['ymis', 'YMIS 會員核實', '🪪', 'builtin', '/ymis', '前往 YMIS 並查看區方核實帳戶', 6, 'TRUE', 'FALSE', 'core', 'done'],
       ['committee', '委任系統', '🗂', 'builtin', '/committee', '委任 · 續任 · R02', 7, 'TRUE', 'FALSE', 'core', 'todo'],
-      ['unit', '旅團管理系統', '🧭', 'builtin', '/unit', '旅名冊 · 人數統計', 8, 'TRUE', 'FALSE', 'core', 'todo'],
       ['venueReg', '場地借用審批', '🏛', 'builtin', '/venue-regs', '借場申請批核 · 場地清單', 9, 'TRUE', 'FALSE', 'core', 'done'],
       ['stockReg', '物資借用審批', '📦', 'builtin', '/stock-regs', '借物資批核 · 庫存管理', 10, 'TRUE', 'FALSE', 'core', 'done'],
-      ['activity', '活動知會', '🗓', 'builtin', '/activity-notices', '旅團活動知會記錄', 11, 'TRUE', 'FALSE', 'core', 'done'],
       ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '天氣決策 · 即時應變 · 總會指引 · 意外報告', 12, 'TRUE', 'FALSE', 'core', 'done'],
       ['training', '訓練班管理', '🎓', 'builtin', '/training', '開班登記 · 區會目錄', 13, 'TRUE', 'FALSE', 'core', 'done'],
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
@@ -7656,6 +7999,20 @@ function blueprint_() {
       // v4.10.0 加咗總會匯報四欄（leaderMet/method/officerCount/support）喺尾，舊表跑 setupSheets 自動補
       ['id', 'districtCode', 'troop', 'section', 'visitDate', 'quarter', 'kind', 'visitorName', 'visitorEmail', 'note', 'followUp', 'createdAt', 'updatedAt',
         'leaderMet', 'method', 'officerCount', 'support'],
+    ] },
+
+    // v4.32.0 旅團聯絡（個人資料）：旅長（section 空）／支部團長／副團長一行一人；
+    // 只經 troopContacts 權限行讀寫，永不經公開 listDistrictTroops 外洩
+    { name: SHEET.TROOP_CONTACTS, rows: [
+      ['id', 'troop', 'section', 'unitCode', 'contactRole', 'name', 'phone', 'email', 'note', 'active', 'createdAt', 'updatedAt', 'updatedBy'],
+    ] },
+
+    // v4.32.0 成員端「聯絡區會」：請求探訪／邀請出席（公開提交；幹部經 troopRequests 權限行處理）
+    { name: SHEET.VISIT_REQUESTS, rows: [
+      ['id', 'refCode', 'districtCode', 'createdAt', 'type', 'troop', 'section', 'activityName',
+        'preferredDate', 'preferredTime', 'location', 'purpose', 'attendeeCount',
+        'wantReply', 'contactName', 'contactType', 'contact',
+        'status', 'assignedTo', 'districtNote', 'updatedBy', 'updatedAt', 'source'],
     ] },
 
     { name: SHEET.PERMS, headerColor: '#ede9fe', frozenCols: 1, rows: permRows },
@@ -7908,6 +8265,7 @@ function patchCardRows_(ss) {
     awards: { oldDesc: '讀獲獎名單 · 推下一級', desc: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', oldDescs: ['獎勵名冊 · 自動計夠期可提名 · 年期自訂'], desc2: '獎勵名冊 · 夠期自動推算 · 只限 DDC 或以上' },
   };
   var descOnly = {
+    troop: { oldDesc: '旅團探訪 · 旅團資料 · 聯絡 · 申請邀請（各分頁權限喺權限表分行設定）', desc: '旅團探訪 · 旅團資料 · 活動知會（各分頁權限喺權限表分行設定）' },
     incident: { oldDesc: '即時應變 · 總會指引 · 意外報告', desc: '天氣決策 · 即時應變 · 總會指引 · 意外報告' },
     debitNote: {
       oldDesc: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（DC／DDC_ADMIN／職員）',
@@ -7919,7 +8277,11 @@ function patchCardRows_(ss) {
     },
   };
   // v4.4.0 刪會議行事曆；v4.5.0 刪週年會議文件；v4.9.0 刪消息發佈卡片（搬咗去主控台頂）
-  var removeIds = { meeting: true, annual: true, news: true };
+  // v4.32.0：visit／troopDirectory／activity 併入「旅團」一卡；Cards 行移除，
+  // 但 Perms 行保留轉作子分頁權限（唔好刪 Perms，否則管理員嘅自訂設定會冇晒）。
+  // unit（旅團管理系統佔位卡）完全刪除，連 Perms 行一併移除。
+  var removeIds = { meeting: true, annual: true, news: true, visit: true, troopDirectory: true, activity: true, unit: true };
+  var removePermIds = { meeting: true, annual: true, news: true, unit: true };
   for (var i = v.length - 1; i >= 1; i--) {
     var id = String(v[i][cId] || '').trim();
     if (removeIds[id]) { sh.deleteRow(i + 1); continue; }
@@ -7939,9 +8301,9 @@ function patchCardRows_(ss) {
     }
     if (String(v[i][cCat] || '').trim() === 'todo') sh.getRange(i + 1, cCat + 1).setValue('done');
   }
-  // Perms 表同步移除已刪卡片
+  // Perms 表只移除完全刪除嘅卡；visit／troopDirectory／activity 已轉子權限行，唔喺 removePermIds 入面
   var psh = ss.getSheetByName(SHEET.PERMS);
-  if (psh) Object.keys(removeIds).forEach(function (cid) { removeRowByFirstCol_(psh, cid); });
+  if (psh) Object.keys(removePermIds).forEach(function (cid) { removeRowByFirstCol_(psh, cid); });
 }
 
 /** Roles 表補 level 欄值（只填空格；已有數字唔改） */

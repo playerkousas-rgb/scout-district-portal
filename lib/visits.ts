@@ -51,10 +51,10 @@ export function rangePresets(today = new Date()): { id: string; label: string; f
   const qTo = `${y}-${String(qToMonth).padStart(2, '0')}-${qToMonth === 3 || qToMonth === 12 ? '31' : '30'}`;
   return [
     { id: 'thisQuarter', label: `本季（第 ${q} 季）`, from: qFrom, to: qTo },
-    { id: 'thisYear', label: `${y} 年全年`, from: `${y}-01-01`, to: `${y}-12-31` },
+    { id: 'thisYear', label: `${y} 童軍年度（1 月–12 月）`, from: `${y}-01-01`, to: `${y}-12-31` },
     { id: 'h1', label: `${y} 上半年`, from: `${y}-01-01`, to: `${y}-06-30` },
     { id: 'h2', label: `${y} 下半年`, from: `${y}-07-01`, to: `${y}-12-31` },
-    { id: 'scoutYear', label: `${y - 1}/${String(y).slice(2)} 年度（9 月–8 月）`, from: `${y - 1}-09-01`, to: `${y}-08-31` },
+    { id: 'schoolYear', label: `${y - 1}/${String(y).slice(2)} 學年（9 月–8 月）`, from: `${y - 1}-09-01`, to: `${y}-08-31` },
     { id: 'lastYear', label: `${y - 1} 年全年`, from: `${y - 1}-01-01`, to: `${y - 1}-12-31` },
   ];
 }

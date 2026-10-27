@@ -260,7 +260,7 @@ GS submitActivityNotice_ → ActivityNotices 新增一行（refCode AN-yyyyMMdd-
    + AllRecords 一筆 + NOTIFY_STAFF_EMAIL 電郵
         │
         ▼
-管理系統 /activity-notices → listActivityNotices（年份／支部／性質過濾、DDC+ 可刪）
+管理系統 /troop?tab=activity（舊 /activity-notices 自動轉向） → listActivityNotices（年份／支部／性質過濾；Perms `activity` 行 👁 查看、✏️ 可手動新增／刪除）
 ```
 
 必填：`troop, activityName, leaderName, leaderPhone`。
@@ -413,6 +413,36 @@ member-portal 借場表提交
 
 ## 🏕 區內旅團公開名錄（管理端及 GS v4.28.0）
 
-管理系統 `Units` 表已擴充可選的 `meetingTime`、`instagramUrl`、`facebookUrl`、`websiteUrl` 及 `publicVisible` 欄位；主辦機構沿用 `org`。管理員於 `/visit` →「⚙️ 旅團名單」編輯，空白欄位在成員端不顯示；`active=FALSE` 或 `publicVisible=FALSE` 不公開，後者獨立於旅團啟用狀態。公開 GET action `listDistrictTroops` 回傳 `{ districtCode, districtName, troops:[{ troop, label, organizer, meetingTime, instagramUrl, facebookUrl, websiteUrl }] }`，不回傳探訪支部團數或內部備註。
+管理系統 `Units` 表已擴充可選的 `meetingTime`、`instagramUrl`、`facebookUrl`、`websiteUrl` 及 `publicVisible` 欄位；主辦機構沿用 `org`。管理員於 `/troop?tab=directory` 編輯公開名錄（舊 `/visit?tab=units` 會轉向），空白欄位在成員端不顯示；`active=FALSE` 或 `publicVisible=FALSE` 不公開，後者獨立於旅團啟用狀態。公開 GET action `listDistrictTroops` 回傳 `{ districtCode, districtName, troops:[{ troop, label, organizer, meetingTime, instagramUrl, facebookUrl, websiteUrl }] }`，不回傳探訪支部團數或內部備註。
 
 member-portal 需將 `listDistrictTroops` 加入自己的 server-side proxy GET action allowlist 及欄位白名單，新增「區內旅團」卡片／頁面與詳情彈窗。完整 API 合約及前端未完成項目見 [`member-portal-troop-directory.md`](member-portal-troop-directory.md)。
+## 📨 旅團聯絡區會 `submitVisitRequest`（GS v4.32.0 新增，公開提交）
+
+成員端「聯絡區會」表單：旅團可以 (1) 申請區幹部探訪，或 (2) 邀請區幹部出席活動。
+同「你講我聽」`submitDistrictFeedback` 一樣：公開 POST（毋須登入、要帶 API Key 經 proxy）、區鎖定期間拒絕、成功後電郵通知區職員。
+
+### 提交欄位（POST body，`action: 'submitVisitRequest'`）
+
+| 欄位 | 必填 | 說明 |
+|---|---|---|
+| `type` | ✓ | `visit`（申請探訪）／`invite`（邀請出席） |
+| `troop` | ✓ | 旅號（必須係在冊啟用旅團，同 `listDistrictTroops` 口徑） |
+| `section` | | `gh`／`cub`／`scout`／`venture`／`rover`；全旅申請留空 |
+| `activityName` | invite 必填 | 活動名稱（≤200 字） |
+| `preferredDate` | | `yyyy-MM-dd` |
+| `preferredTime` | | 自由文字（≤40 字） |
+| `location` | | 地點（≤200 字） |
+| `purpose` | ✓ | 目的／需要咩支援（5–2000 字） |
+| `attendeeCount` | | 預計人數（正整數） |
+| `wantReply` | | `true` 先會儲存下面三欄；`false` 或留空＝唔留聯絡方法（傳咗都會清空） |
+| `contactName` | wantReply 時選填 | 聯絡人稱呼（≤80 字） |
+| `contactType` | wantReply 必填 | `phone`／`email`／`ig`／`fb`（同「你講我聽」一致） |
+| `contact` | wantReply 必填 | 電話／電郵／帳號（≤160 字） |
+
+成功回傳 `{ id, refCode }`（`refCode` 格式 `TR-{yyyyMMdd}-{序號}`，可顯示俾申請人作參考編號）。
+
+### 後續處理（區管理端，成員端唔使理）
+
+- 申請寫入 `VisitRequests` 表（`source='member-portal'`、`status='new'`），**不會**自動寫入探訪紀錄 `Visits`。
+- 區幹部喺管理端「旅團」卡 →「旅團探訪」→「📨 申請邀請」跟進（`getVisitRequests`／`setVisitRequestStatus`，需登入＋Perms `troopRequests` 行；支部 ADC 只見自己支部同全旅申請），實際探訪後照常人手登記。
+- ⚠️ 旅團領袖私人聯絡（電話／電郵）只存區管理端 `TroopContacts` 私隠表，**唔會**經任何公開 action（包括 `listDistrictTroops`）回傳俾成員端；成員端只可以「提交申請等區方回覆」，唔好設計任何讀取領袖聯絡嘅功能。

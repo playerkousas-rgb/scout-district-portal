@@ -80,7 +80,7 @@ master GS 檔（已附標準 Script，只有區會存）
 |---|---|---|---|
 | 區總部借場 | `/venue-regs` | 借場申請批核；**批准自動 TTLock 密碼 + Teamup 轉色 + 電郵申請人**（申請人喺 member-portal 填表） | ✅ |
 | 物資借用審批 | `/stock-regs` | 借物資批核＋庫存管理 | ✅ |
-| 活動知會 | `/activity-notices` | 知會記錄＋查閱（可排序/篩選） | ✅ |
+| 活動知會（旅團卡分頁） | `/troop?tab=activity` | 知會記錄＋查閱（可排序/篩選；舊 `/activity-notices` 自動轉向） | ✅ |
 | 訓練班管理 | `/training` | 開班登記（Script/Drive/通告） | 每班 |
 | 訓練班報名審批 | `/course-regs` | 揀班 → 名單 → 批/拒/取消 | 每班 |
 | 通告庫 | `/notices` | 通告管理 | ✅ |
@@ -118,7 +118,7 @@ master GS 檔（已附標準 Script，只有區會存）
 | `app/course-regs` | 訓練班報名審批頁 |
 | `app/venue-regs` | 場地借用審批頁（批准→approveVenueBooking：TTLock 密碼＋Teamup 轉色＋電郵） |
 | `app/stock-regs` | 物資借用審批頁 |
-| `app/activity-notices` | 活動知會頁 |
+| `components/ActivityNoticesPanel.tsx` | 活動知會面板（由 `app/troop` 承載；`app/activity-notices` 只作舊網址轉向） |
 | `docs/venue-booking-flow.md` | 借場一條龍流程（申請→審批→TTLock+Teamup+電郵） |
 | `docs/keys-checklist.md` | **找回＋驗證 Teamup/TTLock API Key 嘅 checklist** |
 | `docs/booking-setup-merge-checklist.md` | **Merge 後逐步操作：貼 Code.gs→setup→填 Key→驗證→測試** |

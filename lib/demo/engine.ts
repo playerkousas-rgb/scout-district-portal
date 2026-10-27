@@ -12,7 +12,8 @@
 import {
   freshDemoDb, demoUserFor, demoRoomEvents, demoDistrictHqEvents, demoBudget, demoCourseProfile,
   demoCourseSetup, demoCourseSheetRaw, demoDefaultMatrix, demoDebitNotes,
-  DEMO_CARDS, DEMO_ORG_GROUPS, DEMO_STAFF_ROWS, DEMO_HKSA_COUNCIL, DEMO_HKSA_DEPTS,
+  DEMO_CARDS, DEMO_SUB_PERMS, DEMO_ORG_GROUPS, DEMO_STAFF_ROWS, DEMO_HKSA_COUNCIL, DEMO_HKSA_DEPTS,
+  demoTroopContacts, demoVisitRequests,
   DEMO_TOKEN, type DemoDb, type DemoUser,
 } from './seed.ts';
 import {
@@ -62,11 +63,34 @@ function loadDb(): DemoDb {
           persistDb();
         }
         if ((db.schemaVersion || 0) < 5) {
-          const card = DEMO_CARDS.find(c => c.cardId === 'troopDirectory');
-          if (card && !db.cards.some(c => c.cardId === card.cardId)) db.cards.push({ ...card });
           db.matrix.troopDirectory = { ...demoDefaultMatrix().troopDirectory };
           db.matrix.visit = { ...demoDefaultMatrix().visit };
           db.schemaVersion = 5;
+          persistDb();
+        }
+        // v6（GS v4.32.0）：兩張旅團卡合併為一張「旅團」卡 + 子權限行 + 聯絡／申請示範資料
+        if ((db.schemaVersion || 0) < 6) {
+          db.cards = db.cards.filter(c => c.cardId !== 'visit' && c.cardId !== 'troopDirectory');
+          const card = DEMO_CARDS.find(c => c.cardId === 'troop');
+          if (card && !db.cards.some(c => c.cardId === 'troop')) db.cards.push({ ...card });
+          const defaults = demoDefaultMatrix();
+          const matrix = db.matrix;
+          DEMO_SUB_PERMS.forEach(sp => { if (!matrix[sp.id]) matrix[sp.id] = { ...defaults[sp.id] }; });
+          if (!Array.isArray(db.troopContacts)) db.troopContacts = demoTroopContacts();
+          if (!Array.isArray(db.visitRequests)) db.visitRequests = demoVisitRequests();
+          db.schemaVersion = 6;
+          persistDb();
+        }
+        // v7（GS v4.32.0 架構調整）：刪 unit／activity 主卡；activity 改做子權限並保留既有矩陣。
+        if ((db.schemaVersion || 0) < 7) {
+          db.cards = db.cards.filter(c => c.cardId !== 'unit' && c.cardId !== 'activity');
+          if (!db.matrix.activity) db.matrix.activity = { ...demoDefaultMatrix().activity };
+          delete db.matrix.unit;
+          const troopCard = db.cards.find(c => c.cardId === 'troop');
+          if (troopCard && troopCard.description === '旅團探訪 · 旅團資料 · 聯絡 · 申請邀請') {
+            troopCard.description = '旅團探訪 · 旅團資料 · 活動知會 · 申請邀請';
+          }
+          db.schemaVersion = 7;
           persistDb();
         }
         return db;
@@ -144,30 +168,71 @@ function canEditDirectory(u: DemoUser): boolean {
   return canEditVisits(u) || /^ADC(_|$)/.test(u.role);
 }
 
+function troopScopeDemo(role: string): string {
+  const map: Record<string, string> = { ADC_GH: 'gh', ADC_CUBS: 'cub', ADC_SCOUT: 'scout', ADC_VENTURE: 'venture', ADC_ROVER: 'rover' };
+  return map[String(role || '').toUpperCase()] || '';
+}
+
+function filterDemoContacts(rows: AnyObj[], scope: string): AnyObj[] {
+  if (!scope) return rows.slice();
+  const active = rows.filter(c => c.active !== false);
+  const troops = Array.from(new Set(active.map(c => String(c.troop))));
+  const out: AnyObj[] = [];
+  troops.forEach(troop => {
+    const list = active.filter(c => String(c.troop) === troop);
+    const mine = list.filter(c => c.section === scope);
+    if (mine.some(c => c.contactRole === 'leader')) out.push(...mine);
+    else out.push(...list.filter(c => c.contactRole === 'gsl'));
+  });
+  return out;
+}
+
+const TROOP_SUB_IDS_DEMO = DEMO_SUB_PERMS.filter(sp => sp.parentId === 'troop').map(sp => sp.id);
+
+function demoSubAccess(u: DemoUser, id: string): 'edit' | 'view' | '' {
+  if (u.mockAdmin || u.isSuper) return 'edit';
+  if (id === 'visit') return canEditVisits(u) ? 'edit' : 'view';
+  if (id === 'troopDirectory') return canEditDirectory(u) ? 'edit' : 'view';
+  const matrix = loadDb().matrix;
+  return ((matrix[id] || {})[u.role] || '') as 'edit' | 'view' | '';
+}
+
 function visibleCards(u: DemoUser): AnyObj[] {
   const d = loadDb();
+  const subCards: AnyObj[] = DEMO_SUB_PERMS.flatMap(sp => {
+    const access = demoSubAccess(u, sp.id);
+    return access ? [{
+      cardId: sp.id, title: sp.title, icon: sp.icon, type: 'subperm', url: '', description: '',
+      order: 999, enabled: true, embed: false, source: 'core', category: 'done',
+      access, subPerm: true, parentId: sp.parentId,
+    }] : [];
+  });
   // 🎭 示範版權限全開：全部卡片（連隱藏咗嘅都照列，enabled=false 做標示）、一律 edit。
   // 唯一例外：成人獎勵提名（awards）唔喺示範範圍 — 正式系統先用到。
   if (u.mockAdmin) {
     return d.cards
       .filter(c => c.cardId !== 'awards')
       .map((c): AnyObj => ({ ...c, access: 'edit' as const }))
-      .sort((a, b) => a.order - b.order);
+      .sort((a, b) => a.order - b.order)
+      .concat(subCards);
   }
-  return d.cards
+  const mainCards = d.cards
     .filter(c => c.enabled || u.isSuper)
     .filter(c => {
-      if (c.cardId === 'visit' || c.cardId === 'troopDirectory') return true;
+      if (c.cardId === 'troop') return TROOP_SUB_IDS_DEMO.some(id => demoSubAccess(u, id) !== '');
       const access = (d.matrix[c.cardId] || {})[u.role] || '';
       return access !== '' || u.isSuper || u.level <= 1;
     })
     .map((c): AnyObj => {
       const access = (d.matrix[c.cardId] || {})[u.role] || '';
-      if (c.cardId === 'visit') return { ...c, access: canEditVisits(u) ? 'edit' : 'view' };
-      if (c.cardId === 'troopDirectory') return { ...c, access: canEditDirectory(u) ? 'edit' : 'view' };
+      if (c.cardId === 'troop') {
+        const best = TROOP_SUB_IDS_DEMO.some(id => demoSubAccess(u, id) === 'edit') ? 'edit' : 'view';
+        return { ...c, access: best };
+      }
       return { ...c, access: u.level <= 1 ? (access || 'view') : access };
     })
     .sort((a, b) => a.order - b.order);
+  return mainCards.concat(subCards);
 }
 
 // ───────────────────────── DEBIT NOTE 示範帳簿 ─────────────────────────
@@ -324,7 +389,7 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
     }
     case 'getPerms': {
       const r = requireUser(token, 1); if (isErr(r)) return r;
-      return ok({ cards: d.cards.slice().sort((a, b) => a.order - b.order), roles: d.roles, matrix: d.matrix });
+      return ok({ cards: d.cards.slice().sort((a, b) => a.order - b.order), roles: d.roles, matrix: d.matrix, subPerms: DEMO_SUB_PERMS });
     }
     case 'setBudgetSheetUrl': {
       const r = requireUser(token, 2); if (isErr(r)) return r;
@@ -565,7 +630,7 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const visitDate = String(v.visitDate || today());
       if (!troop) return fail('旅團必填');
       const existing = v.id ? d.visits.find(x => x.id === v.id) : undefined;
-      if (v.id && !canEditVisits(u)) return fail('只有 DDC 或以上可以修改探訪紀錄');
+      if (v.id && !canEditVisits(u)) return fail('只有「旅團探訪」✏️ 權限可以修改探訪紀錄');
       if (v.id && !existing) return fail('找不到該探訪記錄');
       const email = existing?.visitorEmail || u.email;
       const dup = d.visits.find(x => x.id !== v.id && x.troop === troop && x.visitDate === visitDate && x.visitorEmail === email);
@@ -584,25 +649,117 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       return ok({ saved: true, id, troop, visitDate });
     }
     case 'deleteVisit': {
-      if (u && !canEditVisits(u)) return fail('只有 DDC 或以上可以刪除探訪紀錄');
+      if (u && !canEditVisits(u)) return fail('只有「旅團探訪」✏️ 權限可以刪除探訪紀錄');
       if (!u) return fail('未登入或登入已過期（示範版）。');
       d.visits = d.visits.filter(x => x.id !== payload.id);
       persistDb(); return ok({ deleted: true, id: payload.id });
     }
     case 'saveUnits': {
-      if (u && !canEditDirectory(u)) return fail('只有 ADC 或以上可以修改旅團資料');
+      if (u && !canEditDirectory(u)) return fail('只有「旅團資料」✏️ 權限可以修改旅團資料');
       if (!u) return fail('未登入或登入已過期（示範版）。');
       d.units = ((payload.units || []) as AnyObj[]).map(x => ({ ...x }));
       persistDb(); return ok({ saved: true, count: d.units.length });
     }
     case 'saveUnitSections': {
-      if (u && !canEditDirectory(u)) return fail('只有 ADC 或以上可以修改旅團資料');
+      if (u && !canEditDirectory(u)) return fail('只有「旅團資料」✏️ 權限可以修改旅團資料');
       if (!u) return fail('未登入或登入已過期（示範版）。');
       const incoming = ((payload.rows || payload.unitSections || []) as AnyObj[]).map(x => ({ ...x }));
       if (payload.troop !== undefined && incoming.some(x => x.troop !== payload.troop)) return fail('只可儲存所選旅的團資料');
       d.unitSections = payload.troop !== undefined
         ? [...(d.unitSections || []).filter(x => x.troop !== payload.troop), ...incoming] : incoming;
       persistDb(); return ok({ saved: true, count: incoming.length });
+    }
+
+    // ── 🔒 旅團聯絡／📨 聯絡區會（v4.32.0） ──
+    case 'getTroopContacts': {
+      if (!u) return fail('未登入或登入已過期（示範版）。');
+      if (!u.mockAdmin && demoSubAccess(u, 'troopContacts') === '') return fail('你沒有此功能嘅權限');
+      const scope = u.mockAdmin || u.isSuper ? '' : troopScopeDemo(u.role);
+      const rows = (d.troopContacts || []) as AnyObj[];
+      return ok({
+        contacts: filterDemoContacts(rows, scope),
+        canEdit: demoSubAccess(u, 'troopContacts') === 'edit',
+        scopeSection: scope, permissionsVersion: 2, units: d.units,
+      });
+    }
+    case 'saveTroopContact': {
+      if (!u) return fail('未登入或登入已過期（示範版）。');
+      if (demoSubAccess(u, 'troopContacts') !== 'edit') return fail('你沒有此功能嘅權限');
+      const c = (payload.contact || {}) as AnyObj;
+      if (!String(c.troop || '').trim()) return fail('請揀旅團');
+      if (!String(c.name || '').trim()) return fail('請填姓名');
+      if (!String(c.phone || '').trim() && !String(c.email || '').trim()) return fail('請填電話或電郵（至少一樣）');
+      const scope = u.mockAdmin || u.isSuper ? '' : troopScopeDemo(u.role);
+      const section = c.contactRole === 'gsl' ? '' : String(c.section || '');
+      if (scope && section !== scope) return fail('你只可以修改自己支部的聯絡資料');
+      d.troopContacts = d.troopContacts || [];
+      const existing = c.id ? d.troopContacts.find(x => x.id === c.id) : undefined;
+      const record = {
+        id: existing?.id || genId('tc'), troop: String(c.troop), section,
+        unitCode: String(c.unitCode || '').toUpperCase(), contactRole: String(c.contactRole || 'other'),
+        name: String(c.name), phone: String(c.phone || ''), email: String(c.email || ''),
+        note: String(c.note || ''), active: c.active !== false,
+        createdAt: existing?.createdAt || nowIso(), updatedAt: nowIso(), updatedBy: u.displayName,
+      };
+      if (existing) Object.assign(existing, record); else d.troopContacts.push(record);
+      persistDb(); return ok({ saved: true, id: record.id });
+    }
+    case 'deleteTroopContact': {
+      if (!u) return fail('未登入或登入已過期（示範版）。');
+      if (demoSubAccess(u, 'troopContacts') !== 'edit') return fail('你沒有此功能嘅權限');
+      d.troopContacts = (d.troopContacts || []).filter(x => x.id !== payload.id);
+      persistDb(); return ok({ deleted: true, id: payload.id });
+    }
+    case 'submitVisitRequest': {
+      const type = String(payload.type || '').toLowerCase();
+      if (type !== 'visit' && type !== 'invite') return fail('申請類別不正確（請求探訪／邀請出席）');
+      const troop = String(payload.troop || '').trim();
+      if (!troop || !d.units.some(x => x.troop === troop && x.active !== false)) return fail('找不到該旅團');
+      const purpose = String(payload.purpose || '').trim();
+      if (purpose.length < 5 || purpose.length > 2000) return fail('請簡單說明目的（5 至 2000 字）');
+      const wantReply = payload.wantReply === true || String(payload.wantReply).toLowerCase() === 'true';
+      if (wantReply && (!['phone', 'email', 'ig', 'fb'].includes(String(payload.contactType || '').toLowerCase()) || !String(payload.contact || '').trim())) {
+        return fail('選擇需要回覆時，請提供有效的聯絡方式及帳號');
+      }
+      const id = genId('vrq');
+      const refCode = `TR-${today().replace(/-/g, '')}-${id.slice(-4)}`;
+      d.visitRequests = d.visitRequests || [];
+      d.visitRequests.unshift({
+        id, refCode, districtCode: 'DEMO', createdAt: nowIso(), type, troop,
+        section: String(payload.section || ''), activityName: String(payload.activityName || ''),
+        preferredDate: String(payload.preferredDate || ''), preferredTime: String(payload.preferredTime || ''),
+        location: String(payload.location || ''), purpose,
+        attendeeCount: Number(payload.attendeeCount) > 0 ? Math.floor(Number(payload.attendeeCount)) : '',
+        wantReply, contactName: wantReply ? String(payload.contactName || '') : '',
+        contactType: wantReply ? String(payload.contactType || '').toLowerCase() : '',
+        contact: wantReply ? String(payload.contact || '') : '',
+        status: 'new', assignedTo: '', districtNote: '', updatedBy: '', updatedAt: '',
+      });
+      persistDb(); return ok({ id, refCode });
+    }
+    case 'getVisitRequests': {
+      if (!u) return fail('未登入或登入已過期（示範版）。');
+      if (!u.mockAdmin && demoSubAccess(u, 'troopRequests') === '') return fail('你沒有此功能嘅權限');
+      const scope = u.mockAdmin || u.isSuper ? '' : troopScopeDemo(u.role);
+      const rows = ((d.visitRequests || []) as AnyObj[])
+        .filter(x => !scope || x.section === scope || x.section === '')
+        .slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      return ok({ requests: rows, canEdit: demoSubAccess(u, 'troopRequests') === 'edit', scopeSection: scope, permissionsVersion: 2, units: d.units });
+    }
+    case 'setVisitRequestStatus': {
+      if (!u) return fail('未登入或登入已過期（示範版）。');
+      if (demoSubAccess(u, 'troopRequests') !== 'edit') return fail('你沒有此功能嘅權限');
+      const row = (d.visitRequests || []).find(x => x.id === payload.id);
+      if (!row) return fail('找不到該申請');
+      const patch = (payload.patch || payload) as AnyObj;
+      if (patch.status !== undefined) {
+        if (!['new', 'accepted', 'declined', 'done', 'cancelled'].includes(String(patch.status))) return fail('狀態不正確');
+        row.status = String(patch.status);
+      }
+      if (patch.assignedTo !== undefined) row.assignedTo = String(patch.assignedTo);
+      if (patch.districtNote !== undefined) row.districtNote = String(patch.districtNote);
+      row.updatedBy = u.displayName; row.updatedAt = nowIso();
+      persistDb(); return ok({ saved: true, id: row.id });
     }
 
     // ── 聯絡簿（v4.9.0 姓名自訂） ──
