@@ -136,6 +136,14 @@
 - **舊部署升級**：貼新 `Code.gs` → 跑一次 `setupSheets()` → 重新部署。setupSheets 會自動：升級 AwardTypes 舊預設（你自己改過嘅數值唔會被掂）、Perms `awards` → `ddcUp`、舊 news 卡停用留底（Cards／Perms 行不刪）、News 表補 `deleted/deletedAt/deletedBy`、新建 `ContactNames` 表、contacts 卡改名「聯絡簿」— **已有資料全部保留**。
 - 測試：`node scripts/test-upgrade-gs.js`（18 項舊 Sheet 升級／保留資料測試）、`node scripts/test-awards-gs.js`（21 項）、`node --experimental-strip-types scripts/test-awards-logic.ts`（27 項）、`node scripts/test-news-gs.js`（38 項）、`node scripts/check-member-alignment.js`（成員 API 對齊）。
 
+## 📇 本區旅團聯絡名單（聯絡簿 › 旅團）
+
+- 聯絡簿「旅團」分頁（需 🔒 旅團聯絡權限）列出全區旅團：**旅號／主辦機構／支部**由旅團名單（`Units`，內建 28 個旅）自動帶出，**旅長姓名／電話／電郵**逐旅填寫。**集會時間地點不收錄。**
+- 📋 **貼上旅長資料**：每行 `旅號 · 旅長姓名 · 電話 · 電郵`，Tab、逗號或空格分隔，次序唔拘（電話同電郵靠內容辨認）；由 Excel 直接複製得。讀入後未寫入，撳「💾 儲存」先會寫；有缺姓名、缺電話同電郵、電郵錯誤嘅旅，整批唔寫，免得半寫半唔寫。
+- 資料存於 `TroopContacts`（`contactRole = gsl`，全旅），同下面「🔒 旅團聯絡（私隱）」共用同一份；只經 `troopContacts` 權限行讀寫，成員系統睇唔到。支部 ADC 只可睇，唔可以改。
+- **唔需要升級 GS**：只用 v4.32.0 已有嘅 `getTroopContacts`／`saveTroopContact`／`deleteTroopContact`。
+- 測試：`node --experimental-strip-types scripts/test-troop-leaders.ts`（11 項）。
+
 ## 🏕 旅團探訪（v4.8.1 → v4.10.0 總會格式匯報）
 
 `/visit` — 幹部撳一下旅團格仔就登記探訪；DC 揀日期範圍即出報告，**一鍵生成總會格式 Excel 直接交總會**。

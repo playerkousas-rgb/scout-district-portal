@@ -146,15 +146,3 @@ export const HQ_GROUPS: ContactGroup[] = [
     ],
   },
 ];
-
-/** 旅團分頁：暫時只提供結構；資料由區方稍後提供（可放 Config TROOP_LIST 或另建 Sheet） */
-export interface TroopRow {
-  troop: string;        // 旅號，例如「港島第 123 旅」
-  sponsor?: string;     // 主辦機構
-  sections?: string;    // 支部（小／幼／童／深／樂）
-  leader?: string;      // 旅長／團長
-  phone?: string;
-  email?: string;
-  meet?: string;        // 集會時間地點
-}
-export const TROOP_ROWS: TroopRow[] = [];

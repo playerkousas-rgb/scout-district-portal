@@ -1,7 +1,8 @@
 'use client';
 /**
  * 📇 聯絡簿 — 三個分頁：旅團 / 港島地域 / 總會（v4.9.0 由「聯結簿」改名）
- * 旅團資料由區方稍後提供（先保留結構 + Config TROOP_LIST 旅號清單）；
+ * 旅團分頁：本區旅團聯絡名單（TroopLeaderList；旅號／主辦／支部由旅團名單帶出，旅長資料經 TroopContacts 貼上或逐旅填寫）；
+ * 冇「旅團聯絡」權限就只列 Config TROOP_LIST 旅號；
  * 港島地域分頁只放「職員直線電話」（v4.5.0：總監架構搬去 /orgchart），
  * 職員表及總會各署電話由 /api/external 即時讀官方網頁，讀唔到先用 lib/contactsDirectory.ts 備援。
  * v4.9.0：電話唔變但人會轉 — 地域職員姓名可以由 ADC+ 直接改（存後台，全區同步）。
@@ -15,9 +16,10 @@ import { useDistrict } from '@/lib/useDistrict';
 import { levelOf, LEVEL_ADC } from '@/lib/levels';
 import BackLink, { BackBar } from '@/components/BackLink';
 import TroopContactsPanel from '@/components/TroopContactsPanel';
+import TroopLeaderList from '@/components/TroopLeaderList';
 import { SOURCES } from '@/lib/externalSources';
 import {
-  HQ_GROUPS, HQ_OFFICE, REGION_GROUPS, REGION_OFFICE, TROOP_ROWS, applyContactNames, staffEmailFor, type ContactGroup, type ContactRow,
+  HQ_GROUPS, HQ_OFFICE, REGION_GROUPS, REGION_OFFICE, applyContactNames, staffEmailFor, type ContactGroup, type ContactRow,
 } from '@/lib/contactsDirectory';
 
 interface LiveState { live: boolean; updated?: string; fetchedAt?: string; stale?: string }
@@ -244,39 +246,24 @@ export default function ContactsPage() {
 
       {tab === 'troop' && (
         <>
-          <section className="info-card">
-            <div className="section-head"><div><h3>🏕 本區旅團 <small>({TROOP_ROWS.length || troopList.length})</small></h3><p>旅團聯絡資料由區方提供後匯入；現時先列出 Config「TROOP_LIST」旅號清單。</p></div></div>
-            {TROOP_ROWS.length > 0 ? (
-              <div className="mtx-scroll">
-                <table className="perm-table dir-table">
-                  <thead><tr><th style={{ textAlign: 'left' }}>旅號</th><th style={{ textAlign: 'left' }}>主辦機構</th><th style={{ textAlign: 'left' }}>支部</th><th style={{ textAlign: 'left' }}>旅長／團長</th><th style={{ textAlign: 'left' }}>電話</th><th style={{ textAlign: 'left' }}>電郵</th><th style={{ textAlign: 'left' }}>集會</th></tr></thead>
-                  <tbody>
-                    {TROOP_ROWS.filter(r => !q || JSON.stringify(r).toLowerCase().includes(q.toLowerCase())).map((r, i) => (
-                      <tr key={i}>
-                        <td style={{ textAlign: 'left', fontWeight: 700 }}>{r.troop}</td>
-                        <td style={{ textAlign: 'left' }}>{r.sponsor || '—'}</td>
-                        <td style={{ textAlign: 'left' }}>{r.sections || '—'}</td>
-                        <td style={{ textAlign: 'left' }}>{r.leader || '—'}</td>
-                        <td style={{ textAlign: 'left', whiteSpace: 'nowrap' }}>{r.phone ? <a href={telHref(r.phone)}>{r.phone}</a> : '—'}</td>
-                        <td style={{ textAlign: 'left' }}>{r.email ? <a href={`mailto:${r.email}`}>{r.email}</a> : '—'}</td>
-                        <td style={{ textAlign: 'left', fontSize: 12 }}>{r.meet || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : troopList.length > 0 ? (
-              <div className="dir-troops">
-                {troopList.filter(t => !q || t.toLowerCase().includes(q.toLowerCase())).map(t => <span key={t} className="dir-troop-chip">{t}</span>)}
-              </div>
-            ) : (
-              <div className="placeholder-box" style={{ padding: 22 }}>
-                <div className="big">🏕</div>
-                <p style={{ fontWeight: 700, color: '#003366', marginBottom: 6 }}>等待區方提供旅團資料</p>
-                <p style={{ fontSize: 13, color: '#475569' }}>格式建議：旅號 / 主辦機構 / 支部 / 旅長 / 電話 / 電郵 / 集會時間地點。提供後可匯入 Google Sheet，聯絡簿即時顯示。</p>
-              </div>
-            )}
-          </section>
+          {showTroopContacts ? (
+            <TroopLeaderList token={session.token} q={q} />
+          ) : (
+            <section className="info-card">
+              <div className="section-head"><div><h3>🏕 本區旅團 <small>({troopList.length})</small></h3><p>旅團聯絡（旅長電話及電郵）需「旅團聯絡」權限；現時只列出旅號。</p></div></div>
+              {troopList.length > 0 ? (
+                <div className="dir-troops">
+                  {troopList.filter(t => !q || t.toLowerCase().includes(q.toLowerCase())).map(t => <span key={t} className="dir-troop-chip">{t}</span>)}
+                </div>
+              ) : (
+                <div className="placeholder-box" style={{ padding: 22 }}>
+                  <div className="big">🏕</div>
+                  <p style={{ fontWeight: 700, color: '#003366', marginBottom: 6 }}>等待區方提供旅團資料</p>
+                  <p style={{ fontSize: 13, color: '#475569' }}>旅團名單由「旅團 → 旅團資料」維護，設定後呢度會自動列出。</p>
+                </div>
+              )}
+            </section>
+          )}
           {showTroopContacts && <TroopContactsPanel token={session.token} />}
         </>
       )}
