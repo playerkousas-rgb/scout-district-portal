@@ -1,31 +1,34 @@
 'use client';
 /**
- * 🏕 旅團（v4.32.0 合併卡）— 一張卡，兩個分頁：
+ * 🏕 旅團（v4.32.0 合併卡）— 一張卡，三個大分頁：
  *   🏕 旅團探訪（探訪登記／探訪報告／📨 申請邀請）
- *   🧭 旅團資料（公開資料／🔒 旅團聯絡）
+ *   🧭 旅團資料（公開資料）
+ *   🗓 活動知會
  *
  * 每個小分頁在 Perms 權限表各有一行子權限（visit／troopDirectory／
- * troopContacts／troopRequests），由超管在「⚙️ 權限／角色管理」以 👁／✏️ 設定。
+ * troopRequests／activity），由超管在「⚙️ 權限／角色管理」以 👁／✏️ 設定。
+ * 🔒 旅團聯絡（troopContacts）已歸入「聯絡簿」，不在此頁處理。
  * 本頁按子權限決定顯示哪些分頁；後台各 action 亦各自複查，前端隱藏不構成安全邊界。
- * 舊 GS（未升級）後台回獨立 visit／troopDirectory 卡時，同樣以該兩卡 access 放行。
+ * 舊 GS（未升級）後台回獨立 visit／troopDirectory／activity 卡時，同樣以該些卡 access 放行。
  */
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { checkCardAccess } from '@/lib/cardAccess';
 import { loadSession } from '@/lib/session';
 import { useDistrict } from '@/lib/useDistrict';
-import type { UserSession } from '@/lib/types';
+import type { AccessLevel, UserSession } from '@/lib/types';
 import VisitPanel from '@/components/VisitPanel';
 import TroopDirectoryPanel from '@/components/TroopDirectoryPanel';
+import ActivityNoticesPanel from '@/components/ActivityNoticesPanel';
 import BackLink, { BackBar } from '@/components/BackLink';
 
-type MainTab = 'visit' | 'directory';
+type MainTab = 'visit' | 'directory' | 'activity';
 
 interface SubAccess {
   visit: boolean;
   directory: boolean;
-  contacts: boolean;
   requests: boolean;
+  activityAccess: AccessLevel;
 }
 
 export default function TroopPage() {
@@ -33,7 +36,11 @@ export default function TroopPage() {
   const searchParams = useSearchParams();
   const { withDistrict } = useDistrict();
   const requested = searchParams.get('tab');
-  const initialMain: MainTab = requested === 'directory' || requested === 'units' ? 'directory' : 'visit';
+  const initialMain: MainTab = requested === 'activity'
+    ? 'activity'
+    : requested === 'directory' || requested === 'units'
+      ? 'directory'
+      : 'visit';
   const initialVisitTab = requested === 'report' || requested === 'requests' ? requested : 'board';
 
   const [session, setSession] = useState<UserSession | null>(null);
@@ -49,17 +56,18 @@ export default function TroopPage() {
     const s = loadSession();
     if (!s) { router.replace(withDistrict('/')); return () => { cancelled = true; }; }
     (async () => {
-      const ids = ['troop', 'visit', 'troopDirectory', 'troopContacts', 'troopRequests'] as const;
+      const ids = ['troop', 'visit', 'troopDirectory', 'troopRequests', 'activity'] as const;
       const results = await Promise.all(ids.map(id => checkCardAccess(s.token, id)));
       if (cancelled) return;
       const allowed = (i: number) => results[i].status === 'allowed';
+      const activityResult = results[4];
       const next: SubAccess = {
         visit: allowed(1),
         directory: allowed(2),
-        contacts: allowed(3),
-        requests: allowed(4),
+        requests: allowed(3),
+        activityAccess: activityResult.status === 'allowed' ? activityResult.access : '',
       };
-      const anyAllowed = allowed(0) || next.visit || next.directory || next.contacts || next.requests;
+      const anyAllowed = allowed(0) || next.visit || next.directory || next.requests || next.activityAccess !== '';
       const allError = results.every(r => r.status === 'error');
       setChecking(false);
       if (!anyAllowed) {
@@ -74,11 +82,11 @@ export default function TroopPage() {
       setSubs(next);
       setSession(prev => (prev && prev.token === s.token ? prev : s));
       setMainTab(prev => {
-        const wantVisit = next.visit || next.requests;
-        const wantDirectory = next.directory || next.contacts;
-        if (prev === 'visit' && !wantVisit && wantDirectory) return 'directory';
-        if (prev === 'directory' && !wantDirectory && wantVisit) return 'visit';
-        return prev;
+        const available: MainTab[] = [];
+        if (next.visit || next.requests) available.push('visit');
+        if (next.directory) available.push('directory');
+        if (next.activityAccess !== '') available.push('activity');
+        return available.includes(prev) ? prev : (available[0] || prev);
       });
     })();
     return () => { cancelled = true; };
@@ -88,7 +96,7 @@ export default function TroopPage() {
   function pickMain(tab: MainTab) {
     setMainTab(tab);
     const query = new URLSearchParams(searchParams.toString());
-    query.set('tab', tab === 'directory' ? 'directory' : 'visit');
+    query.set('tab', tab);
     router.replace(withDistrict(`/troop?${query.toString()}`), { scroll: false });
   }
 
@@ -106,13 +114,14 @@ export default function TroopPage() {
   if (checking || !session || !subs) return <div className="center"><div className="spinner" /></div>;
 
   const showVisitTab = subs.visit || subs.requests;
-  const showDirectoryTab = subs.directory || subs.contacts;
+  const showDirectoryTab = subs.directory;
+  const showActivityTab = subs.activityAccess !== '';
 
   return (
     <>
       <BackLink />
       <h1 className="page-title">🏕 旅團</h1>
-      <p className="page-sub">旅團探訪 · 旅團資料（各小分頁權限於權限表獨立設定）</p>
+      <p className="page-sub">旅團探訪 · 旅團資料 · 活動知會（各小分頁權限於權限表獨立設定）</p>
 
       <div className="inc-tabs" role="tablist" aria-label="旅團分頁">
         {showVisitTab && (
@@ -120,6 +129,9 @@ export default function TroopPage() {
         )}
         {showDirectoryTab && (
           <button role="tab" aria-selected={mainTab === 'directory'} className={`inc-tab${mainTab === 'directory' ? ' on' : ''}`} onClick={() => pickMain('directory')}>🧭 旅團資料</button>
+        )}
+        {showActivityTab && (
+          <button role="tab" aria-selected={mainTab === 'activity'} className={`inc-tab${mainTab === 'activity' ? ' on' : ''}`} onClick={() => pickMain('activity')}>🗓 活動知會</button>
         )}
       </div>
 
@@ -132,7 +144,10 @@ export default function TroopPage() {
         />
       )}
       {mainTab === 'directory' && showDirectoryTab && (
-        <TroopDirectoryPanel session={session} showDirectory={subs.directory} showContacts={subs.contacts} />
+        <TroopDirectoryPanel session={session} />
+      )}
+      {mainTab === 'activity' && showActivityTab && (
+        <ActivityNoticesPanel session={session} access={subs.activityAccess} />
       )}
       <BackBar />
     </>

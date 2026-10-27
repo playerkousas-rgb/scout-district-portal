@@ -260,7 +260,7 @@ GS submitActivityNotice_ → ActivityNotices 新增一行（refCode AN-yyyyMMdd-
    + AllRecords 一筆 + NOTIFY_STAFF_EMAIL 電郵
         │
         ▼
-管理系統 /activity-notices → listActivityNotices（年份／支部／性質過濾、DDC+ 可刪）
+管理系統 /troop?tab=activity（舊 /activity-notices 自動轉向） → listActivityNotices（年份／支部／性質過濾；Perms `activity` 行 👁 查看、✏️ 可手動新增／刪除）
 ```
 
 必填：`troop, activityName, leaderName, leaderPhone`。
@@ -413,7 +413,7 @@ member-portal 借場表提交
 
 ## 🏕 區內旅團公開名錄（管理端及 GS v4.28.0）
 
-管理系統 `Units` 表已擴充可選的 `meetingTime`、`instagramUrl`、`facebookUrl`、`websiteUrl` 及 `publicVisible` 欄位；主辦機構沿用 `org`。管理員於 `/visit` →「⚙️ 旅團名單」編輯，空白欄位在成員端不顯示；`active=FALSE` 或 `publicVisible=FALSE` 不公開，後者獨立於旅團啟用狀態。公開 GET action `listDistrictTroops` 回傳 `{ districtCode, districtName, troops:[{ troop, label, organizer, meetingTime, instagramUrl, facebookUrl, websiteUrl }] }`，不回傳探訪支部團數或內部備註。
+管理系統 `Units` 表已擴充可選的 `meetingTime`、`instagramUrl`、`facebookUrl`、`websiteUrl` 及 `publicVisible` 欄位；主辦機構沿用 `org`。管理員於 `/troop?tab=directory` 編輯公開名錄（舊 `/visit?tab=units` 會轉向），空白欄位在成員端不顯示；`active=FALSE` 或 `publicVisible=FALSE` 不公開，後者獨立於旅團啟用狀態。公開 GET action `listDistrictTroops` 回傳 `{ districtCode, districtName, troops:[{ troop, label, organizer, meetingTime, instagramUrl, facebookUrl, websiteUrl }] }`，不回傳探訪支部團數或內部備註。
 
 member-portal 需將 `listDistrictTroops` 加入自己的 server-side proxy GET action allowlist 及欄位白名單，新增「區內旅團」卡片／頁面與詳情彈窗。完整 API 合約及前端未完成項目見 [`member-portal-troop-directory.md`](member-portal-troop-directory.md)。
 ## 📨 旅團聯絡區會 `submitVisitRequest`（GS v4.32.0 新增，公開提交）

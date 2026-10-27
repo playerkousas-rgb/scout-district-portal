@@ -48,7 +48,7 @@ export default function AdminPage() {
   function cellVal(c: string, r: string): AccessLevel {
     return (matrix[c] && matrix[c][r]) || '';
   }
-  // 「旅團」入口卡本身冇 Perms 行，由下面四行子權限推導（有任一行權限就入得卡）
+  // 「旅團」入口卡本身冇 Perms 行，由下面屬於旅團嘅子權限行推導（有任一行權限就入得卡）
   const isDerivedEntry = (id: string) => id === 'troop' && !!bundle?.subPerms?.length;
   function derivedAccess(parentId: string, role: string): AccessLevel {
     const subs = (bundle?.subPerms || []).filter(sp => sp.parentId === parentId);
@@ -201,7 +201,7 @@ export default function AdminPage() {
 
           {/* 權限矩陣 */}
           <p className="fps-help" style={{ marginBottom: 10 }}>💡 點擊任何格子自由切換：<b>—</b> 不可見 → <b>👁</b> 可看（唯讀） → <b>✏️</b> 可管理（新增／修改／批核），改完記得按「💾 儲存權限」。</p>
-          <p className="fps-help">「旅團」卡內每個小分頁（旅團探訪／旅團資料／🔒 旅團聯絡／📨 申請邀請）喺下面各有一行子權限，全部喺呢張表用 👁／✏️ 設定；入口卡一行只係顯示推導結果。旅團探訪嘅 👁 表示可新增探訪，✏️ 先可改／刪紀錄。</p>
+          <p className="fps-help">「旅團」卡內每個小分頁（旅團探訪／旅團資料／📨 申請邀請／🗓 活動知會）喺下面各有一行子權限；🔒 旅團聯絡已歸入「聯絡簿」，亦有獨立一行。全部喺呢張表用 👁／✏️ 設定；旅團入口卡一行只係顯示推導結果。旅團探訪嘅 👁 表示可新增探訪，✏️ 先可改／刪紀錄。</p>
           <div className="toolbar">
             <button className="btn-sm" onClick={save} disabled={saving}>{saving ? '儲存中…' : '💾 儲存權限'}</button>
             {msg && <span className="ok-msg">{msg}</span>}

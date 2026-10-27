@@ -683,14 +683,17 @@ check('舊 UnitSections 自訂欄位及既有集會資料升級保留，重跑�
   } finally { sheets.UnitSections = previous; }
 });
 
-check('升級合併旅團卡：Cards 只餘 troop 一行，Perms 保留四行子權限（原 visit／troopDirectory 設定不被刪除）', () => {
+check('升級合併旅團卡：Cards 只餘 troop 一行，Perms 保留五行子權限；unit 連權限行刪除', () => {
   assert.strictEqual(sheets.Cards._data.filter(r => r[0] === 'troop').length, 1);
   assert.strictEqual(sheets.Cards._data.filter(r => r[0] === 'visit').length, 0);
   assert.strictEqual(sheets.Cards._data.filter(r => r[0] === 'troopDirectory').length, 0);
-  ['visit', 'troopDirectory', 'troopContacts', 'troopRequests'].forEach(id => {
+  assert.strictEqual(sheets.Cards._data.filter(r => r[0] === 'activity').length, 0, 'activity 主卡行移除，轉子權限');
+  assert.strictEqual(sheets.Cards._data.filter(r => r[0] === 'unit').length, 0, 'unit 主卡行刪除');
+  ['visit', 'troopDirectory', 'troopContacts', 'troopRequests', 'activity'].forEach(id => {
     assert.strictEqual(sheets.Perms._data.filter(r => r[0] === id).length, 1, id + ' Perms 行');
   });
   assert.strictEqual(sheets.Perms._data.filter(r => r[0] === 'troop').length, 0, '入口卡冇 Perms 行');
+  assert.strictEqual(sheets.Perms._data.filter(r => r[0] === 'unit').length, 0, 'unit Perms 行一併刪除');
   const cards = ctx.getCards_(ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12)).data;
   const entry = cards.find(c => c.cardId === 'troop');
   assert.ok(entry);
@@ -702,6 +705,12 @@ check('升級合併旅團卡：Cards 只餘 troop 一行，Perms 保留四行子
   assert.strictEqual(sub.parentId, 'troop');
   assert.strictEqual(sub.access, 'edit');
   assert.strictEqual(cards.find(c => c.cardId === 'visit').access, 'view');
+  const activitySub = cards.find(c => c.cardId === 'activity');
+  assert.ok(activitySub && activitySub.subPerm === true && activitySub.parentId === 'troop', 'activity 以旅團子權限偽卡回傳');
+  assert.strictEqual(activitySub.access, 'view', 'ADC 活動知會預設唯讀');
+  const contactsSub = cards.find(c => c.cardId === 'troopContacts');
+  assert.ok(contactsSub && contactsSub.subPerm === true && contactsSub.parentId === 'contacts', '私隱聯絡歸聯絡簿');
+  assert.ok(!cards.some(c => c.cardId === 'unit'), '已刪 unit 不回傳');
   assert.strictEqual(ctx.requireCardEdit_(ctx.makeToken_('adc@x.org', 'ADC_SCOUT', 12), 'visit').error != null, true);
   assert.strictEqual(ctx.requireCardEdit_(ctx.makeToken_('staff@x.org', 'STAFF', 12), 'troopDirectory').error != null, true);
 });

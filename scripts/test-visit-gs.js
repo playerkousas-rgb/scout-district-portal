@@ -430,12 +430,16 @@ check('各角色預設權限由 Perms 子權限行決定；超管改表即時生
   const permsBefore = sheets.Perms;
   const bpCards = ctx.blueprint_().find(x => x.name === 'Cards');
   const bpPerms = ctx.blueprint_().find(x => x.name === 'Perms');
-  const SUB_IDS = ['visit', 'troopDirectory', 'troopContacts', 'troopRequests'];
+  const SUB_IDS = ['visit', 'troopDirectory', 'troopContacts', 'troopRequests', 'activity'];
   sheets.Cards = makeSheet('Cards', bpCards.rows.filter((row, i) => i === 0 || ['troop', 'contacts'].includes(row[0])));
   sheets.Perms = makeSheet('Perms', bpPerms.rows.filter((row, i) => i === 0 || SUB_IDS.includes(row[0]) || row[0] === 'contacts'));
-  // blueprint 一定要有齊四行子權限，而且入口卡唔可以有自己一行
+  // blueprint 一定要有齊五行子權限，而且入口卡唔可以有自己一行；activity／unit 不再是主卡
   SUB_IDS.forEach(id => assert.strictEqual(sheets.Perms._data.filter(r => r[0] === id).length, 1, id));
   assert.strictEqual(sheets.Perms._data.filter(r => r[0] === 'troop').length, 0);
+  assert.strictEqual(bpCards.rows.filter(r => r[0] === 'activity').length, 0, 'activity 只做子權限，唔再種主卡');
+  assert.strictEqual(bpCards.rows.filter(r => r[0] === 'unit').length, 0, 'unit 主卡已刪');
+  assert.strictEqual(bpPerms.rows.filter(r => r[0] === 'activity').length, 1, 'activity 保留一行 Perms');
+  assert.strictEqual(bpPerms.rows.filter(r => r[0] === 'unit').length, 0, 'unit Perms 行已刪');
   sheets.Users._data[0].push('cards');
   const roles = ['DDC_ADMIN', 'DDC_TRAINING', 'ADC_GH', 'ADC_CUBS', 'ADC_SCOUT', 'ADC_VENTURE', 'ADC_ROVER', 'STAFF', 'LEADER', 'SYSADMIN', 'DC'];
   try {
@@ -446,14 +450,17 @@ check('各角色預設權限由 Perms 子權限行決定；超管改表即時生
       const token = ctx.makeToken_(email, role, 12);
       const visitEdit = ['SYSADMIN', 'DC', 'DDC_ADMIN', 'DDC_TRAINING'].includes(role);
       const directoryEdit = visitEdit || role.startsWith('ADC');
+      const activityEdit = visitEdit || role === 'STAFF';
       const actual = ctx.getCards_(token).data;
       assert.strictEqual(actual.find(x => x.cardId === 'visit').access, visitEdit ? 'edit' : 'view', role + ' 探訪預設');
       assert.strictEqual(actual.find(x => x.cardId === 'troopDirectory').access, directoryEdit ? 'edit' : 'view', role + ' 資料預設');
       assert.strictEqual(actual.find(x => x.cardId === 'visit').subPerm, true, role + ' 子權限標記');
+      assert.strictEqual(actual.find(x => x.cardId === 'activity').access, activityEdit ? 'edit' : 'view', role + ' 活動知會預設');
+      assert.strictEqual(actual.find(x => x.cardId === 'activity').parentId, 'troop', role + ' 活動知會歸旅團');
       assert.strictEqual(actual.find(x => x.cardId === 'troop').access, visitEdit || directoryEdit || role === 'STAFF' ? 'edit' : 'view', role + ' 入口卡推導');
       const contactsCard = actual.find(x => x.cardId === 'troopContacts');
       if (role === 'LEADER') assert.strictEqual(contactsCard, undefined, '一般領袖預設睇唔到私隱聯絡');
-      else assert.ok(contactsCard, role + ' 預設有聯絡權限');
+      else { assert.ok(contactsCard, role + ' 預設有聯絡權限'); assert.strictEqual(contactsCard.parentId, 'contacts', role + ' 私隱聯絡歸聯絡簿'); }
       assert.strictEqual(ctx.getTroopDirectoryBoard_(token).data.canEdit, directoryEdit, role);
       const created = ctx.saveVisit_(token, { troop: '1745', visitDate: `${thisYear}-10-26`, visitorEmail: 'forged@x.org', visitorName: '冒認他人' });
       assert.strictEqual(created.ok, true, role + ' 可新增');
@@ -471,20 +478,29 @@ check('各角色預設權限由 Perms 子權限行決定；超管改表即時生
     const scopedToken = ctx.makeToken_('scoped@x.org', 'STAFF', 12);
     assert.strictEqual(ctx.getVisitBoard_(scopedToken).ok, false, '個人卡範圍對子權限同樣生效');
     // Perms 即係唯一準則：超管俾 STAFF edit 就真係 edit 到（毋須改 code）
-    sheets.Perms = makeSheet('Perms', [['cardId', 'STAFF', 'ADC_SCOUT'], ['visit', 'edit', 'edit'], ['troopDirectory', 'edit', 'edit'], ['troopContacts', 'edit', 'view'], ['troopRequests', 'edit', 'edit']]);
+    sheets.Perms = makeSheet('Perms', [['cardId', 'STAFF', 'ADC_SCOUT'], ['visit', 'edit', 'edit'], ['troopDirectory', 'edit', 'edit'], ['troopContacts', 'edit', 'view'], ['troopRequests', 'edit', 'edit'], ['activity', 'edit', 'view']]);
     const staffToken = ctx.makeToken_('split-7@x.org', 'STAFF', 12);
     assert.strictEqual(ctx.requireCardEdit_(staffToken, 'troopDirectory').error == null, true);
     assert.strictEqual(ctx.requireCardEdit_(staffToken, 'visit').error == null, true);
     assert.strictEqual(ctx.saveUnits_(staffToken, [{ troop: '1745', sections: { scout: '1' } }]).ok, true);
     assert.strictEqual(ctx.saveUnitSections_(staffToken, [], '1745').ok, true);
-    assert.strictEqual(ctx.savePerms_(dcToken, { visit: { ADC_SCOUT: 'edit' }, troopDirectory: { STAFF: 'edit' }, troopContacts: { ADC_SCOUT: 'edit' }, troop: { DC: '' } }).ok, true);
+    assert.strictEqual(ctx.savePerms_(dcToken, { visit: { ADC_SCOUT: 'edit' }, troopDirectory: { STAFF: 'edit' }, troopContacts: { ADC_SCOUT: 'edit' }, activity: { ADC_SCOUT: 'edit' }, troop: { DC: '' } }).ok, true);
     const matrix = ctx.readPerms_();
     assert.strictEqual(matrix.visit.ADC_SCOUT, 'edit', 'savePerms 照單保存子權限，唔再強制覆寫');
     assert.strictEqual(matrix.troopDirectory.STAFF, 'edit');
     assert.strictEqual(matrix.troopContacts.ADC_SCOUT, 'edit');
-    assert.ok(matrix.troopRequests, 'savePerms 必須寫齊四行子權限');
+    assert.strictEqual(matrix.activity.ADC_SCOUT, 'edit', 'savePerms 保存活動知會子權限');
+    assert.ok(matrix.troopRequests, 'savePerms 必須寫齊五行子權限');
     assert.strictEqual(matrix.troop, undefined, '入口卡唔寫 Perms 行');
-    assert.strictEqual(ctx.getPerms_(dcToken).data.subPerms.length, 4, 'getPerms 要回子分頁清單俾管理頁畫行');
+    const subPerms = ctx.getPerms_(dcToken).data.subPerms;
+    assert.strictEqual(subPerms.length, 5, 'getPerms 要回子分頁清單俾管理頁畫行');
+    assert.strictEqual(subPerms.find(x => x.id === 'activity').parentId, 'troop');
+    assert.strictEqual(subPerms.find(x => x.id === 'troopContacts').parentId, 'contacts');
+    // 只有聯絡簿私隱權限時，不得順手解鎖「旅團」入口卡
+    sheets.Perms = makeSheet('Perms', [['cardId', 'ADC_SCOUT'], ['troopContacts', 'view']]);
+    const contactsOnly = { email: 'split-4@x.org', role: 'ADC_SCOUT', source: 'users' };
+    assert.strictEqual(ctx.cardAccessOf_(contactsOnly, 'troopContacts'), 'view');
+    assert.strictEqual(ctx.cardAccessOf_(contactsOnly, 'troop'), '', 'troopContacts 已歸聯絡簿，不計入旅團入口');
   } finally {
     if (cardsBefore) sheets.Cards = cardsBefore; else delete sheets.Cards;
     sheets.Perms = permsBefore;

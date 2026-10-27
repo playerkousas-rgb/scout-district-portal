@@ -81,6 +81,18 @@ function loadDb(): DemoDb {
           db.schemaVersion = 6;
           persistDb();
         }
+        // v7（GS v4.32.0 架構調整）：刪 unit／activity 主卡；activity 改做子權限並保留既有矩陣。
+        if ((db.schemaVersion || 0) < 7) {
+          db.cards = db.cards.filter(c => c.cardId !== 'unit' && c.cardId !== 'activity');
+          if (!db.matrix.activity) db.matrix.activity = { ...demoDefaultMatrix().activity };
+          delete db.matrix.unit;
+          const troopCard = db.cards.find(c => c.cardId === 'troop');
+          if (troopCard && troopCard.description === '旅團探訪 · 旅團資料 · 聯絡 · 申請邀請') {
+            troopCard.description = '旅團探訪 · 旅團資料 · 活動知會 · 申請邀請';
+          }
+          db.schemaVersion = 7;
+          persistDb();
+        }
         return db;
       }
     }
@@ -175,7 +187,7 @@ function filterDemoContacts(rows: AnyObj[], scope: string): AnyObj[] {
   return out;
 }
 
-const TROOP_SUB_IDS_DEMO = DEMO_SUB_PERMS.map(sp => sp.id);
+const TROOP_SUB_IDS_DEMO = DEMO_SUB_PERMS.filter(sp => sp.parentId === 'troop').map(sp => sp.id);
 
 function demoSubAccess(u: DemoUser, id: string): 'edit' | 'view' | '' {
   if (u.mockAdmin || u.isSuper) return 'edit';

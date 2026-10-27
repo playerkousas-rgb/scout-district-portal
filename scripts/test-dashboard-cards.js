@@ -51,6 +51,16 @@ assert.equal(directoryOnly[0].access, 'view', '只有資料唯讀權時入口卡
 assert.ok(!legacy.some(c => c.cardId === 'troopDirectory' || c.cardId === 'visit'));
 console.log('✓ 舊 GS：兩卡合成旅團入口卡，唔改原陣列');
 
+// ── 舊 GS 相容：獨立 activity 卡一併併入旅團 ──
+const activitySource = { ...visit, cardId: 'activity', title: '活動知會', access: 'edit', url: '/activity-notices', order: 2 };
+const withActivity = dashboardCards([directorySource, activitySource], superUser);
+assert.equal(withActivity.length, 1, '舊 activity 卡併入旅團入口卡');
+assert.equal(withActivity[0].cardId, 'troop');
+assert.equal(withActivity[0].access, 'edit', '入口卡取舊卡最高級權限');
+assert.equal(withActivity[0].description, '旅團探訪 · 旅團資料 · 活動知會');
+assert.ok(!withActivity.some(c => c.cardId === 'activity'));
+console.log('✓ 舊 GS：activity 獨立卡合成旅團入口卡');
+
 // ── YMIS：照舊回內頁，唔偽造 ──
 const ymis = { ...visit, cardId: 'ymis', url: '/ymis', order: 6, access: 'view' };
 assert.ok(!legacy.some(c => c.cardId === 'ymisWebsiteShortcut'), '不再新增直接外連 YMIS 卡');
@@ -74,9 +84,17 @@ const visitPage = fs.readFileSync(path.join(root, 'app/visit/page.tsx'), 'utf8')
 const directoryPage = fs.readFileSync(path.join(root, 'app/troop-directory/page.tsx'), 'utf8');
 const troopPage = fs.readFileSync(path.join(root, 'app/troop/page.tsx'), 'utf8');
 const cardItem = fs.readFileSync(path.join(root, 'components/CardItem.tsx'), 'utf8');
+const activityRedirectPage = fs.readFileSync(path.join(root, 'app/activity-notices/page.tsx'), 'utf8');
+const contactsPage = fs.readFileSync(path.join(root, 'app/contacts/page.tsx'), 'utf8');
+const directoryPanel = fs.readFileSync(path.join(root, 'components/TroopDirectoryPanel.tsx'), 'utf8');
 assert.ok(home.includes('const defaults = dashboardCards(r.data, s)'));
 assert.ok(home.includes('canToggle={superUser && !isDashboardShortcut(c)}'));
-assert.ok(troopPage.includes('VisitPanel') && troopPage.includes('TroopDirectoryPanel'), '旅團頁包含探訪及資料兩分頁');
+assert.ok(troopPage.includes('VisitPanel') && troopPage.includes('TroopDirectoryPanel') && troopPage.includes('ActivityNoticesPanel'), '旅團頁包含探訪、公開資料及活動知會三大分頁');
+assert.ok(!troopPage.includes('showContacts'), '私隱聯絡不再經旅團頁顯示');
+assert.ok(activityRedirectPage.includes("query.set('tab', 'activity')"), '舊 /activity-notices 轉去旅團活動分頁');
+assert.ok(contactsPage.includes('TroopContactsPanel') && contactsPage.includes("checkCardAccess(session.token, 'troopContacts')"), '聯絡簿按子權限顯示私隱聯絡');
+assert.ok(!directoryPanel.includes('TroopContactsPanel'), '公開旅團資料面板不再混入私隱聯絡');
+assert.ok(!fs.existsSync(path.join(root, 'app/unit/page.tsx')), '旅團管理系統佔位頁已刪');
 assert.ok(troopPage.includes("checkCardAccess(s.token, id)"), '旅團頁按子權限逐項檢查');
 assert.ok(visitPage.includes('/troop?'), '舊 /visit 轉去 /troop');
 assert.ok(visitPage.includes("tab === 'units'"), '舊 tab=units 轉去資料分頁');

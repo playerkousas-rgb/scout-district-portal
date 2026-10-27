@@ -55,8 +55,8 @@
 
 ### 2.1 卡片分類（done 已實作 / todo 加入中）— 最終定案
 - **已實作（done，4 張）**：
-  - `venueReg` 借場審批、`stockReg` 借物資審批、`activity` 活動知會、`training` 訓練班管理（區會目錄）。
-- **加入中（todo）**：visit / awards / committee / unit。（v4.4.0：contacts 聯結簿、incident 已完成；meeting 已刪除。v4.5.0：budget 已完成、rooms／orgchart 新增（全員 👁）；annual 已刪除。v4.6.0：news 消息發佈新增——DC／SYS／DDC_ADMIN／DDC_TRAINING／STAFF ✏️，其餘 👁）
+  - `venueReg` 借場審批、`stockReg` 借物資審批、`activity` 活動知會（v4.32.0 起改為「旅團」子分頁）、`training` 訓練班管理（區會目錄）。
+- **加入中（todo）**：awards / committee（`visit` 已改為子權限；`unit` 已於 v4.32.0 刪除）。（v4.4.0：contacts 聯結簿、incident 已完成；meeting 已刪除。v4.5.0：budget 已完成、rooms／orgchart 新增（全員 👁）；annual 已刪除。v4.6.0：news 消息發佈新增——DC／SYS／DDC_ADMIN／DDC_TRAINING／STAFF ✏️，其餘 👁）
 - **已刪除**：`courseRegs` 報名審批（批核由訓練班負責領袖喺各班自己嘅 Sheet 做）、
   `notices` 通告庫（通告由通告圖書館提供，區無需管理）。
 - 成員系統（member app）唔登入，純讀主 Sheet + 提交；所有登入事務（開班登記/批核借場借物資/權限/scope/改密碼/卡開關）都喺呢邊。
@@ -71,7 +71,6 @@
 | budget | 區年度預算 | builtin | 原 Excel | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 | — |
 | ymis | YMIS 會員核實（人工登入） | builtin | 區方 Script Properties → 官方 YMIS 登入頁 | 👁 | — | 👁 | 👁 | 👁 | — | — |
 | committee | 委任系統 | jump | 委任表 | ✏️ | ✏️ | ✏️ | 👁 | 👁 | — | — |
-| unit | 旅團管理系統 | jump | 旅名冊 | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | 👁 |
 
 > `ymis`：表外 STAFF／區職員亦有 👁；SYSADMIN／維護帳號、AL／助理區領袖冇。卡片同後台動作雙重核對當前角色，只有 DC／DDC／ADC／STAFF 可見；登入資料只喺按掣後從 Script Properties 取用，詳見 [`YMIS 人工登入卡部署指引`](ymis-verification-feasibility.md)。
 
@@ -84,7 +83,7 @@
 | venueReg | 場地借用審批 | builtin | member `VenueBookings` | ✏️ | ✏️ | ✏️ | ✏️ | — | — | — |
 | rooms | 地域房間及區總部使用情況 | builtin | 地域房間 ICS + Teamup 紅色確認子日曆 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 | 👁 |
 | stock | 物資借用審批 | builtin | member `StockRequests` | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 | 👁 |
-| activity | 活動知會審批 | builtin | member `ActivityNotices` | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | 👁 |
+| activity（子權限） | 旅團 → 活動知會 | subperm | member `ActivityNotices` | ✏️ | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 |
 | incident | 意外／應變 | resource | 總會指引 | ✏️ | ✏️ | 👁 | 👁 | 👁 | 👁 | 👁 |
 
 ### 2.4 訓練班條線（本輪重點）
@@ -153,7 +152,7 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
   唔再另加卡片寫入權限層。
 - **前端卡片門禁**：`lib/cardAccess.ts` 提供 `useRequireCard(cardId)`，每個功能頁 check 該角色對該卡有冇 access；
   就算直接打 URL，睇唔到張卡都會 redirect 返主控台 → 真正做到「睇唔到 = 做唔到」。
-- 所有計劃中卡片（committee/unit 等）已設為 builtin 佔位頁 + 可開關；v4.4.0 起「關」＝隱藏，只有 L0 超管見到。
+- 計劃中卡片（如 committee）可設為 builtin 佔位頁 + 可開關；v4.4.0 起「關」＝隱藏，只有 L0 超管見到。`unit` 已於 v4.32.0 刪除，不再保留佔位頁／Cards／Perms 行。
 
 ## 4. 對接所需要嘅改造（兩邊）
 
@@ -230,7 +229,7 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
 
 ### gs/Code.gs（一次性服務後台）
 - 新表：`Venues` / `VenueBookings`（借場）、`Items` / `StockRequests`（借物資）、`ActivityNotices`（知會）。
-- 新卡片（取代舊 venue/stock 跳轉佔位）：`venueReg`（/venue-regs）、`stockReg`（/stock-regs）、`activity`（/activity-notices）。
+- 新卡片（取代舊 venue/stock 跳轉佔位）：`venueReg`（/venue-regs）、`stockReg`（/stock-regs）、`activity`（當時為 /activity-notices；v4.32.0 起改入 /troop?tab=activity）。
 - 權限（更新）：新建 `venueReg` 預設只畀 DC/SYS/DDC_ADMIN/DDC_TRAINING/STAFF edit；舊表的 view 格**不會**由 `setupSheets()` 修改，實時 `getCards_`／審批動作檢查 `canVenue`，未授權的 ADC／DL／LEADER／AL 仍不可見／不可批核。`stockReg`／`activity` 繼續用原有矩陣。查閱 `rooms` 卡對所有已登入者 view，與審批卡完全分開。
 - 動作：
   - **借場**：`submitVenueRequest`（公開 intake）／`getVenueBookings`／`setVenueBookingStatus`／`saveVenue`/`deleteVenue`（維運）。
@@ -240,7 +239,7 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
 ### 前端
 - `app/venue-regs`：申請審批 + 場地清單維運。
 - `app/stock-regs`：申請審批（自動扣/還庫存）+ 物資清單維運。
-- `app/activity-notices`：知會瀏覽，**可篩選年份/支部/活動性質 + 排序**；admin 可手動新增/刪除。
+- `components/ActivityNoticesPanel.tsx`（由 `app/troop` 承載；`app/activity-notices` 只作舊網址轉向）：知會瀏覽，**可篩選年份/支部/活動性質 + 排序**；Perms `activity` ✏️／管理員可手動新增/刪除。
 
 ### 一次開 vs 訓練班分界
 - 借場/借物資/知會/通告 = 主後台一次過開（一個 Sheet 多分頁），改 code 一次過生效。
@@ -273,27 +272,28 @@ scriptExecUrl | scriptApiKeyHash | driveFolderId | active | createdAt
 ## 6. 待你確認問題
 
 1. 角色：`區長(DL)`、`職領袖(LEADER)` 嘅確實職稱同「受保護」與否？
-2. 卡片 `unit` 你已經有自己嘅旅團管理系統（jump）定係想喺呢邊內建？
+2. ~~卡片 `unit`~~ 已定案刪除：不再保留旅團管理系統佔位卡、頁面或 Perms 行。
 3. `venue`/`stock` 批核要唔要喺呢一期做，定淨係先做訓練班條線？
 4. 入數紙係「只睇」定係「批核後先睇」？
 
 ---
 
-## 11. v4.32.0 子分頁權限（「旅團」卡）— Perms 表統管
+## 11. v4.32.0 子分頁權限 — Perms 表統管
 
-原 `visit`＋`troopDirectory` 兩張卡合併為一張入口卡 `troop`（`/troop`，兩個大分頁：旅團探訪／旅團資料）。
-入口卡本身**唔佔 Perms 行**；四個小分頁各自有一行 Perms（「子權限」），超管喺 `/admin` 逐行撳 👁／✏️，
-`getCards` 會將已授權子分頁以 `type:'subperm'`、`parentId:'troop'` 偽卡形式附帶回傳（主控台會過濾，只顯示入口卡）；
-入口卡 `access` = 四行之中最高級。`getPerms` 回傳 `subPerms` 清單俾管理頁畫子行；`savePerms` 照單保存四行（唔寫 `troop` 行）。
+原 `visit`＋`troopDirectory`＋`activity` 三張卡合併為一張入口卡 `troop`（`/troop`，三個大分頁：旅團探訪／旅團資料（公開）／活動知會；申請邀請是探訪內的小分頁）。`troopContacts` 歸 `contacts`，顯示喺「聯絡簿 → 旅團」；`unit` 已刪除。
+旅團入口卡本身**唔佔 Perms 行**；五行子權限各自有一行 Perms，超管喺 `/admin` 逐行撳 👁／✏️。
+`getCards` 會將已授權子分頁以 `type:'subperm'` 偽卡形式附帶回傳，並帶各自 `parentId`（主控台會過濾，只顯示真正入口卡）；
+旅團入口卡 `access` 只取 parent=`troop` 四行之中最高級，**不計** `troopContacts`，避免只有聯絡權限也誤開旅團卡。`getPerms` 回傳 `subPerms` 清單俾管理頁按 parent 畫子行；`savePerms` 照單保存五行（唔寫 `troop`／`unit` 行）。
 
-| 子分頁 Perms id | 內容 | 後端 actions | 預設 |
-|---|---|---|---|
-| `visit` | 探訪登記／報告（👁＝可登記，✏️＝可改／刪紀錄） | `getVisitBoard`（view）、`saveVisit`（新增 view／改 edit）、`deleteVisit`（edit） | 全員 👁；DC／DDC／SYSADMIN ✏️ |
-| `troopDirectory` | 旅團公開資料（Units＋UnitSections） | `getTroopDirectoryBoard`（view）、`saveUnits`／`saveUnitSections`（edit） | 全員 👁；DC／DDC／各 ADC ✏️ |
-| `troopContacts` | 🔒 私隠聯絡（旅長／團長電話電郵；支部 ADC 只見自己支部，自己支部冇團長就只見旅長） | `getTroopContacts`（view）、`saveTroopContact`／`deleteTroopContact`（edit） | 各 ADC 👁；DC／DDC／STAFF ✏️；其餘 — |
-| `troopRequests` | 📨 成員端申請探訪／邀請出席（支部 ADC 只見自己支部＋全旅申請） | `getVisitRequests`（view）、`setVisitRequestStatus`（edit）；公開 `submitVisitRequest` 供成員端提交 | 各 ADC／DC／DDC／STAFF ✏️；其餘 — |
+| 子分頁 Perms id | Parent | 內容／位置 | 後端 actions | 預設 |
+|---|---|---|---|---|
+| `visit` | `troop` | 探訪登記／報告（👁＝可登記，✏️＝可改／刪紀錄） | `getVisitBoard`（view）、`saveVisit`（新增 view／改 edit）、`deleteVisit`（edit） | 全員 👁；DC／DDC／SYSADMIN ✏️ |
+| `troopDirectory` | `troop` | 旅團公開資料（Units＋UnitSections） | `getTroopDirectoryBoard`（view）、`saveUnits`／`saveUnitSections`（edit） | 全員 👁；DC／DDC／各 ADC ✏️ |
+| `troopRequests` | `troop` | 📨 旅團探訪內的申請／邀請收件箱（支部 ADC 只見自己支部＋全旅申請） | `getVisitRequests`（view）、`setVisitRequestStatus`（edit）；公開 `submitVisitRequest` 供成員端提交 | 各 ADC／DC／DDC／STAFF ✏️；其餘 — |
+| `activity` | `troop` | 🗓 旅團活動知會 | `submitActivityNotice`（公開提交）、`listActivityNotices`、`deleteActivityNotice`；管理面板按此行 👁／✏️ 顯示操作 | 全員 👁；DC／SYSADMIN／DDC／STAFF ✏️ |
+| `troopContacts` | `contacts` | 🔒 聯絡簿 → 旅團的私隠聯絡（旅長／團長電話電郵；支部 ADC 只見自己支部，自己支部冇團長就只見旅長） | `getTroopContacts`（view）、`saveTroopContact`／`deleteTroopContact`（edit） | 各 ADC 👁；DC／DDC／STAFF ✏️；其餘 — |
 
 - 取代 v4.31.0 嘅固定政策（`districtFeatureAccess_` 已刪除）：以後調整權限只改 Perms 表，唔使改程式。
-- `Users.cards` 個人範圍同一般卡一致適用（填咗白名單而冇包該子分頁／`troop` 就入唔到）。
+- `Users.cards` 個人範圍按實際子分頁 id 逐項適用；私隠聯絡在前端另須先通過 `contacts` 卡門禁，所以自訂白名單帳戶要同時有 `contacts` 與 `troopContacts`。
 - 私隠聯絡資料只存 `TroopContacts` 表，永不寫落 `Units`／`UnitSections`，公開 `listDistrictTroops` 絕不包含（已加測試把關）。
 - 明知限制：任何人有主試算表檢視權限都可直接開 `TroopContacts` 分頁（同其他敏感表一樣，已列入保護清單但唔係閱讀隔離）— 區方已確認接受。

@@ -2,7 +2,7 @@ import type { CardDef, UserSession } from './types';
 
 export const YMIS_LOGIN_URL = 'https://ymis.scout.org.hk/#/Login';
 const SHORTCUT_IDS = new Set(['troopDirectoryShortcut']);
-const TROOP_SUB_IDS = ['visit', 'troopDirectory', 'troopContacts', 'troopRequests'];
+const TROOP_SUB_IDS = ['visit', 'troopDirectory', 'troopRequests', 'activity'];
 
 /** 本機導覽捷徑不是 Sheet 卡片，不可呼叫 setCardEnabled 修改它們。 */
 export function isDashboardShortcut(card: CardDef): boolean {
@@ -20,8 +20,8 @@ function bestAccess(cards: CardDef[]): CardDef['access'] {
  *
  * v4.32.0 起「旅團」是一張入口卡（troop）：主控台只渲染入口卡，
  * 子分頁權限偽卡（subPerm）一律過濾走。舊 GS（v4.31.0 或以前）未升級時
- * 後台仍會回 visit／troopDirectory 兩張獨立卡 —— 此處幫手合成一張「旅團」卡
- * 連去 /troop，令前端先部署、GS 後升級期間主控台都正常（access 取兩卡最高級）。
+ * 後台仍會回 visit／troopDirectory／activity 獨立卡 —— 此處幫手合成一張「旅團」卡
+ * 連去 /troop，令前端先部署、GS 後升級期間主控台都正常（access 取各卡最高級）。
  * YMIS 必須進入內頁，卡片不帶帳密；不自行補造後台未授權的 YMIS 卡片。
  */
 export function dashboardCards(cards: CardDef[], _session: UserSession): CardDef[] {
@@ -42,7 +42,7 @@ export function dashboardCards(cards: CardDef[], _session: UserSession): CardDef
       icon: '🏕',
       type: 'builtin',
       url: '/troop',
-      description: '旅團探訪 · 旅團資料',
+      description: '旅團探訪 · 旅團資料 · 活動知會',
       access: bestAccess(legacyTroopCards),
       embed: false,
     });

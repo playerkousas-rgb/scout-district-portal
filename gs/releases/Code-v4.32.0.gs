@@ -1227,20 +1227,21 @@ function requirePermRead_(token, perm, cardId) {
   return { error: '你沒有此功能嘅權限' };
 }
 /**
- * v4.32.0 旅團卡子權限（Perms 表獨立行，由超管喺權限矩陣用 👁／✏️ 統管）：
- * 主控台只出一張「旅團」卡（Cards: troop），卡內分頁各自查自己嗰行 Perms。
- * 唔再用硬編角色白名單 —— 邊個睇到／改到邊個分頁，全部由 Perms 表決定。
+ * v4.32.0 卡片子權限（Perms 表獨立行，由超管喺權限矩陣用 👁／✏️ 統管）：
+ * 「旅團」入口卡包含探訪／公開資料／申請邀請／活動知會；私隠旅團聯絡歸「聯絡簿」。
+ * 每個子分頁各自查自己嗰行 Perms，唔再用硬編角色白名單。
  * 預設值同 v4.31.0 固定政策一致（見 blueprint_ 嘅 permRows）。
  */
-var TROOP_SUB_PERMS = [
+var CARD_SUB_PERMS = [
   { id: 'visit', parentId: 'troop', title: '旅團探訪', icon: '🏕' },
   { id: 'troopDirectory', parentId: 'troop', title: '旅團資料', icon: '🧭' },
-  { id: 'troopContacts', parentId: 'troop', title: '旅團聯絡（私隱）', icon: '🔒' },
   { id: 'troopRequests', parentId: 'troop', title: '旅團申請／邀請', icon: '📨' },
+  { id: 'activity', parentId: 'troop', title: '活動知會', icon: '🗓' },
+  { id: 'troopContacts', parentId: 'contacts', title: '旅團聯絡（私隱）', icon: '🔒' },
 ];
-function troopSubPermDef_(cid) {
+function cardSubPermDef_(cid) {
   var id = String(cid || '').trim();
-  for (var i = 0; i < TROOP_SUB_PERMS.length; i++) if (TROOP_SUB_PERMS[i].id === id) return TROOP_SUB_PERMS[i];
+  for (var i = 0; i < CARD_SUB_PERMS.length; i++) if (CARD_SUB_PERMS[i].id === id) return CARD_SUB_PERMS[i];
   return null;
 }
 /** 支部 ADC 角色 → 負責支部（聯絡／申請嘅支部範圍過濾用）；其他角色回 ''（不限支部） */
@@ -1259,10 +1260,12 @@ function cardAccessOf_(t, cardId) {
     return String(x.email).trim().toLowerCase() === String(t.email).trim().toLowerCase();
   })[0];
   if (!u || String(u.active).toUpperCase() === 'FALSE') return '';
-  // 「旅團」入口卡冇自己嘅 Perms 行：有任何子分頁權限就入得（取最高嗰級）
+  // 「旅團」入口卡冇自己嘅 Perms 行：有任何屬於旅團嘅子分頁權限就入得（取最高嗰級）。
+  // troopContacts 已歸聯絡簿，唔計入旅團入口卡。
   if (cid === 'troop') {
     var best = '';
-    TROOP_SUB_PERMS.forEach(function (d) {
+    CARD_SUB_PERMS.forEach(function (d) {
+      if (d.parentId !== 'troop') return;
       var a = cardAccessOf_(t, d.id);
       if (a === 'edit') best = 'edit';
       else if (a === 'view' && best !== 'edit') best = 'view';
@@ -7063,7 +7066,7 @@ function getCards_(token) {
   }).sort(function (a, b) { return a.order - b.order; });
   // v4.32.0：子分頁權限以「偽卡」形式附喺清單尾（前端卡片門禁可直接查；
   // 主控台會按 subPerm 旗標過濾，唔會渲染成卡片）
-  TROOP_SUB_PERMS.forEach(function (d) {
+  CARD_SUB_PERMS.forEach(function (d) {
     var a = cardAccessOf_(t, d.id);
     if (a !== 'view' && a !== 'edit') return;
     cards.push({
@@ -7134,7 +7137,7 @@ function getPerms_(token) {
     var role = String(r.role).trim();
     return { role: role, label: r.label || role, protected: String(r.protected).toUpperCase() === 'TRUE', level: levelOfRole_(role) };
   });
-  return ok({ cards: cards, roles: roles, matrix: readPerms_(), subPerms: TROOP_SUB_PERMS });
+  return ok({ cards: cards, roles: roles, matrix: readPerms_(), subPerms: CARD_SUB_PERMS });
 }
 function savePerms_(token, matrix) {
   var t = requireAdmin_(token); if (t.error) return err(t.error);
@@ -7143,7 +7146,7 @@ function savePerms_(token, matrix) {
   var roles = readSheet_(SHEET.ROLES).map(function (r) { return String(r.role).trim(); });
   var cards = readSheet_(SHEET.CARDS).map(function (c) { return String(c.cardId).trim(); })
     .filter(function (cid) { return cid && cid !== 'troop'; }); // troop 入口卡由子權限推導，冇自己一行
-  TROOP_SUB_PERMS.forEach(function (d) { if (cards.indexOf(d.id) < 0) cards.push(d.id); });
+  CARD_SUB_PERMS.forEach(function (d) { if (cards.indexOf(d.id) < 0) cards.push(d.id); });
   var header = ['cardId'].concat(roles);
   var rows = [header];
   cards.forEach(function (cid) {
@@ -7854,14 +7857,13 @@ function blueprint_() {
     P.push(row('troopDirectory', directoryDefault()));
     P.push(row('troopContacts', contactsDefault()));
     P.push(row('troopRequests', requestsDefault()));
+    P.push(row('activity', opsEdit()));
     P.push(row('contacts', ALL_EDIT));
     P.push(row('awards', ddcUp()));
     P.push(row('budget', adminEdit()));
     P.push(row('committee', { DC: 'edit', SYSADMIN: 'edit', DDC_ADMIN: 'edit' }));
-    P.push(row('unit', adminEdit()));
     P.push(row('venueReg', opsEdit()));
     P.push(row('stockReg', opsEdit()));
-    P.push(row('activity', opsEdit()));
     // v4.9.0：消息發佈搬咗去主控台頂（ADC+ 直接編輯），news 卡片已移除
     P.push(row('incident', ALL_VIEW));
     P.push(row('training', trainingEdit()));
@@ -7965,17 +7967,15 @@ function blueprint_() {
 
     { name: SHEET.CARDS, rows: [
       ['cardId', 'title', 'icon', 'type', 'url', 'description', 'order', 'enabled', 'embed', 'source', 'category'],
-      ['troop', '旅團', '🏕', 'builtin', '/troop', '旅團探訪 · 旅團資料 · 聯絡 · 申請邀請（各分頁權限喺權限表分行設定）', 1, 'TRUE', 'FALSE', 'core', 'done'],
+      ['troop', '旅團', '🏕', 'builtin', '/troop', '旅團探訪 · 旅團資料 · 活動知會（各分頁權限喺權限表分行設定）', 1, 'TRUE', 'FALSE', 'core', 'done'],
       ['contacts', '聯絡簿', '📇', 'builtin', '/contacts', '聯絡電話：旅團 · 港島地域 · 總會（職員姓名區方可改）', 2, 'TRUE', 'FALSE', 'core', 'done'],
       ['awards', '獎勵提名', '🎖', 'builtin', '/awards', '獎勵名冊 · 自動計夠期可提名 · 年期自訂', 3, 'TRUE', 'FALSE', 'core', 'done'],
       ['circulars', '區通告', '📜', 'builtin', '/circulars', '開班資料自動帶入 · 傳統通告列印 PDF 上載區網', 4, 'TRUE', 'FALSE', 'core', 'done'],
       ['budget', '區年度預算', '📑', 'builtin', '/budget', '直讀區方預算 Sheet · 按月／支部 · 資助合計', 5, 'TRUE', 'FALSE', 'core', 'done'],
       ['ymis', 'YMIS 會員核實', '🪪', 'builtin', '/ymis', '前往 YMIS 並查看區方核實帳戶', 6, 'TRUE', 'FALSE', 'core', 'done'],
       ['committee', '委任系統', '🗂', 'builtin', '/committee', '委任 · 續任 · R02', 7, 'TRUE', 'FALSE', 'core', 'todo'],
-      ['unit', '旅團管理系統', '🧭', 'builtin', '/unit', '旅名冊 · 人數統計', 8, 'TRUE', 'FALSE', 'core', 'todo'],
       ['venueReg', '場地借用審批', '🏛', 'builtin', '/venue-regs', '借場申請批核 · 場地清單', 9, 'TRUE', 'FALSE', 'core', 'done'],
       ['stockReg', '物資借用審批', '📦', 'builtin', '/stock-regs', '借物資批核 · 庫存管理', 10, 'TRUE', 'FALSE', 'core', 'done'],
-      ['activity', '活動知會', '🗓', 'builtin', '/activity-notices', '旅團活動知會記錄', 11, 'TRUE', 'FALSE', 'core', 'done'],
       ['incident', '意外 / 應變', '🚨', 'builtin', '/incident', '天氣決策 · 即時應變 · 總會指引 · 意外報告', 12, 'TRUE', 'FALSE', 'core', 'done'],
       ['training', '訓練班管理', '🎓', 'builtin', '/training', '開班登記 · 區會目錄', 13, 'TRUE', 'FALSE', 'core', 'done'],
       ['fps', 'FPS QR 製作', '💳', 'builtin', '/fps', '轉數快 QR 碼：綁區會戶口，填銀碼即生成', 14, 'TRUE', 'FALSE', 'core', 'done'],
@@ -8265,6 +8265,7 @@ function patchCardRows_(ss) {
     awards: { oldDesc: '讀獲獎名單 · 推下一級', desc: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', oldDescs: ['獎勵名冊 · 自動計夠期可提名 · 年期自訂'], desc2: '獎勵名冊 · 夠期自動推算 · 只限 DDC 或以上' },
   };
   var descOnly = {
+    troop: { oldDesc: '旅團探訪 · 旅團資料 · 聯絡 · 申請邀請（各分頁權限喺權限表分行設定）', desc: '旅團探訪 · 旅團資料 · 活動知會（各分頁權限喺權限表分行設定）' },
     incident: { oldDesc: '即時應變 · 總會指引 · 意外報告', desc: '天氣決策 · 即時應變 · 總會指引 · 意外報告' },
     debitNote: {
       oldDesc: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出（DC／DDC_ADMIN／職員）',
@@ -8276,10 +8277,11 @@ function patchCardRows_(ss) {
     },
   };
   // v4.4.0 刪會議行事曆；v4.5.0 刪週年會議文件；v4.9.0 刪消息發佈卡片（搬咗去主控台頂）
-  // v4.32.0：visit／troopDirectory 兩張卡合併為「旅團」一卡；Cards 行移除，
-  // 但 Perms 行保留轉作子分頁權限（唔好刪 Perms，否則管理員嘅自訂設定會冇晒）
-  var removeIds = { meeting: true, annual: true, news: true, visit: true, troopDirectory: true };
-  var removePermIds = { meeting: true, annual: true, news: true };
+  // v4.32.0：visit／troopDirectory／activity 併入「旅團」一卡；Cards 行移除，
+  // 但 Perms 行保留轉作子分頁權限（唔好刪 Perms，否則管理員嘅自訂設定會冇晒）。
+  // unit（旅團管理系統佔位卡）完全刪除，連 Perms 行一併移除。
+  var removeIds = { meeting: true, annual: true, news: true, visit: true, troopDirectory: true, activity: true, unit: true };
+  var removePermIds = { meeting: true, annual: true, news: true, unit: true };
   for (var i = v.length - 1; i >= 1; i--) {
     var id = String(v[i][cId] || '').trim();
     if (removeIds[id]) { sh.deleteRow(i + 1); continue; }
@@ -8299,7 +8301,7 @@ function patchCardRows_(ss) {
     }
     if (String(v[i][cCat] || '').trim() === 'todo') sh.getRange(i + 1, cCat + 1).setValue('done');
   }
-  // Perms 表同步移除已刪卡片（visit／troopDirectory 已轉子權限行，唔喺 removePermIds 入面）
+  // Perms 表只移除完全刪除嘅卡；visit／troopDirectory／activity 已轉子權限行，唔喺 removePermIds 入面
   var psh = ss.getSheetByName(SHEET.PERMS);
   if (psh) Object.keys(removePermIds).forEach(function (cid) { removeRowByFirstCol_(psh, cid); });
 }

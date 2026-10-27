@@ -56,17 +56,15 @@ export const DEMO_TOKEN = 'demo-session-token';
 // ───────────────────────── 卡片（照後台 Cards 表，冇 news） ─────────────────────────
 
 export const DEMO_CARDS: Record<string, any>[] = [
-  { cardId: 'troop', title: '旅團', icon: '🏕', type: 'builtin', url: '/troop', description: '旅團探訪 · 旅團資料 · 聯絡 · 申請邀請', order: 1, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'troop', title: '旅團', icon: '🏕', type: 'builtin', url: '/troop', description: '旅團探訪 · 旅團資料 · 活動知會 · 申請邀請', order: 1, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'contacts', title: '聯絡簿', icon: '📇', type: 'builtin', url: '/contacts', description: '聯絡電話：旅團 · 港島地域 · 總會（職員姓名區方可改）', order: 2, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'awards', title: '獎勵提名', icon: '🎖', type: 'builtin', url: '/awards', description: '獎勵名冊 · 自動計夠期可提名 · 年期自訂', order: 3, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'circulars', title: '區通告', icon: '📜', type: 'builtin', url: '/circulars', description: '開班資料自動帶入 · 傳統通告列印 PDF 上載區網', order: 4, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'budget', title: '區年度預算', icon: '📑', type: 'builtin', url: '/budget', description: '直讀區方預算 Sheet · 按月／支部 · 資助合計', order: 5, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'ymis', title: 'YMIS 會員核實', icon: '🪪', type: 'builtin', url: '/ymis', description: '前往 YMIS 並查看區方核實帳戶', order: 6, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'committee', title: '委任系統', icon: '🗂', type: 'builtin', url: '/committee', description: '委任 · 續任 · R02', order: 7, enabled: true, embed: false, source: 'core', category: 'todo' },
-  { cardId: 'unit', title: '旅團管理系統', icon: '🧭', type: 'builtin', url: '/unit', description: '旅名冊 · 人數統計', order: 8, enabled: true, embed: false, source: 'core', category: 'todo' },
   { cardId: 'venueReg', title: '場地借用審批', icon: '🏛', type: 'builtin', url: '/venue-regs', description: '借場申請批核 · 場地清單', order: 9, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'stockReg', title: '物資借用審批', icon: '📦', type: 'builtin', url: '/stock-regs', description: '借物資批核 · 庫存管理', order: 10, enabled: true, embed: false, source: 'core', category: 'done' },
-  { cardId: 'activity', title: '活動知會', icon: '🗓', type: 'builtin', url: '/activity-notices', description: '旅團活動知會記錄', order: 11, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'incident', title: '意外 / 應變', icon: '🚨', type: 'builtin', url: '/incident', description: '天氣決策 · 即時應變 · 總會指引 · 意外報告', order: 12, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'training', title: '訓練班管理', icon: '🎓', type: 'builtin', url: '/training', description: '開班登記 · 區會目錄', order: 13, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'fps', title: 'FPS QR 製作', icon: '💳', type: 'builtin', url: '/fps', description: '轉數快 QR 碼：綁區會戶口，填銀碼即生成', order: 14, enabled: true, embed: false, source: 'core', category: 'done' },
@@ -78,8 +76,9 @@ export const DEMO_CARDS: Record<string, any>[] = [
 export const DEMO_SUB_PERMS = [
   { id: 'visit', parentId: 'troop', title: '旅團探訪', icon: '🏕' },
   { id: 'troopDirectory', parentId: 'troop', title: '旅團資料', icon: '🧭' },
-  { id: 'troopContacts', parentId: 'troop', title: '旅團聯絡（私隱）', icon: '🔒' },
   { id: 'troopRequests', parentId: 'troop', title: '旅團申請／邀請', icon: '📨' },
+  { id: 'activity', parentId: 'troop', title: '活動知會', icon: '🗓' },
+  { id: 'troopContacts', parentId: 'contacts', title: '旅團聯絡（私隱）', icon: '🔒' },
 ];
 
 export const DEMO_ROLES: Record<string, any>[] = [
@@ -119,7 +118,7 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
       else m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
     });
   });
-  // v4.32.0 旅團卡子權限行（同 GS blueprint 預設一致）
+  // v4.32.0 卡片子權限行（同 GS blueprint 預設一致）
   const sub = (fn: (role: string, lv: number) => 'edit' | 'view' | '') => {
     const row: Record<string, 'edit' | 'view' | ''> = {};
     Object.keys(roleLevel).forEach(role => { row[role] = fn(role, roleLevel[role]); });
@@ -129,8 +128,10 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
   m.troopDirectory = sub((_r, lv) => (lv <= 3 ? 'edit' : 'view'));
   m.troopContacts = sub((r, lv) => (lv <= 2 || r === 'STAFF' ? 'edit' : lv === 3 ? 'view' : ''));
   m.troopRequests = sub((r, lv) => (lv <= 3 || r === 'STAFF' ? 'edit' : ''));
-  // 超管不屬一般可轉授角色，但 DEBIT NOTE 仍保留最高權限。
+  m.activity = sub((r, lv) => (lv <= 2 || r === 'STAFF' ? 'edit' : 'view'));
+  // 超管不屬一般可轉授角色，但 DEBIT NOTE／活動知會仍保留最高權限。
   if (m.debitNote) m.debitNote.SYSADMIN = 'edit';
+  m.activity.SYSADMIN = 'edit';
   return m;
 }
 
@@ -571,7 +572,7 @@ export function demoVisitRequests(): Record<string, any>[] {
 
 export function freshDemoDb(): DemoDb {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     config: {
       districtName: '筲箕灣區（示範）',
       theme: '',
