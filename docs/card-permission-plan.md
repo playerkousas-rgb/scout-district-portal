@@ -71,6 +71,11 @@
 | budget | 區年度預算 | builtin | 原 Excel | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 | — |
 | ymis | YMIS 會員核實（人工登入） | builtin | 區方 Script Properties → 官方 YMIS 登入頁 | 👁 | — | 👁 | 👁 | 👁 | — | — |
 | committee | 委任系統 | jump | 委任表 | ✏️ | ✏️ | ✏️ | 👁 | 👁 | — | — |
+| links | 常用外部連結 | builtin | 主 Sheet `Links` | ✏️ | ✏️ | ✏️ | ✏️ | ✏️ | 👁 | 👁 |
+| keyDates | 重要日期／大型活動 | builtin | 主 Sheet `KeyDates` | ✏️ | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 |
+| passcodes | 實體密碼（房門／影印機） | builtin | 主 Sheet `Passcodes` | ✏️ | ✏️ | ✏️ | ✏️ | 👁 | 👁 | 👁 |
+
+> v4.33.0 三張卡：表外 STAFF／AL 一律 👁 —— 「全部人可看」＝**全部已登入區職員**，唔會經成員系統或公開 `doGet` 路由漏出去。`links` ADC 或以上 ✏️；`keyDates`／`passcodes` DDC 或以上 ✏️。`keyDates` 只得「活動」同「日期」兩格，日期自由文字由後台解析做排序欄。`passcodes` 只准放要人喺現場先用得着嘅實體密碼（後台擋電郵／網址格式），所以 `Passcodes` 表刻意唔列入 `protectSensitiveSheets_`。三行都寫入 `Perms`，可以喺權限矩陣再調。
 
 > `ymis`：表外 STAFF／區職員亦有 👁；SYSADMIN／維護帳號、AL／助理區領袖冇。卡片同後台動作雙重核對當前角色，只有 DC／DDC／ADC／STAFF 可見；登入資料只喺按掣後從 Script Properties 取用，詳見 [`YMIS 人工登入卡部署指引`](ymis-verification-feasibility.md)。
 

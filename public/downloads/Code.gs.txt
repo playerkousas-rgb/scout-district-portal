@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.32.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.33.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -182,6 +182,9 @@ var SHEET = {
   ALL_RECORDS: 'AllRecords',     // 綜合記錄流水帳
   CIRCULARS: 'Circulars',        // 區通告（職員專用；輸出係傳統格式 PDF）
   DEBIT_NOTES: 'DebitNotes',     // DEBIT NOTE 帳簿（文件、FPS QR 快照及審計欄）
+  LINKS: 'Links',                // v4.33.0 常用連結（常用外部網址；Perms 行 links，ADC+ 可改、全部人可看）
+  KEY_DATES: 'KeyDates',         // v4.33.0 重要日期（大型活動／會議；Perms 行 keyDates，DDC+ 可加、全部人可看）
+  PASSCODES: 'Passcodes',        // v4.33.0 實體密碼（房門／影印機等實體裝置；Perms 行 passcodes，DDC+ 可改、全部人可看）
 };
 
 // ===================== 安全設定（★ 部署前必改）=====================
@@ -382,7 +385,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.32.0',
+      version: '4.33.0',
       feedbackReady: feedbackReady_(),
       dcFeedbackReady: dcFeedbackReady_(),
       troopContactsReady: troopContactsReady_(),
@@ -447,6 +450,9 @@ function doGet(e) {
       case 'getTroopContacts':    return json(getTroopContacts_(p.token));
       case 'getVisitRequests':    return json(getVisitRequests_(p.token));
       case 'getAnnouncements':    return json(getAnnouncements_(p.token));
+      case 'getLinks':            return json(getLinks_(p.token));
+      case 'getKeyDates':         return json(getKeyDates_(p.token));
+      case 'getPasscodes':        return json(getPasscodes_(p.token));
       case 'getCirculars':         return json(getCirculars_(p.token));
       case 'getAllRecords':       return json(getAllRecords_(p.token));
       case 'listIncidentReports': return json(listIncidentReports_(p.token));
@@ -549,6 +555,14 @@ function doPost(e) {
       case 'setAnnouncementActive': return json(setAnnouncementActive_(b.token, b.id, b.active));
       case 'getContactNames':       return json(getContactNames_(b.token));
       case 'saveContactName':       return json(saveContactName_(b.token, b.key, b.name));
+
+      // v4.33.0 🔗 常用連結 / 📅 重要日期 / 🔢 實體密碼
+      case 'saveLink':              return json(saveLink_(b.token, b.link || b));
+      case 'deleteLink':            return json(deleteLink_(b.token, b.id));
+      case 'saveKeyDate':           return json(saveKeyDate_(b.token, b.keyDate || b));
+      case 'deleteKeyDate':         return json(deleteKeyDate_(b.token, b.id));
+      case 'savePasscode':          return json(savePasscode_(b.token, b.passcode || b));
+      case 'deletePasscode':        return json(deletePasscode_(b.token, b.id));
 
       // ---------- 意外／應變：意外報告（管理系統，需登入） ----------
       case 'submitIncidentReport': return json(submitIncidentReport_(b.token, b.report || b));
@@ -2016,7 +2030,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.32.0',
+    version: '4.33.0',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -4598,6 +4612,434 @@ function setVisitRequestStatus_(token, id, patch) {
   setCellByHeader_(sh, idx, 'updatedBy', visitorName_(t.email));
   setCellByHeader_(sh, idx, 'updatedAt', new Date().toISOString());
   return ok({ saved: true, id: targetId });
+}
+
+// ===================== 🔗 常用連結 / 📅 重要日期 / 🔢 實體密碼（v4.33.0） =====================
+// 三張卡共用同一套做法：Perms 表一行（links / keyDates / passcodes）＋ requireCardView_／
+// requireCardEdit_ 門禁，權限之後喺 /admin 逐格改都唔使郁程式。
+// 「全部人可看」＝全部已登入區職員；成員系統（member-portal）公開 action 完全冇呢三個，
+// 唔會外洩。
+
+var LINK_MAX_TITLE = 80;
+var LINK_MAX_URL = 500;
+var LINK_MAX_TEXT = 200;
+var KEY_DATE_MAX_TITLE = 120;
+var KEY_DATE_MAX_TEXT = 120;
+var PASSCODE_MAX_TEXT = 120;
+
+/** 共用：剪裁＋長度上限（太長回 null 代表拒絕） */
+function shortText_(value, max) {
+  var s = String(value == null ? '' : value).trim();
+  if (s.length > max) return null;
+  return s;
+}
+/** 排序欄：數字先，空白／非數字當 0 */
+function orderNum_(value) {
+  var n = Number(value);
+  return isFinite(n) ? n : 0;
+}
+/** 只收 http(s) 外部連結；javascript: / data: 等一律拒絕 */
+function externalHttpUrl_(value) {
+  var url = String(value == null ? '' : value).trim();
+  if (!url) return '';
+  if (url.length > LINK_MAX_URL) return null;
+  return /^https?:\/\/[^\s]+$/i.test(url) ? url : null;
+}
+
+// ── 日期文字解析（同前端 lib/keyDates.ts 同一套規則；後台唔信前端計出嚟嘅排序值）──
+
+var KEY_DATE_MONTHS = {
+  jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+  may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11,
+  dec: 12, december: 12
+};
+
+function kdPad2_(n) { return n < 10 ? '0' + n : String(n); }
+function kdDaysInMonth_(y, m) { return new Date(y, m, 0).getDate(); }
+function kdValidYear_(y) { return isFinite(y) && y >= 1900 && y <= 2200; }
+function kdIso_(y, m, d) { return y + '-' + kdPad2_(m) + '-' + kdPad2_(d); }
+function kdMonthNum_(name) {
+  var key = String(name || '').toLowerCase().replace(/\./g, '');
+  return KEY_DATE_MONTHS[key] || 0;
+}
+
+/** 全形→半形、各種破折號→`-`、中文年月日→ISO */
+function normalizeKeyDateText_(raw) {
+  var s = String(raw == null ? '' : raw)
+    .replace(/[\uFF10-\uFF19]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+    .replace(/[\u3000]/g, ' ')
+    .replace(/[\uFF0C,\u3001\uFF1B;]/g, ' ')
+    .replace(/[\u2010-\u2015\uFF0D~\uFF5E\u301C]/g, '-')
+    .replace(/\s*(?:\u81F3|\u5230)\s*/g, '-');
+  return s
+    .replace(/(\d{4})\s*\u5E74\s*(\d{1,2})\s*\u6708\s*(\d{1,2})\s*\u65E5?/g, '$1-$2-$3')
+    .replace(/(\d{4})\s*\u5E74\s*(\d{1,2})\s*\u6708/g, '$1-$2')
+    .replace(/(\d{4})\s*\u5E74/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function kdDay_(text, y, m, d) {
+  if (!kdValidYear_(y) || m < 1 || m > 12 || d < 1 || d > kdDaysInMonth_(y, m)) return null;
+  var v = kdIso_(y, m, d);
+  return { text: text, start: v, end: v, precision: 'day' };
+}
+function kdRange_(text, y1, m1, d1, y2, m2, d2) {
+  var a = kdDay_(text, y1, m1, d1), b = kdDay_(text, y2, m2, d2);
+  if (!a || !b) return null;
+  var first = a.start <= b.start ? a.start : b.start;
+  var last = a.start <= b.start ? b.start : a.start;
+  return { text: text, start: first, end: last, precision: 'day' };
+}
+function kdMonth_(text, y, m) {
+  if (!kdValidYear_(y) || m < 1 || m > 12) return null;
+  return { text: text, start: kdIso_(y, m, 1), end: kdIso_(y, m, kdDaysInMonth_(y, m)), precision: 'month' };
+}
+function kdYear_(text, y) {
+  if (!kdValidYear_(y)) return null;
+  return { text: text, start: kdIso_(y, 1, 1), end: kdIso_(y, 12, 31), precision: 'year' };
+}
+
+function keyDatePatterns_() {
+  return [
+    // 28Dec2026-3Jan2027（跨月範圍）
+    { re: /(\d{1,2})\s*([A-Za-z]{3,9})\.?\s*(\d{4})?\s*-\s*(\d{1,2})\s*([A-Za-z]{3,9})\.?\s*(\d{4})/iy,
+      build: function (m) {
+        var m1 = kdMonthNum_(m[2]), m2 = kdMonthNum_(m[5]);
+        if (!m1 || !m2) return null;
+        var y2 = Number(m[6]), y1 = m[3] ? Number(m[3]) : y2;
+        return kdRange_(m[0], y1, m1, Number(m[1]), y2, m2, Number(m[4]));
+      } },
+    // 17-18Apr2027（同月範圍）
+    { re: /(\d{1,2})\s*-\s*(\d{1,2})\s*([A-Za-z]{3,9})\.?\s*(\d{4})/iy,
+      build: function (m) {
+        var mo = kdMonthNum_(m[3]);
+        if (!mo) return null;
+        var y = Number(m[4]);
+        return kdRange_(m[0], y, mo, Number(m[1]), y, mo, Number(m[2]));
+      } },
+    // 9Nov2026
+    { re: /(\d{1,2})\s*([A-Za-z]{3,9})\.?\s*(\d{4})/iy,
+      build: function (m) {
+        var mo = kdMonthNum_(m[2]);
+        return mo ? kdDay_(m[0], Number(m[3]), mo, Number(m[1])) : null;
+      } },
+    // Nov 9 2026
+    { re: /([A-Za-z]{3,9})\.?\s*(\d{1,2})\s+(\d{4})/iy,
+      build: function (m) {
+        var mo = kdMonthNum_(m[1]);
+        return mo ? kdDay_(m[0], Number(m[3]), mo, Number(m[2])) : null;
+      } },
+    // 2026-11-09
+    { re: /(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/iy,
+      build: function (m) { return kdDay_(m[0], Number(m[1]), Number(m[2]), Number(m[3])); } },
+    // 9/11/2026（日/月/年）
+    { re: /(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?!\d)/iy,
+      build: function (m) { return kdDay_(m[0], Number(m[3]), Number(m[2]), Number(m[1])); } },
+    // 2026-11（只有月）
+    { re: /(\d{4})-(0?[1-9]|1[0-2])(?!\d)/iy,
+      build: function (m) { return kdMonth_(m[0], Number(m[1]), Number(m[2])); } },
+    // Nov2026（只有月）
+    { re: /([A-Za-z]{3,9})\.?\s*(\d{4})(?!\d)/iy,
+      build: function (m) {
+        var mo = kdMonthNum_(m[1]);
+        return mo ? kdMonth_(m[0], Number(m[2]), mo) : null;
+      } },
+    // 2027（只有年）
+    { re: /(\d{4})(?!\d)/iy,
+      build: function (m) { return kdYear_(m[0], Number(m[1])); } }
+  ];
+}
+
+/** 一格日期文字 → 0 至多個結構化日期（「9Nov2026 2Mar2027」＝兩個） */
+function parseKeyDateText_(raw) {
+  var s = normalizeKeyDateText_(raw);
+  if (!s) return [];
+  var patterns = keyDatePatterns_();
+  var out = [], i = 0;
+  while (i < s.length) {
+    if (i > 0 && /\d/.test(s.charAt(i - 1)) && /\d/.test(s.charAt(i))) { i++; continue; }
+    var advanced = 0;
+    for (var p = 0; p < patterns.length; p++) {
+      patterns[p].re.lastIndex = i;
+      var m = patterns[p].re.exec(s);
+      if (!m) continue;
+      var item = patterns[p].build(m);
+      if (item) { item.text = String(m[0]).trim(); out.push(item); }
+      advanced = m[0].length;
+      break;
+    }
+    i += advanced > 0 ? advanced : 1;
+  }
+  return out;
+}
+
+/** 單一紀錄用：解唔到都唔擋，原文照存（precision='none'），排序時排最後 */
+function keyDateFields_(raw) {
+  var list = parseKeyDateText_(raw);
+  if (list.length) return list[0];
+  return { text: normalizeKeyDateText_(raw), start: '', end: '', precision: 'none' };
+}
+
+// ── 🔗 常用連結 ──
+
+function linkRow_(r) {
+  return {
+    id: String(r.id || '').trim(),
+    districtCode: String(r.districtCode || '').trim() || districtCode_(),
+    title: String(r.title == null ? '' : r.title).trim(),
+    url: String(r.url == null ? '' : r.url).trim(),
+    category: String(r.category == null ? '' : r.category).trim(),
+    note: String(r.note == null ? '' : r.note).trim(),
+    order: orderNum_(r.order),
+    active: String(r.active).toUpperCase() !== 'FALSE',
+    createdAt: String(r.createdAt || ''), createdBy: String(r.createdBy || ''),
+    updatedAt: String(r.updatedAt || ''), updatedBy: String(r.updatedBy || '')
+  };
+}
+
+function getLinks_(token) {
+  var t = requireCardView_(token, 'links'); if (t.error) return err(t.error);
+  if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.LINKS)) {
+    return ok({ access: t.access, items: [] });
+  }
+  var items = readSheet_(SHEET.LINKS).map(linkRow_).filter(function (x) { return x.id && x.title; });
+  items.sort(function (a, b) {
+    if (a.category !== b.category) return a.category.localeCompare(b.category);
+    if (a.order !== b.order) return a.order - b.order;
+    return a.title.localeCompare(b.title);
+  });
+  return ok({ access: t.access, items: items });
+}
+
+/** 新增（id 留空）或更新一條連結；需要 links 卡 ✏️ */
+function saveLink_(token, raw) {
+  var t = requireCardEdit_(token, 'links'); if (t.error) return err(t.error);
+  raw = raw || {};
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.LINKS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Links 表）');
+
+  var title = shortText_(raw.title, LINK_MAX_TITLE);
+  if (title === null) return err('名稱太長（上限 ' + LINK_MAX_TITLE + ' 字）');
+  if (!title) return err('名稱必填');
+  var url = externalHttpUrl_(raw.url);
+  if (url === null) return err('網址必須以 http:// 或 https:// 開頭，且不可含空白');
+  if (!url) return err('網址必填');
+  var category = shortText_(raw.category, 40);
+  if (category === null) return err('分類太長（上限 40 字）');
+  var note = shortText_(raw.note, LINK_MAX_TEXT);
+  if (note === null) return err('備註太長（上限 ' + LINK_MAX_TEXT + ' 字）');
+
+  var now = new Date().toISOString();
+  var fields = {
+    title: title, url: url, category: category, note: note,
+    order: orderNum_(raw.order),
+    active: (raw.active === undefined || raw.active === '' || isTrue_(raw.active)) ? 'TRUE' : 'FALSE',
+    updatedAt: now, updatedBy: t.email || ''
+  };
+
+  var id = String(raw.id || '').trim();
+  if (id) {
+    var idx = rowIndexByCol_(sh, 'id', id);
+    if (idx < 0) return err('找不到該連結');
+    Object.keys(fields).forEach(function (k) { setCellByHeader_(sh, idx, k, fields[k]); });
+    return ok({ saved: true, id: id, created: false });
+  }
+  id = genId_('lk');
+  var row = { id: id, districtCode: districtCode_(), createdAt: now, createdBy: t.email || '' };
+  Object.keys(fields).forEach(function (k) { row[k] = fields[k]; });
+  appendRowObj_(sh, row);
+  return ok({ saved: true, id: id, created: true });
+}
+
+function deleteLink_(token, id) {
+  var t = requireCardEdit_(token, 'links'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.LINKS);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Links 表）');
+  var target = String(id || '').trim();
+  var idx = rowIndexByCol_(sh, 'id', target);
+  if (idx < 0) return err('找不到該連結');
+  sh.deleteRow(idx);
+  return ok({ deleted: true, id: target });
+}
+
+// ── 📅 重要日期 ──
+
+function keyDateRow_(r) {
+  var dateText = String(r.dateText == null ? '' : r.dateText).trim();
+  var start = String(r.startDate == null ? '' : r.startDate).trim();
+  var end = String(r.endDate == null ? '' : r.endDate).trim();
+  var precision = String(r.precision || '').trim();
+  // 有人直接喺 Sheet 加行（只填 dateText）都排得返；唔會寫返落表
+  if (dateText && !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+    var parsed = keyDateFields_(dateText);
+    start = parsed.start; end = parsed.end; precision = parsed.precision;
+  }
+  if (!end) end = start;
+  if (!precision) precision = start ? 'day' : 'none';
+  return {
+    id: String(r.id || '').trim(),
+    districtCode: String(r.districtCode || '').trim() || districtCode_(),
+    title: String(r.title == null ? '' : r.title).trim(),
+    dateText: dateText,
+    startDate: start, endDate: end, precision: precision,
+    active: String(r.active).toUpperCase() !== 'FALSE',
+    createdAt: String(r.createdAt || ''), createdBy: String(r.createdBy || ''),
+    updatedAt: String(r.updatedAt || ''), updatedBy: String(r.updatedBy || '')
+  };
+}
+
+function getKeyDates_(token) {
+  var t = requireCardView_(token, 'keyDates'); if (t.error) return err(t.error);
+  if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.KEY_DATES)) {
+    return ok({ access: t.access, items: [] });
+  }
+  var items = readSheet_(SHEET.KEY_DATES).map(keyDateRow_).filter(function (x) { return x.id && x.title; });
+  items.sort(function (a, b) {
+    var ka = a.startDate || '9999-99-99', kb = b.startDate || '9999-99-99';
+    if (ka !== kb) return ka < kb ? -1 : 1;
+    return a.title.localeCompare(b.title);
+  });
+  return ok({ access: t.access, items: items });
+}
+
+/**
+ * 新增（id 留空）或更新一項重要日期；需要 keyDates 卡 ✏️（預設 DDC 或以上）。
+ * 只收兩格：活動（title）同日期（dateText）；排序用嘅 startDate／endDate 由後台自己解析。
+ */
+function saveKeyDate_(token, raw) {
+  var t = requireCardEdit_(token, 'keyDates'); if (t.error) return err(t.error);
+  raw = raw || {};
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.KEY_DATES);
+  if (!sh) return err('尚未執行 setupSheets()（缺 KeyDates 表）');
+
+  var title = shortText_(raw.title, KEY_DATE_MAX_TITLE);
+  if (title === null) return err('活動名稱太長（上限 ' + KEY_DATE_MAX_TITLE + ' 字）');
+  if (!title) return err('活動名稱必填');
+  var dateText = shortText_(raw.dateText === undefined ? raw.date : raw.dateText, KEY_DATE_MAX_TEXT);
+  if (dateText === null) return err('日期太長（上限 ' + KEY_DATE_MAX_TEXT + ' 字）');
+  if (!dateText) return err('日期必填（例如 9Nov2026、17-18Apr2027、2027，未定就寫「待定」）');
+
+  var parsed = keyDateFields_(dateText);
+  var now = new Date().toISOString();
+  var fields = {
+    title: title, dateText: parsed.text || dateText,
+    startDate: parsed.start, endDate: parsed.end, precision: parsed.precision,
+    active: (raw.active === undefined || raw.active === '' || isTrue_(raw.active)) ? 'TRUE' : 'FALSE',
+    updatedAt: now, updatedBy: t.email || ''
+  };
+
+  var id = String(raw.id || '').trim();
+  if (id) {
+    var idx = rowIndexByCol_(sh, 'id', id);
+    if (idx < 0) return err('找不到該紀錄');
+    Object.keys(fields).forEach(function (k) { setCellByHeader_(sh, idx, k, fields[k]); });
+    return ok({ saved: true, id: id, created: false });
+  }
+  id = genId_('kd');
+  var row = { id: id, districtCode: districtCode_(), createdAt: now, createdBy: t.email || '' };
+  Object.keys(fields).forEach(function (k) { row[k] = fields[k]; });
+  appendRowObj_(sh, row);
+  return ok({ saved: true, id: id, created: true });
+}
+
+function deleteKeyDate_(token, id) {
+  var t = requireCardEdit_(token, 'keyDates'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.KEY_DATES);
+  if (!sh) return err('尚未執行 setupSheets()（缺 KeyDates 表）');
+  var target = String(id || '').trim();
+  var idx = rowIndexByCol_(sh, 'id', target);
+  if (idx < 0) return err('找不到該紀錄');
+  sh.deleteRow(idx);
+  return ok({ deleted: true, id: target });
+}
+
+// ── 🔢 實體密碼 ──
+// 定位：要人身處現場先用到嘅密碼（房門／影印機／儲物櫃）。偷咗都冇用，所以唔當機密處理。
+// 但仍然只限已登入區職員睇到，而且後台硬性擋住明顯係系統帳戶密碼嘅嘢。
+
+function passcodeRow_(r) {
+  return {
+    id: String(r.id || '').trim(),
+    districtCode: String(r.districtCode || '').trim() || districtCode_(),
+    name: String(r.name == null ? '' : r.name).trim(),
+    code: String(r.code == null ? '' : r.code).trim(),
+    location: String(r.location == null ? '' : r.location).trim(),
+    note: String(r.note == null ? '' : r.note).trim(),
+    order: orderNum_(r.order),
+    active: String(r.active).toUpperCase() !== 'FALSE',
+    createdAt: String(r.createdAt || ''), createdBy: String(r.createdBy || ''),
+    updatedAt: String(r.updatedAt || ''), updatedBy: String(r.updatedBy || '')
+  };
+}
+
+function getPasscodes_(token) {
+  var t = requireCardView_(token, 'passcodes'); if (t.error) return err(t.error);
+  if (!SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.PASSCODES)) {
+    return ok({ access: t.access, items: [] });
+  }
+  var items = readSheet_(SHEET.PASSCODES).map(passcodeRow_).filter(function (x) { return x.id && x.name; });
+  items.sort(function (a, b) {
+    if (a.location !== b.location) return a.location.localeCompare(b.location);
+    if (a.order !== b.order) return a.order - b.order;
+    return a.name.localeCompare(b.name);
+  });
+  return ok({ access: t.access, items: items });
+}
+
+function savePasscode_(token, raw) {
+  var t = requireCardEdit_(token, 'passcodes'); if (t.error) return err(t.error);
+  raw = raw || {};
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.PASSCODES);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Passcodes 表）');
+
+  var name = shortText_(raw.name, PASSCODE_MAX_TEXT);
+  if (name === null) return err('名稱太長（上限 ' + PASSCODE_MAX_TEXT + ' 字）');
+  if (!name) return err('名稱必填（例如 1802 房門、影印機）');
+  var code = shortText_(raw.code, 60);
+  if (code === null) return err('密碼太長（上限 60 字）；呢張卡只放實體裝置密碼');
+  if (!code) return err('密碼必填');
+  var location = shortText_(raw.location, PASSCODE_MAX_TEXT);
+  if (location === null) return err('位置太長（上限 ' + PASSCODE_MAX_TEXT + ' 字）');
+  var note = shortText_(raw.note, 300);
+  if (note === null) return err('備註太長（上限 300 字）');
+  // 守住定位：唔好將系統／網上帳戶密碼擺入呢張「唔保密」嘅卡
+  if (/[\w.+-]+@[\w-]+\.[\w.]+/.test(code) || /^https?:\/\//i.test(code)) {
+    return err('實體密碼卡只放房門／影印機等實體密碼，唔可以存電郵帳戶或網站登入資料');
+  }
+
+  var now = new Date().toISOString();
+  var fields = {
+    name: name, code: code, location: location, note: note,
+    order: orderNum_(raw.order),
+    active: (raw.active === undefined || raw.active === '' || isTrue_(raw.active)) ? 'TRUE' : 'FALSE',
+    updatedAt: now, updatedBy: t.email || ''
+  };
+
+  var id = String(raw.id || '').trim();
+  if (id) {
+    var idx = rowIndexByCol_(sh, 'id', id);
+    if (idx < 0) return err('找不到該密碼紀錄');
+    Object.keys(fields).forEach(function (k) { setCellByHeader_(sh, idx, k, fields[k]); });
+    return ok({ saved: true, id: id, created: false });
+  }
+  id = genId_('pc');
+  var row = { id: id, districtCode: districtCode_(), createdAt: now, createdBy: t.email || '' };
+  Object.keys(fields).forEach(function (k) { row[k] = fields[k]; });
+  appendRowObj_(sh, row);
+  return ok({ saved: true, id: id, created: true });
+}
+
+function deletePasscode_(token, id) {
+  var t = requireCardEdit_(token, 'passcodes'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.PASSCODES);
+  if (!sh) return err('尚未執行 setupSheets()（缺 Passcodes 表）');
+  var target = String(id || '').trim();
+  var idx = rowIndexByCol_(sh, 'id', target);
+  if (idx < 0) return err('找不到該密碼紀錄');
+  sh.deleteRow(idx);
+  return ok({ deleted: true, id: target });
 }
 
 // ===================== 意外／應變：意外報告（v4.3.0） =====================
@@ -7847,6 +8289,9 @@ function blueprint_() {
     function ddcUp() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = ''; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'view'; return m; }
     function trainingEdit() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
     function circularsEdit() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; m.ADC_ROVER = 'edit'; m.ADC_VENTURE = 'edit'; m.ADC_SCOUT = 'edit'; m.ADC_CUBS = 'edit'; m.ADC_GH = 'edit'; m.STAFF = 'edit'; return m; }
+    // v4.33.0：全部人 👁，DDC 或以上 ✏️（重要日期、實體密碼）／ADC 或以上 ✏️（常用連結）
+    function ddcUpEdit() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
+    function adcUpEdit() { var m = ddcUpEdit(); m.ADC_ROVER = 'edit'; m.ADC_VENTURE = 'edit'; m.ADC_SCOUT = 'edit'; m.ADC_CUBS = 'edit'; m.ADC_GH = 'edit'; return m; }
     var P = [['cardId'].concat(ROLE_LIST)];
     // v4.32.0 旅團子權限預設（同 v4.31.0 固定政策一致；之後由超管喺 Perms 表自行調整）
     function visitDefault() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
@@ -7875,6 +8320,10 @@ function blueprint_() {
     P.push(row('rooms', ALL_VIEW));
     P.push(row('orgchart', ALL_VIEW));
     P.push(row('ymis', ALL_VIEW));
+    // v4.33.0 三張新卡（之後可由超管喺 /admin 權限矩陣逐格改）
+    P.push(row('links', adcUpEdit()));
+    P.push(row('keyDates', ddcUpEdit()));
+    P.push(row('passcodes', ddcUpEdit()));
     return P;
   })();
 
@@ -7984,6 +8433,9 @@ function blueprint_() {
       ['debitNote', 'DEBIT NOTE 生成', '🧾', 'builtin', '/debit-note', '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出', 17, 'TRUE', 'FALSE', 'core', 'done'],
       ['feedback', '你講我聽｜意見箱', '💬', 'builtin', '/feedback-inbox', '查閱一般意見及支援留言', 18, 'TRUE', 'FALSE', 'core', 'done'],
       ['dcFeedback', 'DC 保密留言', '🔒', 'builtin', '/dc-feedback', '只限區總監查閱（系統超級管理員亦可）', 19, 'TRUE', 'FALSE', 'core', 'done'],
+      ['links', '常用連結', '🔗', 'builtin', '/links', '區會常用外部網址一覽 · ADC 或以上可增刪改', 20, 'TRUE', 'FALSE', 'core', 'done'],
+      ['keyDates', '重要日期', '📅', 'builtin', '/key-dates', '大型活動及會議日期 · 倒數 · 匯出日曆 · DDC 或以上可加', 21, 'TRUE', 'FALSE', 'core', 'done'],
+      ['passcodes', '實體密碼', '🔢', 'builtin', '/passcodes', '房門／影印機等實體密碼 · DDC 或以上可改', 22, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
 
     { name: SHEET.UNITS, headerColor: '#bbf7d0', rows: [
@@ -8097,6 +8549,27 @@ function blueprint_() {
     { name: SHEET.DEBIT_NOTES, headerColor: '#fce7f3', frozenCols: 1, rows: [
       ['id', 'districtCode', 'ref', 'to', 'attention', 'date', 'amount', 'particulars', 'status', 'remarks', 'reminder',
         'fpsAccountName', 'fpsAccountNumber', 'fpsQrPayload', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'],
+    ] },
+
+    // v4.33.0 🔗 常用連結：區會成日要撳嘅外部網址（例如停車場登記），ADC 或以上可增刪改，全部已登入職員可看
+    { name: SHEET.LINKS, headerColor: '#dbeafe', rows: [
+      ['id', 'districtCode', 'title', 'url', 'category', 'note', 'order', 'active',
+        'createdAt', 'createdBy', 'updatedAt', 'updatedBy'],
+    ] },
+
+    // v4.33.0 📅 重要日期：大型活動／會議日期（「活動 + 日期」兩格）；
+    // dateText = 用戶原文（9Nov2026 / 17-18Apr2027 / 2027 都收），startDate/endDate 由後台解析出嚟排序用
+    { name: SHEET.KEY_DATES, headerColor: '#fef3c7', rows: [
+      ['id', 'districtCode', 'title', 'dateText', 'startDate', 'endDate', 'precision', 'active',
+        'createdAt', 'createdBy', 'updatedAt', 'updatedBy'],
+    ] },
+
+    // v4.33.0 🔢 實體密碼：房門／影印機等「要人到現場先用到」嘅密碼。
+    // ⚠️ 刻意唔列入 protectSensitiveSheets_／唔當機密：此表只准放實體裝置密碼，
+    //    系統帳戶、網上服務、電子鎖 API 等密碼一律唔可以放呢度（照舊放 Config／Script Properties）。
+    { name: SHEET.PASSCODES, headerColor: '#ede9fe', rows: [
+      ['id', 'districtCode', 'name', 'code', 'location', 'note', 'order', 'active',
+        'createdAt', 'createdBy', 'updatedAt', 'updatedBy'],
     ] },
     { name: SHEET.CIRCULARS, rows: [
       ['id', 'districtCode', 'circularNo', 'category', 'title', 'sections', 'sessions',

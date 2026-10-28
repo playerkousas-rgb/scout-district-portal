@@ -1116,3 +1116,60 @@ export interface CoursePrintData {
   portalUrl: string; fpsId: string; fpsName: string; webUrl: string;
   pulledAt: string;
 }
+
+// ───────────────────────── v4.33.0 🔗 常用連結 / 📅 重要日期 / 🔢 實體密碼 ─────────────────────────
+// 三張卡都係「全部已登入區職員 👁，指定層級 ✏️」，實際權限由 Perms 表同名一行決定。
+
+/** 後台三張卡嘅共同回應形狀：access 俾前端決定顯唔顯示編輯掣 */
+export interface AccessBoard<T> {
+  access: AccessLevel;
+  items: T[];
+}
+
+/** 🔗 常用連結（例如 HKIR 停車場登記） */
+export interface DistrictLink {
+  id: string;
+  districtCode?: string;
+  title: string;
+  url: string;
+  category?: string;      // 選填分組（地域 / 總會 / 區會表格…）
+  note?: string;
+  order?: number;
+  active?: boolean;
+  createdAt?: string;
+  createdBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+/** 📅 重要日期：只需填「活動」同「日期」兩格；startDate/endDate 由後台解析 dateText 得出 */
+export interface KeyDate {
+  id: string;
+  districtCode?: string;
+  title: string;
+  dateText: string;                               // 用戶原文：9Nov2026 / 17-18Apr2027 / 2027 / 待定
+  startDate?: string;                             // yyyy-MM-dd（解唔到時為 ''）
+  endDate?: string;                               // yyyy-MM-dd；單日同 startDate 一樣
+  precision?: 'day' | 'month' | 'year' | 'none';
+  active?: boolean;
+  createdAt?: string;
+  createdBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+/** 🔢 實體密碼：房門／影印機等「人要喺現場先用到」嘅密碼（刻意唔當機密，但只限已登入職員睇） */
+export interface Passcode {
+  id: string;
+  districtCode?: string;
+  name: string;           // 1802 房門 / 影印機…
+  code: string;
+  location?: string;      // 地域總部 18 樓…
+  note?: string;
+  order?: number;
+  active?: boolean;
+  createdAt?: string;
+  createdBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}

@@ -102,6 +102,20 @@
 
 ---
 
+## 🔗 常用連結 / 📅 重要日期 / 🔢 實體密碼（v4.33.0）
+
+主控台三張新卡，**全部已登入區職員都睇到**；三者都唔會經成員系統或公開網站漏出去（冇公開 `doGet` 路由，一定要 token）。
+
+- **🔗 常用外部連結（`/links`）**：收埋成日要搵嘅外部網址（例：`http://bit.ly/HKIRCarPark`）。可填分類（自動變分組，有 `datalist` 提示）、備註同排序；每行有「📋 複製網址」。網址一定要 `http://` 或 `https://` 開頭、唔可以有空白（前後端都驗），`javascript:` 之類一律擋。**ADC 或以上可改**，其餘區職員可看。
+- **📅 重要日期／大型活動（`/key-dates`）**：取代喺 WhatsApp 群組碌返上去搵日期。只有兩格：**活動**同**日期**。日期係自由文字，後台 `parseKeyDateText_`（前端同一套規則喺 `lib/keyDates.ts`）會自動解析做 `startDate`／`endDate`／`precision` 用嚟排序：`9Nov2026`、`17-18Apr2027`（跨日）、`2027年3月23日`、`2026-11-24`、淨係 `2027`（全年）、解唔到（例如「待定」）就照收做 `precision:'none'` 排最後。新增嗰陣一格打幾個日期（`9Nov2026 2Mar2027 26Apr2027`）會自動拆開逐項記低，送出前有 chip 預覽。分「將來／已過去」，有 📋 複製清單同 📥 下載 `.ics`。**DDC 或以上可加／改／刪**，其餘區職員可看。
+- **🔢 實體密碼（`/passcodes`）**：淨係放要人喺現場先用得着嘅密碼（1802 房門鎖、影印機代碼），所以唔當機密 —— `Passcodes` 表**刻意唔加入** `protectSensitiveSheets_`。按位置分組、等寬字顯示、一撳複製。後台擋低電郵格式或 `http(s)://` 開頭嘅 code，頁頂亦有警告橫額講明唔可以放網上帳戶密碼。**DDC 或以上可改**，其餘區職員可看。
+- **權限**：三行（`links`／`keyDates`／`passcodes`）寫入 `Perms` 表，之後可以喺「⚙️ 權限／角色管理」逐個角色撳 👁／✏️ 調整，唔使改程式。頁面用 `useRequireCard()` 擋直接開網址，編輯掣則跟後端回傳嘅 `access === 'edit'`，唔會淨係靠前端判斷。
+- **部署**：貼新 `Code.gs` 後執行 `setupSheets()`，會追加 `Links`、`KeyDates`、`Passcodes` 三張表、三行卡片同三行權限；純追加，唔會郁現有資料或自訂權限。表未建好之前，三頁只會顯示空清單，唔會報錯。
+- **示範版**：三張卡喺示範版齊全（樣本連結／會議日期／房門密碼），只存瀏覽器 sessionStorage；舊示範 session 會由 schema v7 自動升到 v8 補返新卡同資料。
+- **測試**：`node scripts/test-links-keydates-gs.js`（37 項後台：`setupSheets` 追加、三張卡權限門檻、CRUD／驗證、日期解析排序、路由）、`node --experimental-strip-types scripts/test-key-dates.ts`（27 項日期文字解析／格式／ICS）、`node scripts/test-new-cards-ui.js`（10 項真 TSX 渲染：👁 冇編輯掣、日期自動分將來／已過去、密碼警告）、`node --experimental-strip-types scripts/test-demo-engine.ts`（33 項，含三張新卡同 v7→v8 升級）。
+
+---
+
 ## 🧾 DEBIT NOTE 生成（v4.23.1）
 
 主控台 **「🧾 DEBIT NOTE 生成」**可直接取代現有 Excel 輸入及帳簿流程：
@@ -363,7 +377,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 | 檔案 | 用途 |
 |---|---|
-| `gs/Code.gs` | 完整統一後台 v4.28.1（旅團名錄 API 已合併；Apps Script 須由區方自行部署，升級前依只追加指引備份） |
+| `gs/Code.gs` | 完整統一後台 v4.33.0（旅團名錄 API 已合併；Apps Script 須由區方自行部署，升級前依只追加指引備份） |
 | `public/downloads/Code.gs.txt` | 與 `gs/Code.gs` 同一份內容，供網站「更新／下載」直接下載 |
 | `gs/Code.gs.course.js` | 每個訓練班嘅收表 Script 模板 |
 | `app/api/proxy/route.ts` | 前端 → Apps Script 嘅代理（API Key 唔出前端） |
@@ -378,3 +392,8 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 | `scripts/mock-gs-server.js` | 本機模擬 Apps Script 後台（啟動時會顯示僅本機使用的 `PORTAL_SKW_MASTER_PASSWORD` 與 `PORTAL_SKW_MASTER_BRIDGE_SECRET` 假值；切勿用於正式環境） |
 | `scripts/test-awards-logic.ts` | 獎勵夠期推算／Excel 匯入解析測試（24 項，`node --experimental-strip-types`） |
 | `scripts/check-member-alignment.js` | 成員系統 ↔ 後台對齊檢查（action 缺漏 / proxy 白名單 / 安全邊界） |
+| `app/links/`、`app/key-dates/`、`app/passcodes/` | 常用外部連結 / 重要日期／大型活動 / 實體密碼三張卡（v4.33.0） |
+| `lib/keyDates.ts` | 日期自由文字解析（`9Nov2026`／`17-18Apr2027`／`2027`）、排序、`.ics` 產生 |
+| `scripts/test-links-keydates-gs.js` | 三張新卡後台測試：追加式 `setupSheets`、權限門檻、CRUD、日期解析（37 項） |
+| `scripts/test-key-dates.ts` | 日期文字解析／顯示／ICS 測試（27 項，`node --experimental-strip-types`） |
+| `scripts/test-new-cards-ui.js` | 三張新卡真 TSX 渲染測試：唯讀／可編輯畫面差異（10 項） |

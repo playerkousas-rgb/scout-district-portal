@@ -716,13 +716,14 @@ check('升級合併旅團卡：Cards 只餘 troop 一行，Perms 保留五行子
 });
 
 check('現行發布快照與開發源一致，原 v4.29.0 凍結快照保留', () => {
-  const current = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.32.0.gs'), 'utf8');
+  const current = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.33.0.gs'), 'utf8');
   assert.strictEqual(current, code);
+  assert.ok(fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.32.0.gs'), 'utf8').includes("version: '4.32.0'"));
   assert.ok(fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.31.0.gs'), 'utf8').includes("version: '4.31.0'"));
   assert.ok(fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.30.0.gs'), 'utf8').includes("version: '4.30.0'"));
   const frozen = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.29.0.gs'), 'utf8');
   assert.ok(frozen.includes("version: '4.29.0'"));
-  assert.ok(code.includes("version: '4.32.0'"));
+  assert.ok(code.includes("version: '4.33.0'"));
 });
 
 check('前端可下載的完整 Code.gs 與後台原始檔完全一致', () => {
