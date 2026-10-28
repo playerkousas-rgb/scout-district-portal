@@ -436,12 +436,12 @@ const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.32.0');
+assert.strictEqual(h0.data.version, '4.33.0');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
 assert.strictEqual(h0.data.feedbackReady, true, 'DistrictFeedback should be ready after setup');
 assert.strictEqual(h0.data.dcFeedbackReady, true, 'DCConfidential should be ready after setup');
-console.log('  ✓ getHealthCheck 回傳版本 4.32.0、意見箱就緒及電子鎖初始狀態');
+console.log('  ✓ getHealthCheck 回傳版本 4.33.0、意見箱就緒及電子鎖初始狀態');
 assert.strictEqual(h0.data.tokenSecretSet, true, 'setup should create a private token signing secret');
 assert.strictEqual(h0.data.masterProxyBridgeSet, true, 'setup should create the Vercel-to-Apps-Script bridge secret');
 assert.ok(props.PORTAL_TOKEN_SECRET && props.PORTAL_TOKEN_SECRET.length >= 32, 'token secret should be stored in Script Properties');

@@ -9,9 +9,24 @@ import { demoCall, demoExternal, resetDemoData } from '../lib/demo/engine.ts';
 import { DEMO_TOKEN, demoDefaultMatrix, freshDemoDb } from '../lib/demo/seed.ts';
 import { canViewYmisRole } from '../lib/accountRoles.ts';
 
+// 示範引擎會用 window.sessionStorage 存快照；喺 Node 度 stub 一個，順便測得到版本升級。
+const demoStore = new Map<string, string>();
+(globalThis as any).window = {
+  sessionStorage: {
+    getItem: (k: string) => (demoStore.has(k) ? (demoStore.get(k) as string) : null),
+    setItem: (k: string, v: string) => { demoStore.set(k, String(v)); },
+    removeItem: (k: string) => { demoStore.delete(k); },
+  },
+};
+const SNAPSHOT_KEY = 'portal_demo_state_v1';
+
 let pass = 0;
 function check(name: string, fn: () => void) {
   try { fn(); pass++; console.log(`  ✓ ${name}`); }
+  catch (e) { console.error(`  ✗ ${name}\n    ${e instanceof Error ? e.message : e}`); process.exitCode = 1; }
+}
+async function checkAsync(name: string, fn: () => Promise<void>) {
+  try { await fn(); pass++; console.log(`  ✓ ${name}`); }
   catch (e) { console.error(`  ✗ ${name}\n    ${e instanceof Error ? e.message : e}`); process.exitCode = 1; }
 }
 
@@ -38,8 +53,8 @@ check('getCards：權限全開 — 主卡全部 edit + 5 張子權限偽卡；�
   const ids = r.data.map((c: any) => c.cardId);
   const mainCards = r.data.filter((c: any) => !c.subPerm);
   const subCards = r.data.filter((c: any) => c.subPerm);
-  assert.strictEqual(mainCards.length, 14, '刪 unit、activity 入旅團後主卡再少兩張（兼收起 awards）');
-  assert.strictEqual(freshDemoDb().schemaVersion, 7, '新示範資料用 schema v7');
+  assert.strictEqual(mainCards.length, 17, 'v4.33.0 再加常用連結／重要日期／實體密碼三張主卡');
+  assert.strictEqual(freshDemoDb().schemaVersion, 8, '新示範資料用 schema v8');
   assert.strictEqual(subCards.length, 5);
   assert.deepStrictEqual(subCards.map((c: any) => c.cardId).sort(), ['activity', 'troopContacts', 'troopDirectory', 'troopRequests', 'visit']);
   assert.ok(subCards.filter((c: any) => c.cardId !== 'troopContacts').every((c: any) => c.parentId === 'troop'));
@@ -416,6 +431,98 @@ check('DEBIT NOTE：示範整批匯入略過重複；有錯批次整批不寫', 
   assert.ok(invalid.ok);
   assert.strictEqual(invalid.data.aborted, true);
   assert.strictEqual(demoCall('listDebitNotes', { token: T.adc }, 'GET').data.length, before);
+});
+
+// ── 9.5 v4.33.0 三張新卡 ──
+check('LINKS：示範有樣本連結，加／改／刪都行得通；網址一定要 http(s)', () => {
+  const first = demoCall('getLinks', { token: T.adc }, 'GET');
+  assert.ok(first.ok);
+  assert.strictEqual(first.data.access, 'edit');
+  assert.ok(first.data.items.length >= 3, '示範版要有樣本連結');
+  assert.ok(first.data.items.some((i: any) => /^https?:\/\//.test(i.url)));
+
+  assert.strictEqual(demoCall('saveLink', { token: T.adc, link: { title: '壞網址', url: 'bit.ly/x' } }, 'POST').ok, false);
+  assert.strictEqual(demoCall('saveLink', { token: T.adc, link: { title: '', url: 'https://a.org' } }, 'POST').ok, false);
+
+  const made = demoCall('saveLink', { token: T.adc, link: { title: 'HKIR 停車場', url: 'http://bit.ly/HKIRCarPark', category: '港島地域' } }, 'POST');
+  assert.ok(made.ok);
+  assert.strictEqual(made.data.created, true);
+  const edited = demoCall('saveLink', { token: T.adc, link: { id: made.data.id, title: 'HKIR 停車場登記', url: 'http://bit.ly/HKIRCarPark' } }, 'POST');
+  assert.strictEqual(edited.data.created, false);
+  const after = demoCall('getLinks', { token: T.adc }, 'GET').data.items;
+  assert.strictEqual(after.find((i: any) => i.id === made.data.id).title, 'HKIR 停車場登記');
+  assert.ok(demoCall('deleteLink', { token: T.adc, id: made.data.id }, 'POST').ok);
+  assert.strictEqual(demoCall('deleteLink', { token: T.adc, id: made.data.id }, 'POST').ok, false);
+  assert.strictEqual(demoCall('getLinks', { token: T.bad }, 'GET').ok, false);
+});
+
+check('KEY DATES：日期文字自動解析成排序用日子，解唔到都收（排最後）', () => {
+  const board = demoCall('getKeyDates', { token: T.adc }, 'GET');
+  assert.ok(board.ok && board.data.items.length >= 3);
+
+  const one = demoCall('saveKeyDate', { token: T.adc, keyDate: { title: '青少年委員會會議', dateText: '9Nov2026' } }, 'POST');
+  assert.ok(one.ok);
+  const range = demoCall('saveKeyDate', { token: T.adc, keyDate: { title: 'HKIR Retreat', dateText: '17-18Apr2027' } }, 'POST');
+  const yearOnly = demoCall('saveKeyDate', { token: T.adc, keyDate: { title: '區大露營', dateText: '2027' } }, 'POST');
+  const tbd = demoCall('saveKeyDate', { token: T.adc, keyDate: { title: '區執委會會議', dateText: '待定' } }, 'POST');
+  assert.ok(tbd.ok, '未定日期都要收得');
+
+  const items = demoCall('getKeyDates', { token: T.adc }, 'GET').data.items;
+  const pick = (id: string) => items.find((i: any) => i.id === id);
+  assert.strictEqual(pick(one.data.id).startDate, '2026-11-09');
+  assert.strictEqual(pick(range.data.id).startDate, '2027-04-17');
+  assert.strictEqual(pick(range.data.id).endDate, '2027-04-18');
+  assert.strictEqual(pick(yearOnly.data.id).precision, 'year');
+  assert.strictEqual(pick(tbd.data.id).startDate, '');
+  assert.strictEqual(items[items.length - 1].id, tbd.data.id, '未定日期排最後');
+  const dated = items.filter((i: any) => i.startDate).map((i: any) => i.startDate);
+  assert.deepStrictEqual(dated, dated.slice().sort(), '有日期嘅由早到遲');
+
+  assert.strictEqual(demoCall('saveKeyDate', { token: T.adc, keyDate: { title: '冇日期' } }, 'POST').ok, false);
+  assert.strictEqual(demoCall('saveKeyDate', { token: T.adc, keyDate: { dateText: '9Nov2026' } }, 'POST').ok, false);
+  assert.ok(demoCall('deleteKeyDate', { token: T.adc, id: tbd.data.id }, 'POST').ok);
+});
+
+check('PASSCODES：實體密碼加得；但唔准放電郵／網站帳戶密碼', () => {
+  const board = demoCall('getPasscodes', { token: T.adc }, 'GET');
+  assert.ok(board.ok && board.data.items.length >= 3);
+  assert.ok(board.data.items.every((i: any) => i.code));
+
+  assert.strictEqual(demoCall('savePasscode', { token: T.adc, passcode: { name: 'Gmail', code: 'adc@demo.org' } }, 'POST').ok, false);
+  assert.strictEqual(demoCall('savePasscode', { token: T.adc, passcode: { name: '網站', code: 'https://ymis.scout.org.hk' } }, 'POST').ok, false);
+  assert.strictEqual(demoCall('savePasscode', { token: T.adc, passcode: { name: '', code: '1234' } }, 'POST').ok, false);
+
+  const made = demoCall('savePasscode', { token: T.adc, passcode: { name: '1802 房門', code: '1802#', location: '地域總部 18 樓' } }, 'POST');
+  assert.ok(made.ok);
+  demoCall('savePasscode', { token: T.adc, passcode: { id: made.data.id, name: '1802 房門', code: '1803#' } }, 'POST');
+  const items = demoCall('getPasscodes', { token: T.adc }, 'GET').data.items;
+  assert.strictEqual(items.find((i: any) => i.id === made.data.id).code, '1803#');
+  assert.ok(demoCall('deletePasscode', { token: T.adc, id: made.data.id }, 'POST').ok);
+});
+
+await checkAsync('舊示範 session（schema v7）升級：自動補三張卡同三份資料，舊資料唔郁', async () => {
+  resetDemoData();
+  const raw = JSON.parse(JSON.stringify(freshDemoDb()));
+  raw.schemaVersion = 7;
+  delete raw.links; delete raw.keyDates; delete raw.passcodes;
+  raw.cards = raw.cards.filter((c: any) => !['links', 'keyDates', 'passcodes'].includes(c.cardId));
+  ['links', 'keyDates', 'passcodes'].forEach((id) => { delete raw.matrix[id]; });
+  raw.announcements[0].title = '舊 session 嘅消息';
+  demoStore.set(SNAPSHOT_KEY, JSON.stringify(raw));
+
+  // 另開一個模組實例：記憶體冇 db，會照舊 session 快照行升級路徑
+  const aged = await import('../lib/demo/engine.ts?schema=7');
+  const cards = aged.demoCall('getCards', { token: T.adc }, 'GET').data.map((c: any) => c.cardId);
+  ['links', 'keyDates', 'passcodes'].forEach(id => assert.ok(cards.includes(id), `升級後應該有 ${id} 卡`));
+  assert.ok(aged.demoCall('getLinks', { token: T.adc }, 'GET').data.items.length > 0);
+  assert.ok(aged.demoCall('getKeyDates', { token: T.adc }, 'GET').data.items.length > 0);
+  assert.ok(aged.demoCall('getPasscodes', { token: T.adc }, 'GET').data.items.length > 0);
+  assert.strictEqual(
+    aged.demoCall('getAnnouncements', { token: T.adc }, 'GET').data[0].title, '舊 session 嘅消息',
+    '升級唔應該洗走舊示範資料',
+  );
+  assert.strictEqual(JSON.parse(demoStore.get(SNAPSHOT_KEY) as string).schemaVersion, 8, '升級後快照要寫返 v8');
+  resetDemoData();
 });
 
 // ── 10. 重設 ──

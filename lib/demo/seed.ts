@@ -71,6 +71,9 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'rooms', title: '區總部及地域房間使用情況', icon: '🏢', type: 'builtin', url: '/rooms', description: '地域 17／18／19 樓 + 區總部確認借用（紅色）· 月曆', order: 15, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'orgchart', title: '地域及總會架構', icon: '🏛', type: 'builtin', url: '/orgchart', description: '港島地域總監架構 · 總會領導層，自動跟官網更新', order: 16, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'debitNote', title: 'DEBIT NOTE 生成', icon: '🧾', type: 'builtin', url: '/debit-note', description: '正式單據 · FPS QR · 後端帳簿 · 舊單翻查 · Excel 匯出', order: 17, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'links', title: '常用連結', icon: '🔗', type: 'builtin', url: '/links', description: '區會常用外部網址一覽 · ADC 或以上可增刪改', order: 20, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'keyDates', title: '重要日期', icon: '📅', type: 'builtin', url: '/key-dates', description: '大型活動及會議日期 · 倒數 · 匯出日曆 · DDC 或以上可加', order: 21, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'passcodes', title: '實體密碼', icon: '🔢', type: 'builtin', url: '/passcodes', description: '房門／影印機等實體密碼 · DDC 或以上可改', order: 22, enabled: true, embed: false, source: 'core', category: 'done' },
 ];
 
 export const DEMO_SUB_PERMS = [
@@ -115,6 +118,9 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
       else if (c.cardId === 'rooms') m[c.cardId][role] = 'view';
       else if (c.cardId === 'ymis') m[c.cardId][role] = 'view';
       else if (c.cardId === 'circulars') m[c.cardId][role] = lv <= 4 ? 'edit' : 'view';
+      // v4.33.0：常用連結 ADC 或以上 ✏️；重要日期／實體密碼 DDC 或以上 ✏️；其餘一律 👁
+      else if (c.cardId === 'links') m[c.cardId][role] = lv <= 3 ? 'edit' : 'view';
+      else if (c.cardId === 'keyDates' || c.cardId === 'passcodes') m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
       else m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
     });
   });
@@ -550,6 +556,9 @@ export interface DemoDb {
   courseLinks: Record<string, any>[];
   circulars: Record<string, any>[];
   debitNotes: Record<string, any>[];
+  links: Record<string, any>[];
+  keyDates: Record<string, any>[];
+  passcodes: Record<string, any>[];
   installedPlugins: string[];
   seq: number;
 }
@@ -570,9 +579,52 @@ export function demoVisitRequests(): Record<string, any>[] {
   ];
 }
 
+// ───────────────────────── v4.33.0 常用連結 / 重要日期 / 實體密碼（示範資料） ─────────────────────────
+
+export function demoLinks(): Record<string, any>[] {
+  return [
+    { id: 'lk-01', districtCode: 'DEMO', title: '地域總部停車場登記（示範）', url: 'https://example.org/demo-carpark', category: '港島地域', note: '活動前一日截止登記', order: 1, active: true, createdAt: iso(60), createdBy: '示範', updatedAt: iso(60), updatedBy: '示範' },
+    { id: 'lk-02', districtCode: 'DEMO', title: '總會通告圖書館（示範）', url: 'https://example.org/demo-circulars', category: '總會', note: '', order: 2, active: true, createdAt: iso(60), createdBy: '示範', updatedAt: iso(60), updatedBy: '示範' },
+    { id: 'lk-03', districtCode: 'DEMO', title: '區會常用表格雲端夾（示範）', url: 'https://example.org/demo-forms', category: '區會', note: '要用區會 Google 帳戶登入', order: 1, active: true, createdAt: iso(45), createdBy: '示範', updatedAt: iso(45), updatedBy: '示範' },
+  ];
+}
+
+/** 示範日期：相對今日計，示範版唔會過期變空白 */
+export function demoKeyDates(): Record<string, any>[] {
+  const mk = (offsetDays: number) => dateOnly(-offsetDays);
+  const rows: Array<[string, string, number, number]> = [
+    ['區執行委員會會議（示範）', 'kd-01', 21, 21],
+    ['地域幹部會議（示範）', 'kd-02', 45, 45],
+    ['區大會操（示範）', 'kd-03', 80, 80],
+    ['區周年露營（示範）', 'kd-04', 150, 151],
+  ];
+  return rows.map(([title, id, startOffset, endOffset]) => {
+    const start = mk(startOffset); const end = mk(endOffset);
+    return {
+      id, districtCode: 'DEMO', title, dateText: start === end ? start : `${start} - ${end}`,
+      startDate: start, endDate: end, precision: 'day', active: true,
+      createdAt: iso(30), createdBy: '示範', updatedAt: iso(30), updatedBy: '示範',
+    };
+  }).concat([{
+    id: 'kd-05', districtCode: 'DEMO', title: '區大露營（示範，只知年份）',
+    dateText: String(new Date().getFullYear() + 1),
+    startDate: `${new Date().getFullYear() + 1}-01-01`, endDate: `${new Date().getFullYear() + 1}-12-31`,
+    precision: 'year', active: true,
+    createdAt: iso(30), createdBy: '示範', updatedAt: iso(30), updatedBy: '示範',
+  }]);
+}
+
+export function demoPasscodes(): Record<string, any>[] {
+  return [
+    { id: 'pc-01', districtCode: 'DEMO', name: '1802 房門（示範）', code: '1802#', location: '地域總部 18 樓', note: '入完要撳 # 字', order: 1, active: true, createdAt: iso(90), createdBy: '示範', updatedAt: iso(20), updatedBy: '示範' },
+    { id: 'pc-02', districtCode: 'DEMO', name: '影印機（示範）', code: '2468', location: '地域總部 18 樓', note: '彩色影印要另一個碼，問區職員', order: 2, active: true, createdAt: iso(90), createdBy: '示範', updatedAt: iso(90), updatedBy: '示範' },
+    { id: 'pc-03', districtCode: 'DEMO', name: '物資倉密碼鎖（示範）', code: '1357', location: '區總部', note: '', order: 1, active: true, createdAt: iso(90), createdBy: '示範', updatedAt: iso(90), updatedBy: '示範' },
+  ];
+}
+
 export function freshDemoDb(): DemoDb {
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     config: {
       districtName: '筲箕灣區（示範）',
       theme: '',
@@ -615,6 +667,9 @@ export function freshDemoDb(): DemoDb {
     courseLinks: demoCourseLinks(),
     circulars: demoCirculars(),
     debitNotes: demoDebitNotes(),
+    links: demoLinks(),
+    keyDates: demoKeyDates(),
+    passcodes: demoPasscodes(),
     installedPlugins: [],
     seq: 1000,
   };

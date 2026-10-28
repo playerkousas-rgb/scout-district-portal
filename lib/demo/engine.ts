@@ -13,13 +13,14 @@ import {
   freshDemoDb, demoUserFor, demoRoomEvents, demoDistrictHqEvents, demoBudget, demoCourseProfile,
   demoCourseSetup, demoCourseSheetRaw, demoDefaultMatrix, demoDebitNotes,
   DEMO_CARDS, DEMO_SUB_PERMS, DEMO_ORG_GROUPS, DEMO_STAFF_ROWS, DEMO_HKSA_COUNCIL, DEMO_HKSA_DEPTS,
-  demoTroopContacts, demoVisitRequests,
+  demoTroopContacts, demoVisitRequests, demoLinks, demoKeyDates, demoPasscodes,
   DEMO_TOKEN, type DemoDb, type DemoUser,
 } from './seed.ts';
 import {
   normalizeDebitNoteAmount, normalizeDebitNoteDate, normalizeDebitNoteReminder, validateDebitNote,
   type DebitNoteDraft, type DebitNoteRecord,
 } from '../debitNote.ts';
+import { parseSingleKeyDate } from '../keyDates.ts';
 
 type AnyObj = Record<string, any>;
 type ApiResultLike = { ok: boolean; data?: any; error?: string };
@@ -91,6 +92,20 @@ function loadDb(): DemoDb {
             troopCard.description = '旅團探訪 · 旅團資料 · 活動知會 · 申請邀請';
           }
           db.schemaVersion = 7;
+          persistDb();
+        }
+        // v8（GS v4.33.0）：🔗 常用連結 / 📅 重要日期 / 🔢 實體密碼三張新卡
+        if ((db.schemaVersion || 0) < 8) {
+          const defaults = demoDefaultMatrix();
+          (['links', 'keyDates', 'passcodes'] as const).forEach(id => {
+            const card = DEMO_CARDS.find(c => c.cardId === id);
+            if (card && !db!.cards.some(c => c.cardId === id)) db!.cards.push({ ...card });
+            if (!db!.matrix[id]) db!.matrix[id] = { ...defaults[id] };
+          });
+          if (!Array.isArray(db.links)) db.links = demoLinks();
+          if (!Array.isArray(db.keyDates)) db.keyDates = demoKeyDates();
+          if (!Array.isArray(db.passcodes)) db.passcodes = demoPasscodes();
+          db.schemaVersion = 8;
           persistDb();
         }
         return db;
@@ -277,6 +292,43 @@ function demoDebitNoteRecord(draft: DebitNoteDraft, id: string, u: DemoUser, pre
     createdAt: String(previous?.createdAt || now), createdBy: String(previous?.createdBy || u.email),
     updatedAt: now, updatedBy: u.email,
   };
+}
+
+// ───────────────────────── v4.33.0 常用連結 / 重要日期 / 實體密碼 ─────────────────────────
+
+/** 該帳戶對某張卡嘅示範權限（示範身份權限全開；其餘跟 matrix） */
+function demoCardAccess(u: DemoUser, cardId: string): 'edit' | 'view' | '' {
+  if (u.mockAdmin || u.isSuper) return 'edit';
+  return ((loadDb().matrix[cardId] || {})[u.role] || '') as 'edit' | 'view' | '';
+}
+
+/** 需要 ✏️ 權限先做得（新增／修改／刪除） */
+function requireDemoCard(token: string, cardId: string): DemoUser | ApiResultLike {
+  const u = userForToken(token);
+  if (!u) return fail('未登入或登入已過期（示範版）。');
+  return demoCardAccess(u, cardId) === 'edit' ? u : fail('你沒有此功能嘅權限（示範版權限模擬）。');
+}
+
+/** 👁 或 ✏️ 都睇得；回應形狀同後台 getLinks／getKeyDates／getPasscodes 一致 */
+function demoBoard(token: string, cardId: string, rows: AnyObj[]): ApiResultLike {
+  const u = userForToken(token);
+  if (!u) return fail('未登入或登入已過期（示範版）。');
+  const access = demoCardAccess(u, cardId);
+  if (access !== 'edit' && access !== 'view') return fail('你沒有此功能嘅權限（示範版權限模擬）。');
+  const items = rows.map(x => ({ ...x }));
+  if (cardId === 'links') {
+    items.sort((a, b) => String(a.category || '').localeCompare(String(b.category || ''))
+      || (Number(a.order) || 0) - (Number(b.order) || 0)
+      || String(a.title || '').localeCompare(String(b.title || '')));
+  } else if (cardId === 'keyDates') {
+    items.sort((a, b) => String(a.startDate || '9999-99-99').localeCompare(String(b.startDate || '9999-99-99'))
+      || String(a.title || '').localeCompare(String(b.title || '')));
+  } else {
+    items.sort((a, b) => String(a.location || '').localeCompare(String(b.location || ''))
+      || (Number(a.order) || 0) - (Number(b.order) || 0)
+      || String(a.name || '').localeCompare(String(b.name || '')));
+  }
+  return ok({ access, items });
 }
 
 /**
@@ -763,6 +815,111 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
     }
 
     // ── 聯絡簿（v4.9.0 姓名自訂） ──
+    // ── 🔗 常用連結 / 📅 重要日期 / 🔢 實體密碼（v4.33.0）──
+    case 'getLinks': return demoBoard(token, 'links', d.links);
+    case 'saveLink': {
+      const r = requireDemoCard(token, 'links'); if (isErr(r)) return r;
+      const raw = (payload.link || payload) as AnyObj;
+      const title = String(raw.title || '').trim();
+      const url = String(raw.url || '').trim();
+      if (!title) return fail('名稱必填');
+      if (!/^https?:\/\/\S+$/i.test(url)) return fail('網址必須以 http:// 或 https:// 開頭，且不可含空白');
+      const now = nowIso();
+      const fields = {
+        title, url, category: String(raw.category || '').trim(), note: String(raw.note || '').trim(),
+        order: Number(raw.order) || 0, active: true, updatedAt: now, updatedBy: r.email,
+      };
+      const id = String(raw.id || '').trim();
+      if (id) {
+        const found = d.links.find(x => x.id === id);
+        if (!found) return fail('找不到該連結');
+        Object.assign(found, fields);
+        persistDb(); return ok({ saved: true, id, created: false });
+      }
+      const newId = genId('lk');
+      d.links.push({ id: newId, districtCode: 'DEMO', createdAt: now, createdBy: r.email, ...fields });
+      persistDb(); return ok({ saved: true, id: newId, created: true });
+    }
+    case 'deleteLink': {
+      const r = requireDemoCard(token, 'links'); if (isErr(r)) return r;
+      const id = String(payload.id || '').trim();
+      const before = d.links.length;
+      d.links = d.links.filter(x => x.id !== id);
+      if (d.links.length === before) return fail('找不到該連結');
+      persistDb(); return ok({ deleted: true, id });
+    }
+
+    case 'getKeyDates': return demoBoard(token, 'keyDates', d.keyDates);
+    case 'saveKeyDate': {
+      const r = requireDemoCard(token, 'keyDates'); if (isErr(r)) return r;
+      const raw = (payload.keyDate || payload) as AnyObj;
+      const title = String(raw.title || '').trim();
+      const dateText = String(raw.dateText ?? raw.date ?? '').trim();
+      if (!title) return fail('活動名稱必填');
+      if (!dateText) return fail('日期必填（例如 9Nov2026、17-18Apr2027、2027，未定就寫「待定」）');
+      const parsed = parseSingleKeyDate(dateText);
+      const now = nowIso();
+      const fields = {
+        title, dateText: parsed.text || dateText,
+        startDate: parsed.start, endDate: parsed.end, precision: parsed.precision,
+        active: true, updatedAt: now, updatedBy: r.email,
+      };
+      const id = String(raw.id || '').trim();
+      if (id) {
+        const found = d.keyDates.find(x => x.id === id);
+        if (!found) return fail('找不到該紀錄');
+        Object.assign(found, fields);
+        persistDb(); return ok({ saved: true, id, created: false });
+      }
+      const newId = genId('kd');
+      d.keyDates.push({ id: newId, districtCode: 'DEMO', createdAt: now, createdBy: r.email, ...fields });
+      persistDb(); return ok({ saved: true, id: newId, created: true });
+    }
+    case 'deleteKeyDate': {
+      const r = requireDemoCard(token, 'keyDates'); if (isErr(r)) return r;
+      const id = String(payload.id || '').trim();
+      const before = d.keyDates.length;
+      d.keyDates = d.keyDates.filter(x => x.id !== id);
+      if (d.keyDates.length === before) return fail('找不到該紀錄');
+      persistDb(); return ok({ deleted: true, id });
+    }
+
+    case 'getPasscodes': return demoBoard(token, 'passcodes', d.passcodes);
+    case 'savePasscode': {
+      const r = requireDemoCard(token, 'passcodes'); if (isErr(r)) return r;
+      const raw = (payload.passcode || payload) as AnyObj;
+      const name = String(raw.name || '').trim();
+      const code = String(raw.code || '').trim();
+      if (!name) return fail('名稱必填（例如 1802 房門）');
+      if (!code) return fail('密碼必填');
+      if (/[\w.+-]+@[\w-]+\.[\w.]+/.test(code) || /^https?:\/\//i.test(code)) {
+        return fail('實體密碼卡只放房門／影印機等實體密碼，唔可以存電郵帳戶或網站登入資料');
+      }
+      const now = nowIso();
+      const fields = {
+        name, code, location: String(raw.location || '').trim(), note: String(raw.note || '').trim(),
+        order: Number(raw.order) || 0, active: true, updatedAt: now, updatedBy: r.email,
+      };
+      const id = String(raw.id || '').trim();
+      if (id) {
+        const found = d.passcodes.find(x => x.id === id);
+        if (!found) return fail('找不到該密碼紀錄');
+        Object.assign(found, fields);
+        persistDb(); return ok({ saved: true, id, created: false });
+      }
+      const newId = genId('pc');
+      d.passcodes.push({ id: newId, districtCode: 'DEMO', createdAt: now, createdBy: r.email, ...fields });
+      persistDb(); return ok({ saved: true, id: newId, created: true });
+    }
+    case 'deletePasscode': {
+      const r = requireDemoCard(token, 'passcodes'); if (isErr(r)) return r;
+      const id = String(payload.id || '').trim();
+      const before = d.passcodes.length;
+      d.passcodes = d.passcodes.filter(x => x.id !== id);
+      if (d.passcodes.length === before) return fail('找不到該密碼紀錄');
+      persistDb(); return ok({ deleted: true, id });
+    }
+
     case 'getContactNames': {
       const r = requireUser(token, 3); if (isErr(r)) return r;
       return ok({ names: { ...d.contactNames } });

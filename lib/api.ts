@@ -11,6 +11,7 @@ import type {
   VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, TroopDirectoryBoard, ScoutUnit, UnitSection,
   TroopContact, TroopContactsBoard, VisitRequest, VisitRequestsBoard,
+  AccessBoard, DistrictLink, KeyDate, Passcode,
   Circular, CircularsBoard, CircularStatus, DistrictFeedback, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
   CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec, HubCoursesResult,
   DistrictTroopDirectory,
@@ -399,6 +400,31 @@ export const api = {
   // ── 🎖 獎勵提名：提名期死線（v4.9.0，民青局嘉許）──
   saveAwardDeadlines: (token: string, cfg: { habDistrict: string; habHq: string }): Promise<ApiResult<{ saved: boolean; deadlineCfg: { habDistrict: string; habHq: string } }>> =>
     callPost('saveAwardDeadlines', { token, cfg }),
+
+  // ── 🔗 常用連結（v4.33.0；Perms 行 links，預設 ADC 或以上 ✏️、全部已登入職員 👁）──
+  getLinks: (token: string): Promise<ApiResult<AccessBoard<DistrictLink>>> =>
+    callGet('getLinks', { token }),
+  saveLink: (token: string, link: Partial<DistrictLink>): Promise<ApiResult<{ saved: boolean; id: string; created: boolean }>> =>
+    callPost('saveLink', { token, link }),
+  deleteLink: (token: string, id: string): Promise<ApiResult<{ deleted: boolean; id: string }>> =>
+    callPost('deleteLink', { token, id }),
+
+  // ── 📅 重要日期（v4.33.0；Perms 行 keyDates，預設 DDC 或以上 ✏️、全部已登入職員 👁）──
+  getKeyDates: (token: string): Promise<ApiResult<AccessBoard<KeyDate>>> =>
+    callGet('getKeyDates', { token }),
+  /** 只需 title + dateText；後台會自己解析排序日期，唔信前端計出嚟嘅值 */
+  saveKeyDate: (token: string, keyDate: Partial<KeyDate>): Promise<ApiResult<{ saved: boolean; id: string; created: boolean }>> =>
+    callPost('saveKeyDate', { token, keyDate }),
+  deleteKeyDate: (token: string, id: string): Promise<ApiResult<{ deleted: boolean; id: string }>> =>
+    callPost('deleteKeyDate', { token, id }),
+
+  // ── 🔢 實體密碼（v4.33.0；Perms 行 passcodes，預設 DDC 或以上 ✏️、全部已登入職員 👁）──
+  getPasscodes: (token: string): Promise<ApiResult<AccessBoard<Passcode>>> =>
+    callGet('getPasscodes', { token }),
+  savePasscode: (token: string, passcode: Partial<Passcode>): Promise<ApiResult<{ saved: boolean; id: string; created: boolean }>> =>
+    callPost('savePasscode', { token, passcode }),
+  deletePasscode: (token: string, id: string): Promise<ApiResult<{ deleted: boolean; id: string }>> =>
+    callPost('deletePasscode', { token, id }),
 
   // ── 📇 聯絡簿：地域職員姓名區方自訂（v4.9.0；電話唔變人會轉）──
   getContactNames: (token: string): Promise<ApiResult<{ names: Record<string, string> }>> =>
