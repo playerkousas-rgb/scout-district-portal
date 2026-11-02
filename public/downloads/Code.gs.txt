@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.33.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.35.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -185,6 +185,7 @@ var SHEET = {
   LINKS: 'Links',                // v4.33.0 常用連結（常用外部網址；Perms 行 links，ADC+ 可改、全部人可看）
   KEY_DATES: 'KeyDates',         // v4.33.0 重要日期（大型活動／會議；Perms 行 keyDates，DDC+ 可加、全部人可看）
   PASSCODES: 'Passcodes',        // v4.33.0 實體密碼（房門／影印機等實體裝置；Perms 行 passcodes，DDC+ 可改、全部人可看）
+  DISTRICT_EVENT_AUDIT: 'DistrictCalendarAudit', // append-only Teamup 行事曆操作審計（事件內容以 Teamup 為準）
 };
 
 // ===================== 安全設定（★ 部署前必改）=====================
@@ -385,7 +386,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.33.0',
+      version: '4.35.0',
       feedbackReady: feedbackReady_(),
       dcFeedbackReady: dcFeedbackReady_(),
       troopContactsReady: troopContactsReady_(),
@@ -453,6 +454,7 @@ function doGet(e) {
       case 'getLinks':            return json(getLinks_(p.token));
       case 'getKeyDates':         return json(getKeyDates_(p.token));
       case 'getPasscodes':        return json(getPasscodes_(p.token));
+      case 'getDistrictEvents':   return json(getDistrictEvents_(p.token, p.from, p.to));
       case 'getCirculars':         return json(getCirculars_(p.token));
       case 'getAllRecords':       return json(getAllRecords_(p.token));
       case 'listIncidentReports': return json(listIncidentReports_(p.token));
@@ -520,6 +522,8 @@ function doPost(e) {
       case 'updateVenueBooking':    return json(updateVenueBooking_(b.token, b.id, b.patch || b));
       case 'getLockList':           return json(getLockList_(b.token));
       case 'getVenueLockConfig':    return json(getVenueLockConfig_(b.token));
+      case 'getDistrictCalendarSubcalendars': return json(getDistrictCalendarSubcalendars_(b.token));
+      case 'saveDistrictCalendarSubcalendar': return json(saveDistrictCalendarSubcalendar_(b.token, b.subcalendarId));
       case 'saveVenueLockConfig':   return json(saveVenueLockConfig_(b.token, b.config || b));
       case 'setCourseRegStatus':    return json(setCourseRegStatus_(b.token, b.courseId, b.id, b.status));
       case 'setRegFeePaid':         return json(setRegFeePaid_(b.token, b.courseId, b.id, b.paid));
@@ -563,6 +567,8 @@ function doPost(e) {
       case 'deleteKeyDate':         return json(deleteKeyDate_(b.token, b.id));
       case 'savePasscode':          return json(savePasscode_(b.token, b.passcode || b));
       case 'deletePasscode':        return json(deletePasscode_(b.token, b.id));
+      case 'saveDistrictEvent':     return json(saveDistrictEvent_(b.token, b.event || b));
+      case 'deleteDistrictEvent':   return json(deleteDistrictEvent_(b.token, b.id, b.expectedUpdatedAt));
 
       // ---------- 意外／應變：意外報告（管理系統，需登入） ----------
       case 'submitIncidentReport': return json(submitIncidentReport_(b.token, b.report || b));
@@ -2030,7 +2036,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.33.0',
+    version: '4.35.0',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -2050,8 +2056,10 @@ function getVenueLockConfig_(token) {
     teamupPendingSub: tc.pendingSub || '',
     teamupApprovedSub: tc.approvedSub || '',
     teamupRejectedSub: tc.rejectedSub || '',
+    teamupDistrictSub: tc.districtSub || '',
     teamupAttendeeFieldSet: !!tc.attendeeFieldKey,
     teamupReady: !!(tc.apiKey && tc.calendarId && tc.approvedSub),
+    teamupDistrictReady: !!(tc.apiKey && tc.calendarId && tc.districtSub),
     notifyStaffEmail: getConfigValue_('NOTIFY_STAFF_EMAIL') || '',
     venueCount: activeVenues.length,
     venuesWithLockCount: venuesWithLock.length,
@@ -4955,6 +4963,274 @@ function deleteKeyDate_(token, id) {
   return ok({ deleted: true, id: target });
 }
 
+// ── 🗓️ 區會行事曆（Teamup 為唯一事件資料來源；README ADMIN APP 權限／稽核模式）──
+// 每個 create/update/delete 都在 server 端重驗目前登入者、角色及 Perms；Token 從不送到瀏覽器。
+// 操作成功後 append-only 寫入 hash-chain audit；Teamup 專用子日曆 ID 另行白名單驗證。
+var DISTRICT_EVENT_MAX_TITLE = 120;
+var DISTRICT_EVENT_MAX_LOCATION = 160;
+var DISTRICT_EVENT_MAX_CATEGORY = 40;
+var DISTRICT_EVENT_MAX_DESCRIPTION = 2000;
+
+function districtEventCanCreate_(t) {
+  var role = String((t && t.role) || '').trim().toUpperCase();
+  return role !== 'STAFF' && levelOfUser_(t && t.email, role) <= LEVEL_ADC;
+}
+function districtEventCanEdit_(t) {
+  var role = String((t && t.role) || '').trim().toUpperCase();
+  var level = levelOfUser_(t && t.email, role);
+  return level <= LEVEL_DDC || role === 'STAFF';
+}
+function districtCalendarUrl_(path) {
+  var c = teamupCfg_();
+  return 'https://api.teamup.com/' + encodeURIComponent(c.calendarId) + '/' + path;
+}
+function districtTeamupError_(res, fallback) {
+  if (!res) return fallback;
+  var status = Number(res.code || 0);
+  if (status === 401 || status === 403) return 'Teamup 拒絕讀寫；請管理員檢查後端 Token 權限。';
+  if (status === 404) return 'Teamup 找不到該活動或日曆，可能已由其他管理員刪除。';
+  if (status === 409 || status === 412) return '活動已被其他人修改，請重新載入後再試。';
+  return fallback + '（HTTP ' + status + '）';
+}
+function districtCalendarSubcalendars_(token, requireManager) {
+  var access = requireManager ? requireAccountManager_(token) : requireCardView_(token, 'districtCalendar');
+  if (access.error) return err(access.error);
+  var c = teamupCfg_();
+  if (!c.apiKey || !c.calendarId) return err('Teamup 尚未設定 TEAMUP_API_KEY／TEAMUP_CALENDAR_KEY；請管理員在後端 Config 完成設定');
+  var res;
+  try { res = teamupFetch_(districtCalendarUrl_('subcalendars'), { method: 'get' }); }
+  catch (e) { return err('連接 Teamup 失敗，請稍後再試'); }
+  if (res.code < 200 || res.code >= 300) return err(districtTeamupError_(res, '讀取 Teamup 子日曆失敗'));
+  var data = {};
+  try { data = JSON.parse(res.text || '{}'); } catch (ignore) { return err('Teamup 子日曆回應格式無效'); }
+  var rows = Array.isArray(data.subcalendars) ? data.subcalendars : (Array.isArray(data) ? data : []);
+  var excluded = [c.pendingSub, c.approvedSub, c.rejectedSub].filter(Boolean).map(String);
+  var items = rows.filter(function (x) { return x && x.id !== undefined && String(x.active).toLowerCase() !== 'false'; })
+    .map(function (x) { return { id: String(x.id), name: String(x.name || ('子日曆 ' + x.id)), color: String(x.color || '') }; });
+  return ok({ items: items, selectedId: excluded.indexOf(String(c.districtSub || '')) >= 0 ? '' : (c.districtSub || ''), excludedIds: excluded, canConfigure: !!requireManager });
+}
+function getDistrictCalendarSubcalendars_(token) {
+  return districtCalendarSubcalendars_(token, true);
+}
+function saveDistrictCalendarSubcalendar_(token, subcalendarId) {
+  var t = requireAccountManager_(token); if (t.error) return err(t.error);
+  var id = String(subcalendarId || '').trim();
+  if (!/^\d+$/.test(id)) return err('請選擇有效的 Teamup 子日曆');
+  var result = districtCalendarSubcalendars_(token, true);
+  if (!result.ok || !result.data) return result;
+  var selected = result.data.items.filter(function (x) { return x.id === id; })[0];
+  if (!selected) return err('所選子日曆不屬於目前 Teamup 日曆或已停用');
+  if (result.data.excludedIds.indexOf(id) >= 0) return err('不可使用借場流程的 pending／approved／rejected 子日曆');
+  if (!districtCalendarAuditReady_()) return err('請先執行 setupSheets() 建立受保護的行事曆操作稽核表');
+  var previousId = getConfigValue_('TEAMUP_DISTRICT_SUBCAL_ID') || '';
+  setConfigTextValue_('TEAMUP_DISTRICT_SUBCAL_ID', id, '區會行事曆專用子日曆（不可與借場 pending／approved／rejected 共用）');
+  var audit = appendDistrictCalendarAudit_('', 'configure', t.email || '', previousId, id);
+  return ok({ saved: true, subcalendarId: id, subcalendarName: selected.name, warn: audit.error || '' });
+}
+function districtDateValid_(value) {
+  var v = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  var d = new Date(v + 'T00:00:00Z');
+  return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
+function districtEventDate_(value) {
+  var ms = teamupEventDateMs_(value, false);
+  return ms && !isNaN(ms) ? Utilities.formatDate(new Date(ms), 'Asia/Hong_Kong', 'yyyy-MM-dd') : '';
+}
+function districtEventTime_(value) {
+  var ms = teamupEventDateMs_(value, false);
+  return ms && !isNaN(ms) ? Utilities.formatDate(new Date(ms), 'Asia/Hong_Kong', 'HH:mm') : '';
+}
+function districtTeamupNotes_(category, description) {
+  var prefix = category ? '活動類別：' + String(category).replace(/[\r\n]+/g, ' ') + '\n' : '';
+  return prefix + String(description || '');
+}
+function districtEventFromTeamup_(ev) {
+  ev = ev || {};
+  var notes = String(ev.notes || '');
+  var category = '';
+  var meta = notes.match(/^活動類別：([^\r\n]+)\r?\n/);
+  if (meta) { category = meta[1].trim(); notes = notes.slice(meta[0].length); }
+  var start = ev.start_dt || ev.startDate || '';
+  var end = ev.end_dt || ev.endDate || start;
+  var allDay = ev.all_day === true || ev.allDay === true || String(ev.all_day).toLowerCase() === 'true';
+  return {
+    id: String(ev.id || ''), title: String(ev.title || ''),
+    startDate: districtEventDate_(start), endDate: districtEventDate_(end) || districtEventDate_(start),
+    startTime: allDay ? '' : districtEventTime_(start), endTime: allDay ? '' : districtEventTime_(end),
+    allDay: allDay, location: String(ev.location || ''), category: category,
+    description: notes, updatedAt: String(ev.modify_dt || ev.modified_dt || ev.update_dt || ev.updated_at || ''),
+    createdAt: String(ev.create_dt || ev.created_dt || ev.created_at || ''), active: true,
+  };
+}
+function getDistrictEvents_(token, from, to) {
+  var t = requireCardView_(token, 'districtCalendar'); if (t.error) return err(t.error);
+  var c = teamupCfg_();
+  var canCreate = districtEventCanCreate_(t), canEdit = t.access === 'edit' && districtEventCanEdit_(t);
+  if (!c.apiKey || !c.calendarId) return err('Teamup 尚未設定 TEAMUP_API_KEY／TEAMUP_CALENDAR_KEY；請管理員聯絡系統維護者');
+  if (!c.districtSub) return ok({ access: t.access, canCreate: canCreate, canEdit: canEdit, configured: false, source: 'teamup', items: [] });
+  if ([c.pendingSub, c.approvedSub, c.rejectedSub].filter(Boolean).map(String).indexOf(String(c.districtSub)) >= 0) return err('安全檢查拒絕：TEAMUP_DISTRICT_SUBCAL_ID 與借場流程子日曆重疊，請管理員更換專用日曆');
+  var start = String(from || '').trim(), end = String(to || '').trim();
+  if (!start || !end) {
+    var now = new Date(); start = Utilities.formatDate(now, 'Asia/Hong_Kong', 'yyyy-MM-01');
+    end = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() + 1, 0), 'Asia/Hong_Kong', 'yyyy-MM-dd');
+  }
+  if (!districtDateValid_(start) || !districtDateValid_(end) || end < start) return err('行事曆日期範圍無效');
+  if ((new Date(end + 'T00:00:00Z') - new Date(start + 'T00:00:00Z')) / 86400000 > 62) return err('一次最多讀取 63 日行事曆');
+  var url = districtCalendarUrl_('events') + '?startDate=' + encodeURIComponent(start) + '&endDate=' + encodeURIComponent(end)
+    + '&subcalendarId%5B%5D=' + encodeURIComponent(c.districtSub) + '&tz=Asia%2FHong_Kong';
+  var res;
+  try { res = teamupFetch_(url, { method: 'get' }); }
+  catch (e) { return err('連接 Teamup 失敗，請稍後再試'); }
+  if (res.code < 200 || res.code >= 300) return err(districtTeamupError_(res, '讀取 Teamup 活動失敗'));
+  var data = {};
+  try { data = JSON.parse(res.text || '{}'); } catch (ignore) { return err('Teamup 活動回應格式無效'); }
+  var rawItems = Array.isArray(data.events) ? data.events : (Array.isArray(data) ? data : []);
+  var items = rawItems.filter(function (ev) { return !Array.isArray(ev.subcalendar_ids) || districtEventBelongs_(ev, c.districtSub); })
+    .map(districtEventFromTeamup_).filter(function (x) { return x.id && x.title && x.startDate; });
+  items.sort(function (a, b) { return (a.startDate + (a.startTime || '')).localeCompare(b.startDate + (b.startTime || '')) || a.title.localeCompare(b.title); });
+  return ok({ access: t.access, canCreate: canCreate, canEdit: canEdit, configured: true, source: 'teamup', subcalendarId: c.districtSub, items: items });
+}
+function districtEventPayload_(raw, actor) {
+  raw = raw || {};
+  var title = shortText_(raw.title, DISTRICT_EVENT_MAX_TITLE);
+  if (title === null) return { error: '活動名稱太長（上限 ' + DISTRICT_EVENT_MAX_TITLE + ' 字）' };
+  if (!title) return { error: '活動名稱必填' };
+  var startDate = String(raw.startDate || '').trim(), endDate = String(raw.endDate || startDate).trim();
+  if (!districtDateValid_(startDate) || !districtDateValid_(endDate)) return { error: '請輸入有效開始及結束日期（YYYY-MM-DD）' };
+  if (endDate < startDate) return { error: '結束日期不可早於開始日期' };
+  var startTime = String(raw.startTime || '').trim(), endTime = String(raw.endTime || '').trim();
+  var allDay = raw.allDay === undefined ? (!startTime && !endTime) : isTrue_(raw.allDay);
+  if (!allDay && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime))) return { error: '非全日活動請填有效開始及結束時間（HH:MM）' };
+  if (!allDay && endDate === startDate && endTime <= startTime) return { error: '同日活動的結束時間必須晚於開始時間' };
+  if (allDay) { startTime = ''; endTime = ''; }
+  var location = shortText_(raw.location, DISTRICT_EVENT_MAX_LOCATION);
+  if (location === null) return { error: '地點太長（上限 ' + DISTRICT_EVENT_MAX_LOCATION + ' 字）' };
+  var category = shortText_(raw.category, DISTRICT_EVENT_MAX_CATEGORY);
+  if (category === null) return { error: '分類太長（上限 ' + DISTRICT_EVENT_MAX_CATEGORY + ' 字）' };
+  var description = shortText_(raw.description, DISTRICT_EVENT_MAX_DESCRIPTION);
+  if (description === null) return { error: '活動詳情太長（上限 ' + DISTRICT_EVENT_MAX_DESCRIPTION + ' 字）' };
+  var timeValue = function (date, time, endOfDay) {
+    if (allDay) return toTeamupDt_(date, endOfDay);
+    return date + 'T' + time + ':00+08:00';
+  };
+  return { payload: {
+    subcalendar_ids: [Number(teamupCfg_().districtSub)], title: title, location: location || '',
+    notes: districtTeamupNotes_(category || '', description || ''),
+    start_dt: timeValue(startDate, startTime, false), end_dt: timeValue(endDate, endTime, true), all_day: allDay,
+  }, expectedUpdatedAt: String(raw.expectedUpdatedAt || '').trim() };
+}
+function districtEventBelongs_(ev, subId) {
+  var ids = Array.isArray(ev && ev.subcalendar_ids) ? ev.subcalendar_ids.map(String) : [];
+  return ids.indexOf(String(subId)) >= 0;
+}
+function districtEventConflict_(actual, expected) {
+  if (!expected) return true;
+  return String(actual || '') !== String(expected || '');
+}
+function districtCalendarAuditReady_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.DISTRICT_EVENT_AUDIT);
+  if (!sh || sh.getLastRow() < 1) return false;
+  var headers = sheetHeadersBySheet_(sh);
+  return ['districtCode', 'eventId', 'action', 'actor', 'at', 'beforeHash', 'afterHash', 'previousHash', 'hash'].every(function (h) { return headers.indexOf(h) >= 0; });
+}
+function appendDistrictCalendarAudit_(eventId, action, actor, beforeValue, afterValue) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { error: '操作已完成，但稽核記錄等待逾時；請通知管理員檢查 DistrictCalendarAudit' };
+  try {
+    var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.DISTRICT_EVENT_AUDIT);
+    if (!sh) return { error: '操作已完成，但缺 DistrictCalendarAudit；請執行 setupSheets() 並補記稽核' };
+    var last = sh.getLastRow(), previousHash = '';
+    if (last >= 2) previousHash = String(sh.getRange(last, 9).getValue() || '');
+    var at = new Date().toISOString();
+    var beforeHash = beforeValue === undefined || beforeValue === null ? '' : sha256_(JSON.stringify(beforeValue));
+    var afterHash = afterValue === undefined || afterValue === null ? '' : sha256_(JSON.stringify(afterValue));
+    var record = { districtCode: districtCode_(), eventId: String(eventId || ''), action: String(action), actor: String(actor || ''), at: at,
+      beforeHash: beforeHash, afterHash: afterHash, previousHash: previousHash };
+    record.hash = sha256_(JSON.stringify([record.districtCode, record.eventId, record.action, record.actor, record.at, record.beforeHash, record.afterHash, record.previousHash]));
+    appendRowObj_(sh, record);
+    return { ok: true };
+  } catch (e) { return { error: '操作已完成，但稽核記錄寫入失敗；請通知管理員補查' }; }
+  finally { lock.releaseLock(); }
+}
+function getDistrictCalendarSubcalendarForMutation_() {
+  var c = teamupCfg_();
+  if (!c.apiKey || !c.calendarId) return { error: 'Teamup 尚未設定 TEAMUP_API_KEY／TEAMUP_CALENDAR_KEY' };
+  if (!c.districtSub) return { error: '尚未設定專用區會子日曆；請管理員選擇 TEAMUP_DISTRICT_SUBCAL_ID' };
+  if ([c.pendingSub, c.approvedSub, c.rejectedSub].filter(Boolean).map(String).indexOf(String(c.districtSub)) >= 0) return { error: '安全檢查拒絕：區會行事曆子日曆不可與借場流程共用' };
+  return { config: c };
+}
+function saveDistrictEvent_(token, raw) {
+  raw = raw || {};
+  var id = String(raw.id || '').trim(), t;
+  if (id) {
+    t = requireCardEdit_(token, 'districtCalendar'); if (t.error) return err(t.error);
+    if (!districtEventCanEdit_(t)) return err('只有 DDC 或以上、區職員及管理員可以修改區會行事曆');
+  } else {
+    t = requireCardView_(token, 'districtCalendar'); if (t.error) return err(t.error);
+    if (!districtEventCanCreate_(t)) return err('只有 ADC 或以上（不包括 STAFF）可以新增區會行事曆活動');
+  }
+  var setup = getDistrictCalendarSubcalendarForMutation_(); if (setup.error) return err(setup.error);
+  if (!districtCalendarAuditReady_()) return err('請先執行 setupSheets() 建立受保護的行事曆操作稽核表');
+  var parsed = districtEventPayload_(raw, t.email); if (parsed.error) return err(parsed.error);
+  if (id && !parsed.expectedUpdatedAt) return err('缺少活動版本資料；請重新載入後再編輯');
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return err('行事曆正由另一位管理員更新，請稍後再試');
+  var result, beforeEvent = null, afterEvent = null, action = id ? 'update' : 'create';
+  try {
+    var url = districtCalendarUrl_('events' + (id ? '/' + encodeURIComponent(id) : ''));
+    var method = id ? 'put' : 'post';
+    if (id) {
+      var currentRes = teamupFetch_(url, { method: 'get' });
+      if (currentRes.code < 200 || currentRes.code >= 300) return err(districtTeamupError_(currentRes, '讀取待編輯 Teamup 活動失敗'));
+      var currentData = JSON.parse(currentRes.text || '{}'), current = currentData.event || currentData;
+      beforeEvent = current;
+      if (!districtEventBelongs_(current, setup.config.districtSub)) return err('找不到該區會活動，或活動不屬於專用區會子日曆');
+      var actualVersion = String(current.modify_dt || current.modified_dt || current.update_dt || current.updated_at || '');
+      if (districtEventConflict_(actualVersion, parsed.expectedUpdatedAt)) return err('活動已被其他人修改；已停止覆寫，請重新載入後再試。');
+      parsed.payload.subcalendar_ids = current.subcalendar_ids;
+      if (current.who) parsed.payload.who = current.who;
+      if (current.custom) parsed.payload.custom = current.custom;
+    }
+    var response = teamupFetch_(url, { method: method, payload: JSON.stringify(parsed.payload) });
+    if (response.code < 200 || response.code >= 300) return err(districtTeamupError_(response, 'Teamup 儲存活動失敗'));
+    var responseData = JSON.parse(response.text || '{}'), savedEvent = responseData.event || responseData;
+    var eventId = String(savedEvent.id || id || '');
+    if (!eventId) return err('Teamup 未回傳活動 ID，請檢查日曆確認寫入狀態');
+    afterEvent = savedEvent && savedEvent.id ? savedEvent : parsed.payload;
+    result = { id: eventId, created: !id };
+  } catch (e) { return err('Teamup 儲存活動失敗；請檢查網絡及後端設定'); }
+  finally { lock.releaseLock(); }
+  var audit = appendDistrictCalendarAudit_(result.id, action, t.email || '', beforeEvent, afterEvent);
+  return ok({ saved: true, id: result.id, created: result.created, warn: audit.error || '' });
+}
+function deleteDistrictEvent_(token, id, expectedUpdatedAt) {
+  var t = requireCardEdit_(token, 'districtCalendar'); if (t.error) return err(t.error);
+  if (!districtEventCanEdit_(t)) return err('只有 DDC 或以上、區職員及管理員可以刪除區會活動');
+  var target = String(id || '').trim(), expected = String(expectedUpdatedAt || '').trim();
+  if (!target || !expected) return err('缺少活動版本資料；請重新載入後再刪除');
+  var setup = getDistrictCalendarSubcalendarForMutation_(); if (setup.error) return err(setup.error);
+  if (!districtCalendarAuditReady_()) return err('請先執行 setupSheets() 建立受保護的行事曆操作稽核表');
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return err('行事曆正由另一位管理員更新，請稍後再試');
+  var beforeEvent = null;
+  try {
+    var url = districtCalendarUrl_('events/' + encodeURIComponent(target));
+    var currentRes = teamupFetch_(url, { method: 'get' });
+    if (currentRes.code < 200 || currentRes.code >= 300) return err(districtTeamupError_(currentRes, '讀取待刪除 Teamup 活動失敗'));
+    var data = JSON.parse(currentRes.text || '{}'), current = data.event || data;
+    beforeEvent = current;
+    if (!districtEventBelongs_(current, setup.config.districtSub)) return err('找不到該區會活動，或活動不屬於專用區會子日曆');
+    var actual = String(current.modify_dt || current.modified_dt || current.update_dt || current.updated_at || '');
+    if (districtEventConflict_(actual, expected)) return err('活動已被其他人修改；已停止刪除，請重新載入後再試。');
+    var deleted = teamupFetch_(url, { method: 'delete' });
+    if (deleted.code < 200 || deleted.code >= 300) return err(districtTeamupError_(deleted, 'Teamup 刪除活動失敗'));
+  } catch (e) { return err('Teamup 刪除活動失敗；請檢查網絡及後端設定'); }
+  finally { lock.releaseLock(); }
+  var audit = appendDistrictCalendarAudit_(target, 'delete', t.email || '', beforeEvent, null);
+  return ok({ deleted: true, id: target, warn: audit.error || '' });
+}
+
 // ── 🔢 實體密碼 ──
 // 定位：要人身處現場先用到嘅密碼（房門／影印機／儲物櫃）。偷咗都冇用，所以唔當機密處理。
 // 但仍然只限已登入區職員睇到，而且後台硬性擋住明顯係系統帳戶密碼嘅嘢。
@@ -7048,6 +7324,7 @@ function teamupCfg_() {
     pendingSub: getConfigValue_('TEAMUP_PENDING_SUBCAL_ID') || '',
     approvedSub: getConfigValue_('TEAMUP_APPROVED_SUBCAL_ID') || getConfigValue_('teamupApprovedSubId'),
     rejectedSub: getConfigValue_('TEAMUP_REJECTED_SUBCAL_ID') || getConfigValue_('teamupRejectedSubId'),
+    districtSub: getConfigValue_('TEAMUP_DISTRICT_SUBCAL_ID') || '',
     attendeeFieldKey: getConfigValue_('TEAMUP_FIELD_ATTENDEE_KEY') || '',
   };
 }
@@ -8139,7 +8416,7 @@ function showNewApiKey() { regenerateApiKeyMenu(); }
 function protectSensitiveSheets_(ss, newlyCreatedNames) {
   var me = '';
   try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { me = ''; }
-  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ, SHEET.DEBIT_NOTES, SHEET.FEEDBACK, SHEET.DC_FEEDBACK, SHEET.TROOP_CONTACTS, SHEET.VISIT_REQUESTS].forEach(function (name) {
+  [SHEET.CONFIG, SHEET.USERS, SHEET.STAFF, SHEET.COURSE_LINKS, SHEET.INCIDENT_REQ, SHEET.DEBIT_NOTES, SHEET.FEEDBACK, SHEET.DC_FEEDBACK, SHEET.TROOP_CONTACTS, SHEET.VISIT_REQUESTS, SHEET.DISTRICT_EVENT_AUDIT].forEach(function (name) {
     if (Array.isArray(newlyCreatedNames) && newlyCreatedNames.indexOf(name) < 0) return;
     try {
       var sh = ss.getSheetByName(name);
@@ -8292,6 +8569,8 @@ function blueprint_() {
     // v4.33.0：全部人 👁，DDC 或以上 ✏️（重要日期、實體密碼）／ADC 或以上 ✏️（常用連結）
     function ddcUpEdit() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
     function adcUpEdit() { var m = ddcUpEdit(); m.ADC_ROVER = 'edit'; m.ADC_VENTURE = 'edit'; m.ADC_SCOUT = 'edit'; m.ADC_CUBS = 'edit'; m.ADC_GH = 'edit'; return m; }
+    // 區會行事曆：全部人可看；編輯權由 DDC+／STAFF／管理員持有，ADC 的新增權由後端分開判斷。
+    function districtCalendarEdit() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; m.STAFF = 'edit'; return m; }
     var P = [['cardId'].concat(ROLE_LIST)];
     // v4.32.0 旅團子權限預設（同 v4.31.0 固定政策一致；之後由超管喺 Perms 表自行調整）
     function visitDefault() { var m = {}; ROLE_LIST.forEach(function (r) { m[r] = 'view'; }); m.DC = 'edit'; m.SYSADMIN = 'edit'; m.DDC_ADMIN = 'edit'; m.DDC_TRAINING = 'edit'; return m; }
@@ -8324,6 +8603,7 @@ function blueprint_() {
     P.push(row('links', adcUpEdit()));
     P.push(row('keyDates', ddcUpEdit()));
     P.push(row('passcodes', ddcUpEdit()));
+    P.push(row('districtCalendar', districtCalendarEdit()));
     return P;
   })();
 
@@ -8344,6 +8624,7 @@ function blueprint_() {
       ['TEAMUP_PENDING_SUBCAL_ID', '', '藍色（申請中）子日曆'],
       ['TEAMUP_APPROVED_SUBCAL_ID', '', '紅色（已批）子日曆（兼容舊 teamupApprovedSubId）'],
       ['TEAMUP_REJECTED_SUBCAL_ID', '', '(選填) 拒絕子日曆（兼容舊 teamupRejectedSubId）'],
+      ['TEAMUP_DISTRICT_SUBCAL_ID', '', '區會行事曆專用子日曆（不可與借場 pending／approved／rejected 共用）'],
       ['TEAMUP_BOOKING_URL', '', '公開唯讀月曆連結'],
       ['TEAMUP_FIELD_ATTENDEE_KEY', '', 'Teamup custom field key：參加人數（本日曆 API 回應顯示為 1）'],
       ['SCIENER_CLIENT_ID', '', 'Sciener 開放平台 app_id（兼容 ttlockClientId）'],
@@ -8436,6 +8717,7 @@ function blueprint_() {
       ['links', '常用連結', '🔗', 'builtin', '/links', '區會常用外部網址一覽 · ADC 或以上可增刪改', 20, 'TRUE', 'FALSE', 'core', 'done'],
       ['keyDates', '重要日期', '📅', 'builtin', '/key-dates', '大型活動及會議日期 · 倒數 · 匯出日曆 · DDC 或以上可加', 21, 'TRUE', 'FALSE', 'core', 'done'],
       ['passcodes', '實體密碼', '🔢', 'builtin', '/passcodes', '房門／影印機等實體密碼 · DDC 或以上可改', 22, 'TRUE', 'FALSE', 'core', 'done'],
+      ['districtCalendar', '區會行事曆', '🗓️', 'builtin', '/district-calendar', 'Teamup 專用日曆 · 月曆／議程 · ADC 或以上可新增；DDC、職員及管理員可編輯', 23, 'TRUE', 'FALSE', 'core', 'done'],
     ] },
 
     { name: SHEET.UNITS, headerColor: '#bbf7d0', rows: [
@@ -8562,6 +8844,11 @@ function blueprint_() {
     { name: SHEET.KEY_DATES, headerColor: '#fef3c7', rows: [
       ['id', 'districtCode', 'title', 'dateText', 'startDate', 'endDate', 'precision', 'active',
         'createdAt', 'createdBy', 'updatedAt', 'updatedBy'],
+    ] },
+
+    // Teamup 是區會活動唯一資料來源；此 append-only 表只保存管理操作稽核，不複製事件內容。
+    { name: SHEET.DISTRICT_EVENT_AUDIT, headerColor: '#dcfce7', rows: [
+      ['districtCode', 'eventId', 'action', 'actor', 'at', 'beforeHash', 'afterHash', 'previousHash', 'hash'],
     ] },
 
     // v4.33.0 🔢 實體密碼：房門／影印機等「要人到現場先用到」嘅密碼。

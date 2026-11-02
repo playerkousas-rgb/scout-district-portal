@@ -1,10 +1,10 @@
 /**
- * gs/Code.gs 邏輯測試（v4.33.0 三張新卡）— node scripts/test-links-keydates-gs.js
- * 涵蓋：🔗 常用連結（links）／📅 重要日期（keyDates）／🔢 實體密碼（passcodes）
+ * gs/Code.gs 邏輯測試（Teamup 區會行事曆及 v4.33.0 卡片）— node scripts/test-links-keydates-gs.js
+ * 涵蓋：🔗 常用連結／📅 重要日期／🔢 實體密碼／🗓️ 區會行事曆
  *   · Perms 門禁：全部已登入職員 👁；links ADC+ ✏️、keyDates／passcodes DDC+ ✏️
  *   · CRUD、驗證（網址格式、必填、長度、唔准放網上帳戶密碼）
  *   · 日期文字解析同排序（9Nov2026 / 17-18Apr2027 / 2027 / 待定）
- *   · setupSheets 會補建三張表、三行 Cards、三行 Perms（唔會郁舊資料）
+ *   · setupSheets 會補建連結／日期／密碼及 append-only 行事曆稽核表，唔會建立本地活動表
  * 做法同其他 *-gs 測試一樣：喺 vm 入面 stub Apps Script 全域物件，用記憶體 2D 陣列扮 Sheet。
  */
 const fs = require('fs');
@@ -63,7 +63,10 @@ const ROLES = ['DC', 'SYSADMIN', 'DDC_ADMIN', 'DDC_TRAINING', 'ADC_ROVER', 'ADC_
   'ADC_SCOUT', 'ADC_CUBS', 'ADC_GH', 'DL', 'LEADER', 'AL', 'STAFF'];
 
 const sheets = {
-  Config: makeSheet('Config', [['key', 'value', '說明'], ['districtCode', 'SKW', ''], ['districtName', '筲箕灣區', '']]),
+  Config: makeSheet('Config', [['key', 'value', '說明'], ['districtCode', 'SKW', ''], ['districtName', '筲箕灣區', ''],
+    ['TEAMUP_API_KEY', 'unit-test-token', ''], ['TEAMUP_CALENDAR_KEY', 'unit-test-calendar', ''],
+    ['TEAMUP_PENDING_SUBCAL_ID', '1001', ''], ['TEAMUP_APPROVED_SUBCAL_ID', '1002', ''],
+    ['TEAMUP_REJECTED_SUBCAL_ID', '1003', ''], ['TEAMUP_DISTRICT_SUBCAL_ID', '1004', '']]),
   Users: makeSheet('Users', [['email', 'role', 'active', 'level', 'cards'],
     ['dc@x.org', 'DC', 'TRUE', 1, ''],
     ['ddc@x.org', 'DDC_ADMIN', 'TRUE', 2, ''],
@@ -84,6 +87,10 @@ const sheets = {
   System: makeSheet('System', [['key', 'value'], ['locked', 'FALSE'], ['lockMessage', '維護中']]),
 };
 
+const teamupEvents = new Map();
+let nextTeamupId = 1;
+let teamupChangeCount = 0;
+let observedTeamupToken = '';
 const scriptProps = { PORTAL_TOKEN_SECRET: 'FAKE_UNIT_TEST_PRIVATE_TOKEN_SECRET_0123456789_ABCDEFGHIJKLMNOP' };
 
 const ctx = {
@@ -100,7 +107,9 @@ const ctx = {
   Utilities: {
     formatDate: (d, tz, fmt) => {
       const iso = new Date(d.getTime() + 8 * 3600 * 1000).toISOString();
-      if (fmt === 'yyyy-MM-dd') return iso.slice(0, 10);
+      if (fmt === 'yyyy-MM-dd' || fmt === 'yyyy-MM-01') return fmt === 'yyyy-MM-01' ? iso.slice(0, 7) + '-01' : iso.slice(0, 10);
+      if (fmt === "yyyy-MM-dd'T'HH:mm:ss") return iso.slice(0, 19);
+      if (fmt === 'HH:mm') return iso.slice(11, 16);
       if (fmt === 'yyyyMMdd') return iso.slice(0, 10).replace(/-/g, '');
       return iso;
     },
@@ -116,7 +125,43 @@ const ctx = {
   },
   ContentService: { createTextOutput: (t) => ({ setMimeType: () => t }), MimeType: { JSON: 'json' } },
   MailApp: { sendEmail: () => {} },
-  UrlFetchApp: { fetch: () => ({ getContentText: () => '{}', getResponseCode: () => 200 }) },
+  UrlFetchApp: { fetch: (url, options = {}) => {
+    observedTeamupToken = options.headers && options.headers['Teamup-Token'] || '';
+    const u = new URL(url);
+    const method = String(options.method || 'get').toLowerCase();
+    const pathName = decodeURIComponent(u.pathname).replace(/^\//, '');
+    const result = (data, code = 200) => ({ getContentText: () => JSON.stringify(data), getResponseCode: () => code });
+    if (pathName.endsWith('/subcalendars')) return result({ subcalendars: [
+      { id: 1001, name: '借場申請中', active: true }, { id: 1002, name: '借場已批', active: true },
+      { id: 1003, name: '借場拒絕', active: true }, { id: 1004, name: '區會行事曆', active: true },
+    ] });
+    const body = options.payload ? JSON.parse(options.payload) : {};
+    const match = pathName.match(/\/events(?:\/([^/]+))?$/);
+    if (!match) return result({ error: 'not found' }, 404);
+    const eventId = match[1] ? decodeURIComponent(match[1]) : '';
+    if (!eventId && method === 'get') {
+      const wantedSub = u.searchParams.getAll('subcalendarId[]').map(String);
+      const events = [...teamupEvents.values()].filter(ev => !wantedSub.length || ev.subcalendar_ids.some(id => wantedSub.includes(String(id))));
+      return result({ events });
+    }
+    if (!eventId && method === 'post') {
+      const id = 'tu-' + nextTeamupId++;
+      const stamp = new Date(Date.UTC(2027, 0, 1, 0, 0, teamupChangeCount++)).toISOString();
+      const ev = { ...body, id, create_dt: stamp, modify_dt: stamp };
+      teamupEvents.set(id, ev);
+      return result({ event: ev }, 201);
+    }
+    const current = teamupEvents.get(eventId);
+    if (!current) return result({ error: 'not found' }, 404);
+    if (method === 'get') return result({ event: current });
+    if (method === 'put') {
+      const stamp = new Date(Date.UTC(2027, 0, 1, 0, 0, teamupChangeCount++)).toISOString();
+      const ev = { ...current, ...body, id: eventId, create_dt: current.create_dt, modify_dt: stamp };
+      teamupEvents.set(eventId, ev); return result({ event: ev });
+    }
+    if (method === 'delete') { teamupEvents.delete(eventId); return result({}); }
+    return result({ error: 'unsupported' }, 405);
+  } },
   PropertiesService: {
     getScriptProperties: () => ({
       getProperty: k => scriptProps[k] || '',
@@ -151,17 +196,20 @@ ctx.uiAlert_ = () => {};
 ctx.showKeyDialog_ = () => {};
 ctx.setupSheets();
 
-check('補建三張新表 Links / KeyDates / Passcodes', () => {
-  ['Links', 'KeyDates', 'Passcodes'].forEach(n => assert.ok(sheets[n], `缺 ${n} 表`));
+check('補建 Links / KeyDates / Passcodes 及 append-only DistrictCalendarAudit；不建立本地活動表', () => {
+  ['Links', 'KeyDates', 'Passcodes', 'DistrictCalendarAudit'].forEach(n => assert.ok(sheets[n], `缺 ${n} 表`));
+  assert.ok(!sheets.DistrictEvents, '不得以 Sheet 作活動主資料來源');
+  assert.ok(sheets.Config._data.some(row => row[0] === 'TEAMUP_DISTRICT_SUBCAL_ID'), '專用子日曆 ID 必須有 Config 設定入口');
   assert.strictEqual(sheets.Links._data[0].slice(0, 4).join('|'), 'id|districtCode|title|url');
   assert.strictEqual(sheets.KeyDates._data[0].slice(0, 6).join('|'),
     'id|districtCode|title|dateText|startDate|endDate');
   assert.strictEqual(sheets.Passcodes._data[0].slice(0, 4).join('|'), 'id|districtCode|name|code');
+  assert.strictEqual(sheets.DistrictCalendarAudit._data[0].join('|'), 'districtCode|eventId|action|actor|at|beforeHash|afterHash|previousHash|hash');
 });
 
-check('補建三行 Cards，舊 contacts 行冇被覆寫', () => {
+check('補建四行 Cards，舊 contacts 行冇被覆寫', () => {
   const ids = sheets.Cards._data.slice(1).map(r => r[0]);
-  ['links', 'keyDates', 'passcodes'].forEach(id => assert.ok(ids.includes(id), `缺 ${id} 卡`));
+  ['links', 'keyDates', 'passcodes', 'districtCalendar'].forEach(id => assert.ok(ids.includes(id), `缺 ${id} 卡`));
   const contacts = sheets.Cards._data.find(r => r[0] === 'contacts');
   assert.strictEqual(contacts[1], '聯絡簿');
 });
@@ -187,6 +235,10 @@ check('補建三行 Perms：全部角色 view，指定層級 edit', () => {
     assert.strictEqual(get(cid, 'DL'), 'view');
     assert.strictEqual(get(cid, 'AL'), 'view');
   });
+  // 行事曆：全部已登入角色可看；DDC+、STAFF、管理員可編輯，ADC 由後端另授新增權。
+  ['DC', 'SYSADMIN', 'DDC_ADMIN', 'DDC_TRAINING', 'STAFF'].forEach(role => assert.strictEqual(get('districtCalendar', role), 'edit'));
+  assert.strictEqual(get('districtCalendar', 'ADC_SCOUT'), 'view');
+  assert.strictEqual(get('districtCalendar', 'AL'), 'view');
 });
 
 check('三張卡唔會列入敏感保護表（實體密碼刻意唔當機密）', () => {
@@ -365,6 +417,99 @@ check('DDC 刪得、ADC 刪唔到', () => {
   assert.strictEqual(ctx.deleteKeyDate_(ddc, tmp).ok, true);
 });
 
+// ───────────────────────── 🗓️ 區會行事曆 ─────────────────────────
+
+console.log('\n🗓️ 區會行事曆（Teamup 為主資料來源）');
+
+let eventId = '';
+let currentVersion = '';
+check('子日曆清單後端讀取；借場三個子日曆不能選，專用子日曆可設定', () => {
+  const options = ctx.getDistrictCalendarSubcalendars_(dc);
+  assert.strictEqual(options.ok, true);
+  assert.strictEqual(options.data.items.length, 4);
+  assert.deepStrictEqual(Array.from(options.data.excludedIds), ['1001', '1002', '1003']);
+  assert.strictEqual(ctx.saveDistrictCalendarSubcalendar_(dc, '1001').ok, false);
+  assert.strictEqual(ctx.saveDistrictCalendarSubcalendar_(dc, '1004').ok, true);
+  assert.strictEqual(ctx.getConfigValue_('TEAMUP_DISTRICT_SUBCAL_ID'), '1004');
+  assert.strictEqual(ctx.saveDistrictCalendarSubcalendar_(adc, '1004').ok, false, 'ADC 不可更改日曆設定');
+});
+
+check('Teamup 活動讀取以指定專用子日曆為範圍；權限由後端回傳', () => {
+  const board = ctx.getDistrictEvents_(adc, '2027-04-01', '2027-04-30');
+  assert.strictEqual(board.ok, true);
+  assert.strictEqual(board.data.access, 'view');
+  assert.strictEqual(board.data.configured, true);
+  assert.strictEqual(board.data.source, 'teamup');
+  assert.strictEqual(board.data.canCreate, true);
+  assert.strictEqual(board.data.canEdit, false);
+  assert.strictEqual(board.data.items.length, 0);
+  assert.ok(!JSON.stringify(board).includes('unit-test-token'), 'Teamup API Token 絕不可出現在 API response');
+  assert.strictEqual(observedTeamupToken, 'unit-test-token', 'Teamup Token 只應由 server-side header 使用');
+});
+
+check('ADC 新增活動會直接 POST 到 Teamup；Token 留在 server-side header', () => {
+  const created = ctx.saveDistrictEvent_(adc, { title: '區會會議', startDate: '2027-04-17', endDate: '2027-04-17', startTime: '19:00', endTime: '21:00', location: '區總部', category: '會議', description: '測試議程' });
+  assert.strictEqual(created.ok, true, created.error); eventId = created.data.id;
+  assert.ok(eventId.startsWith('tu-'));
+  const saved = teamupEvents.get(eventId);
+  assert.strictEqual(saved.subcalendar_ids[0], 1004);
+  assert.strictEqual(saved.title, '區會會議');
+  assert.strictEqual(saved.location, '區總部');
+  assert.strictEqual(saved.notes.includes('測試議程'), true);
+  const board = ctx.getDistrictEvents_(adc, '2027-04-01', '2027-04-30');
+  assert.strictEqual(board.data.items[0].id, eventId);
+  assert.strictEqual(board.data.items[0].category, '會議');
+  assert.strictEqual(board.data.items[0].description, '測試議程');
+  currentVersion = board.data.items[0].updatedAt;
+  assert.ok(currentVersion);
+});
+
+check('ADC 不能修改／刪除；DDC 可更新 Teamup，並拒絕過期版本覆寫', () => {
+  const patch = { id: eventId, expectedUpdatedAt: currentVersion, title: '改名', startDate: '2027-04-17', endDate: '2027-04-17', startTime: '19:00', endTime: '21:00', category: '會議' };
+  assert.strictEqual(ctx.saveDistrictEvent_(adc, patch).ok, false);
+  assert.strictEqual(ctx.deleteDistrictEvent_(adc, eventId, currentVersion).ok, false);
+  const updated = ctx.saveDistrictEvent_(ddc, patch);
+  assert.strictEqual(updated.ok, true, updated.error);
+  assert.strictEqual(teamupEvents.get(eventId).title, '改名');
+  const board = ctx.getDistrictEvents_(ddc, '2027-04-01', '2027-04-30');
+  assert.strictEqual(board.data.items[0].title, '改名');
+  const freshVersion = board.data.items[0].updatedAt;
+  assert.notStrictEqual(freshVersion, currentVersion);
+  assert.strictEqual(ctx.saveDistrictEvent_(ddc, { ...patch, title: '舊版本覆寫', expectedUpdatedAt: currentVersion }).ok, false);
+  assert.strictEqual(teamupEvents.get(eventId).title, '改名');
+  currentVersion = freshVersion;
+});
+
+check('區職員可修改／刪除但不可新增；領袖不可新增；成功操作 append-only 審計並串 hash', () => {
+  assert.strictEqual(ctx.saveDistrictEvent_(staff, { title: '職員不應新增', startDate: '2027-05-02', endDate: '2027-05-02', allDay: true }).ok, false);
+  const staffEdit = ctx.saveDistrictEvent_(staff, { id: eventId, expectedUpdatedAt: currentVersion, title: '職員修改', startDate: '2027-04-17', endDate: '2027-04-17', startTime: '19:00', endTime: '21:00' });
+  assert.strictEqual(staffEdit.ok, true, staffEdit.error);
+  currentVersion = ctx.getDistrictEvents_(ddc, '2027-04-01', '2027-04-30').data.items[0].updatedAt;
+  assert.strictEqual(ctx.deleteDistrictEvent_(staff, eventId, currentVersion).ok, true);
+  assert.strictEqual(ctx.saveDistrictEvent_(al, { title: '領袖不應新增', startDate: '2027-05-02', endDate: '2027-05-02', allDay: true }).ok, false);
+  const rows = sheets.DistrictCalendarAudit._data.slice(1);
+  assert.ok(rows.some(r => r[1] === eventId && r[2] === 'create' && r[3] === 'adc@x.org'));
+  assert.ok(rows.some(r => r[1] === eventId && r[2] === 'update' && r[3] === 'ddc@x.org'));
+  assert.ok(rows.some(r => r[1] === eventId && r[2] === 'update' && r[3] === 'staff@x.org'));
+  const deletes = rows.filter(r => r[2] === 'delete');
+  assert.strictEqual(deletes[deletes.length - 1][3], 'staff@x.org');
+  assert.ok(rows.some(r => r[2] === 'create' && !r[5] && r[6]), 'create records afterHash only');
+  assert.ok(rows.some(r => r[2] === 'update' && r[5] && r[6]), 'update records beforeHash and afterHash');
+  assert.ok(rows.some(r => r[2] === 'delete' && r[5] && !r[6]), 'delete records beforeHash only');
+  for (let i = 1; i < rows.length; i++) assert.strictEqual(rows[i][7], rows[i - 1][8], 'hash chain previousHash must link');
+  assert.ok(!teamupEvents.has(eventId), 'delete must call Teamup DELETE');
+});
+
+check('日期／欄位驗證後端執行，借場子日曆重疊時 fail closed', () => {
+  assert.strictEqual(ctx.saveDistrictEvent_(adc, { title: '', startDate: '2027-01-01', endDate: '2027-01-01', allDay: true }).ok, false);
+  assert.strictEqual(ctx.saveDistrictEvent_(adc, { title: 'x', startDate: '2027-02-30', endDate: '2027-02-30', allDay: true }).ok, false);
+  assert.strictEqual(ctx.saveDistrictEvent_(adc, { title: 'x', startDate: '2027-01-02', endDate: '2027-01-01', allDay: true }).ok, false);
+  ctx.setConfigTextValue_('TEAMUP_DISTRICT_SUBCAL_ID', '1001', 'test');
+  assert.strictEqual(ctx.getDistrictEvents_(adc, '2027-04-01', '2027-04-30').ok, false);
+  assert.strictEqual(ctx.saveDistrictEvent_(adc, { title: '不應寫入', startDate: '2027-05-01', endDate: '2027-05-01', allDay: true }).ok, false);
+  ctx.setConfigTextValue_('TEAMUP_DISTRICT_SUBCAL_ID', '1004', 'test');
+});
+
 // ───────────────────────── 🔢 實體密碼 ─────────────────────────
 
 console.log('\n🔢 實體密碼（passcodes）');
@@ -427,21 +572,24 @@ check('STAFF 刪唔到；DC 刪得', () => {
 
 console.log('\n🧭 卡片清單同路由');
 
-check('getCards_ 三張卡都會回，access 跟角色', () => {
+check('getCards_ 新卡都會回，access 跟角色', () => {
   const forDc = ctx.getCards_(dc).data;
   const forAl = ctx.getCards_(al).data;
   const pick = (list, id) => list.find(c => c.cardId === id);
   assert.strictEqual(pick(forDc, 'links').access, 'edit');
   assert.strictEqual(pick(forDc, 'keyDates').access, 'edit');
   assert.strictEqual(pick(forDc, 'passcodes').access, 'edit');
+  assert.strictEqual(pick(forDc, 'districtCalendar').access, 'edit');
   assert.strictEqual(pick(forAl, 'links').access, 'view');
   assert.strictEqual(pick(forAl, 'keyDates').access, 'view');
   assert.strictEqual(pick(forAl, 'passcodes').access, 'view');
+  assert.strictEqual(pick(forAl, 'districtCalendar').access, 'view');
   assert.strictEqual(pick(forDc, 'links').url, '/links');
   assert.strictEqual(pick(forDc, 'keyDates').url, '/key-dates');
   assert.strictEqual(pick(forDc, 'passcodes').url, '/passcodes');
-  // 三張都係真卡（唔係子權限偽卡）
-  ['links', 'keyDates', 'passcodes'].forEach(id => assert.ok(!pick(forDc, id).subPerm));
+  assert.strictEqual(pick(forDc, 'districtCalendar').url, '/district-calendar');
+  // 新卡均係真卡（唔係子權限偽卡）
+  ['links', 'keyDates', 'passcodes', 'districtCalendar'].forEach(id => assert.ok(!pick(forDc, id).subPerm));
 });
 
 check('doGet／doPost 路由駁通', () => {
@@ -449,6 +597,8 @@ check('doGet／doPost 路由駁通', () => {
   sheets.Config.appendRow(['API_KEY_HASH', ctx.sha256_(apiKey), 'test only']);
   const get = ctx.doGet({ parameter: { apiKey, action: 'getKeyDates', token: dc } });
   assert.strictEqual(JSON.parse(get).ok, true);
+  const calendarGet = ctx.doGet({ parameter: { apiKey, action: 'getDistrictEvents', token: adc, from: '2027-06-01', to: '2027-06-30' } });
+  assert.strictEqual(JSON.parse(calendarGet).ok, true);
   const post = ctx.doPost({
     parameter: {},
     postData: { contents: JSON.stringify({ apiKey, action: 'saveLink', token: dc, link: { title: '路由測試', url: 'https://route.org' } }) },
@@ -459,11 +609,18 @@ check('doGet／doPost 路由駁通', () => {
     postData: { contents: JSON.stringify({ apiKey, action: 'deleteLink', token: dc, id: JSON.parse(post).data.id }) },
   });
   assert.strictEqual(JSON.parse(del).ok, true);
+  const calendar = ctx.doPost({ parameter: {}, postData: { contents: JSON.stringify({ apiKey, action: 'saveDistrictEvent', token: adc, event: { title: '路由活動', startDate: '2027-06-01', endDate: '2027-06-01', allDay: true } }) } });
+  const calendarResult = JSON.parse(calendar);
+  assert.strictEqual(calendarResult.ok, true, calendarResult.error);
+  const calendarBoard = JSON.parse(ctx.doGet({ parameter: { apiKey, action: 'getDistrictEvents', token: ddc, from: '2027-06-01', to: '2027-06-30' } }));
+  const routeVersion = calendarBoard.data.items.find(e => e.id === calendarResult.data.id).updatedAt;
+  const calendarDelete = ctx.doPost({ parameter: {}, postData: { contents: JSON.stringify({ apiKey, action: 'deleteDistrictEvent', token: ddc, id: calendarResult.data.id, expectedUpdatedAt: routeVersion }) } });
+  assert.strictEqual(JSON.parse(calendarDelete).ok, true);
 });
 
-check('三個新 action 唔會喺公開（免登入）路由出現', () => {
+check('新日曆 action 唔會喺公開（免登入）路由出現', () => {
   const apiKey = 'links-test-api-key';
-  ['getLinks', 'getKeyDates', 'getPasscodes'].forEach(action => {
+  ['getLinks', 'getKeyDates', 'getPasscodes', 'getDistrictEvents'].forEach(action => {
     const r = JSON.parse(ctx.doGet({ parameter: { apiKey, action } }));
     assert.strictEqual(r.ok, false, `${action} 無 token 竟然通過`);
   });

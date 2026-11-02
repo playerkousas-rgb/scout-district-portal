@@ -74,6 +74,7 @@ export const DEMO_CARDS: Record<string, any>[] = [
   { cardId: 'links', title: '常用連結', icon: '🔗', type: 'builtin', url: '/links', description: '區會常用外部網址一覽 · ADC 或以上可增刪改', order: 20, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'keyDates', title: '重要日期', icon: '📅', type: 'builtin', url: '/key-dates', description: '大型活動及會議日期 · 倒數 · 匯出日曆 · DDC 或以上可加', order: 21, enabled: true, embed: false, source: 'core', category: 'done' },
   { cardId: 'passcodes', title: '實體密碼', icon: '🔢', type: 'builtin', url: '/passcodes', description: '房門／影印機等實體密碼 · DDC 或以上可改', order: 22, enabled: true, embed: false, source: 'core', category: 'done' },
+  { cardId: 'districtCalendar', title: '區會行事曆', icon: '🗓️', type: 'builtin', url: '/district-calendar', description: 'Teamup 專用日曆 · 月曆／議程 · ADC 或以上可新增；DDC、職員及管理員可編輯', order: 23, enabled: true, embed: false, source: 'core', category: 'done' },
 ];
 
 export const DEMO_SUB_PERMS = [
@@ -121,6 +122,7 @@ export function demoDefaultMatrix(): Record<string, Record<string, 'edit' | 'vie
       // v4.33.0：常用連結 ADC 或以上 ✏️；重要日期／實體密碼 DDC 或以上 ✏️；其餘一律 👁
       else if (c.cardId === 'links') m[c.cardId][role] = lv <= 3 ? 'edit' : 'view';
       else if (c.cardId === 'keyDates' || c.cardId === 'passcodes') m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
+      else if (c.cardId === 'districtCalendar') m[c.cardId][role] = lv <= 2 || role === 'STAFF' ? 'edit' : 'view';
       else m[c.cardId][role] = lv <= 2 ? 'edit' : 'view';
     });
   });
@@ -559,6 +561,7 @@ export interface DemoDb {
   links: Record<string, any>[];
   keyDates: Record<string, any>[];
   passcodes: Record<string, any>[];
+  districtEvents: Record<string, any>[];
   installedPlugins: string[];
   seq: number;
 }
@@ -614,6 +617,15 @@ export function demoKeyDates(): Record<string, any>[] {
   }]);
 }
 
+export function demoDistrictEvents(): Record<string, any>[] {
+  const upcoming = (offset: number) => dateOnly(-offset);
+  return [
+    { id: 'de-01', districtCode: 'DEMO', title: '區執行委員會會議（示範）', startDate: upcoming(21), endDate: upcoming(21), startTime: '19:30', endTime: '21:00', allDay: false, location: '區總部會議室', category: '會議', description: '檢視本季度工作進度及活動安排。', active: true, createdAt: iso(20), createdBy: '示範', updatedAt: iso(20), updatedBy: '示範' },
+    { id: 'de-02', districtCode: 'DEMO', title: '區領袖訓練日（示範）', startDate: upcoming(45), endDate: upcoming(45), startTime: '', endTime: '', allDay: true, location: '烏溪沙青年新村', category: '訓練', description: '集合時間及裝備清單稍後公布。', active: true, createdAt: iso(20), createdBy: '示範', updatedAt: iso(20), updatedBy: '示範' },
+    { id: 'de-03', districtCode: 'DEMO', title: '區周年露營（示範）', startDate: upcoming(80), endDate: upcoming(81), startTime: '09:00', endTime: '17:00', allDay: false, location: '大潭童軍中心', category: '露營', description: '兩日一夜區際活動。', active: true, createdAt: iso(20), createdBy: '示範', updatedAt: iso(20), updatedBy: '示範' },
+  ];
+}
+
 export function demoPasscodes(): Record<string, any>[] {
   return [
     { id: 'pc-01', districtCode: 'DEMO', name: '1802 房門（示範）', code: '1802#', location: '地域總部 18 樓', note: '入完要撳 # 字', order: 1, active: true, createdAt: iso(90), createdBy: '示範', updatedAt: iso(20), updatedBy: '示範' },
@@ -624,7 +636,7 @@ export function demoPasscodes(): Record<string, any>[] {
 
 export function freshDemoDb(): DemoDb {
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     config: {
       districtName: '筲箕灣區（示範）',
       theme: '',
@@ -670,6 +682,7 @@ export function freshDemoDb(): DemoDb {
     links: demoLinks(),
     keyDates: demoKeyDates(),
     passcodes: demoPasscodes(),
+    districtEvents: demoDistrictEvents(),
     installedPlugins: [],
     seq: 1000,
   };

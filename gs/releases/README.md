@@ -12,10 +12,10 @@
 
 ## 出新版本流程
 
-1. 喺 `gs/Code.gs` 改邏輯，更新檔頭同 `getHealthCheck_` 嘅版本號（例如 `4.30.0` → `4.31.0`）。
-2. 跑晒 `scripts/test-*-gs.js` 同 `npx tsc --noEmit`、`npm run build`。
-3. 複製快照：`cp gs/Code.gs gs/releases/Code-v4.31.0.gs`，並同步 `cp gs/Code.gs public/downloads/Code.gs.txt`。
-4. `scripts/test-upgrade-gs.js` 會強制檢查 `gs/Code.gs` 同 `public/downloads/Code.gs.txt` 一致，唔同步會 fail。
+1. 喺 `gs/Code.gs` 改邏輯，更新檔頭同健康檢查版本號。
+2. 跑相關 `scripts/test-*-gs.js` 同 `npx tsc --noEmit`、`npm run build`。
+3. 複製對應版本快照：`cp gs/Code.gs gs/releases/Code-v<版本>.gs`，並同步 `cp gs/Code.gs public/downloads/Code.gs.txt`。
+4. `scripts/test-upgrade-gs.js` 會強制檢查現行快照同可下載 `Code.gs` 完全一致。
 5. 開 PR 合併後，區方下載對應快照（或 `/downloads/Code.gs.txt`）貼入 Apps Script → 執行 `setupSheets()` → 重新部署 Web App。
 
 ## 對齊來源
@@ -24,12 +24,13 @@
 
 ## 現有快照
 
-- `Code-v4.33.0.gs` — 三張新卡：🔗 常用外部連結（Links 表；全部區職員可看，ADC 或以上可改）、📅 重要日期／大型活動（KeyDates 表；全部區職員可看，DDC 或以上可加，後台自動解析 `9Nov2026`／`17-18Apr2027`／`2027` 等日期文字做排序欄）、🔢 實體密碼（Passcodes 表；房門／影印機等實體密碼，全部區職員可看，DDC 或以上可改，後台擋低電郵／網站帳戶密碼）。三張卡只對已登入區職員開放，唔會經成員系統公開。
+- `Code-v4.35.0.gs` — 🗓️ Teamup 區會行事曆：Teamup 為唯一活動資料來源；ADC+（不包括 STAFF）新增，DDC+／STAFF／管理員編輯刪除；專用子日曆隔離借場流程，server-side re-auth、ScriptLock、樂觀版本檢查及 append-only hash-chain 操作稽核。
+- `Code-v4.33.0.gs` — 三張新卡：🔗 常用外部連結（Links 表；全部區職員可看，ADC 或以上可改）、📅 重要日期／大型活動（KeyDates 表；全部區職員可看，DDC 或以上可加，後台自動解析日期文字做排序欄）、🔢 實體密碼（Passcodes 表；房門／影印機等實體密碼，全部區職員可看，DDC 或以上可改，後台擋低電郵／網站帳戶密碼）。
 - `Code-v4.32.0.gs` — 旅團一卡三分頁：五行子分頁權限入 Perms 表（四行歸旅團、私隠聯絡歸聯絡簿；取代固定政策）、TroopContacts（ADC 支部範圍＋冇團長見旅長）、VisitRequests（公開提交、回覆可選）；刪除 `unit` 卡及 Perms 行。
 - `Code-v4.31.0.gs` — 旅團資料與探訪獨立權限，新增／修改分開門禁；隱藏未開設支部而保留歷史資料。
 - `Code-v4.30.0.gs` — 恢復 SYSADMIN 使用既有 YMIS 帳密功能；按旅儲存各支部資料及能力旗標，不覆寫其他旅。
 
-- `Code-v4.29.1.gs` — 現行下載版：全隱藏團不重生骨架、公開網址清洗、不完整列拒絕；全表清空要求前端確認。
+- `Code-v4.29.1.gs` — 歷史快照：全隱藏團不重生骨架、公開網址清洗、不完整列拒絕；全表清空要求前端確認。
 - `Code-v4.29.0.gs` — 旅→團階層名錄（UnitSections 表、`saveUnitSections`、團級集會時間／地點／社交帳戶）
 
 > 歷史版本（v4.28.1 或之前）喺 Git history 入面可以搵返；由 v4.29.0 起先有獨立快照檔。

@@ -4,6 +4,19 @@ export default function UpdatesPage() {
     <>
       <h1 className="page-title">📢 更新 / 下載</h1>
       <p className="page-sub">平台版本與後台程式碼下載。Apps Script 只有在區方完成備份、設定及驗收後才由區方自行部署。</p>
+      <div className="info-card" style={{ borderColor: '#5eead4' }}>
+        <h3>v4.35.0 — 🗓️ Teamup 區會行事曆</h3>
+        <p>區會活動以 Teamup 為唯一資料來源：管理系統讀取專用 Teamup 子日曆，新增、修改及刪除直接經 Apps Script 後端呼叫 Teamup API。</p>
+        <ul>
+          <li>月曆及議程支援全日、香港時間、跨日、地點、類別及詳情。</li>
+          <li>ADC 或以上（不包括 STAFF）可新增；DDC 或以上、STAFF 及管理員可修改／刪除。所有寫入 action 在後端重新驗證授權。</li>
+          <li>參考 README 專案 <code>BUILD.md</code> §7／<code>docs/19</code> §8：用 ScriptLock、Teamup 版本戳樂觀鎖及受保護的 append-only 操作稽核 hash chain，記錄操作者、事件 ID、操作、時間及 before/after hash；匿名收件匣／2FA 不適用於既有登入管理系統；沒有另加活動待批流程。</li>
+          <li>管理員從 Teamup 選專用子日曆；後端拒絕與借場 pending／approved／rejected 子日曆重疊。API Token 只在 Apps Script Config，不會傳到瀏覽器。</li>
+          <li>示範版只操作本機示範資料，清楚標示不會寫入 Teamup。</li>
+        </ul>
+        <p>升級：先備份，更新完整 <code>gs/Code.gs</code>，執行 <code>setupSheets()</code> 建立受保護 <code>DistrictCalendarAudit</code> 表，設定 Teamup 後在行事曆頁選擇專用子日曆，再更新 Web App 部署。Teamup 未提供本流程可用的原子 compare-and-swap；系統會序列化自身寫入及檢查 <code>modify_dt</code>，但建議此專用子日曆只由管理系統編輯。自動測試以 mock API 驗證；真實 Teamup CRUD 尚須在測試日曆完成實測，未實測前不視為已驗收。</p>
+        <a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">下載完整 Code.gs v4.35.0</a>
+      </div>
       <div className="info-card">
         <h3>v4.33.0 — 🔗 常用外部連結・📅 重要日期／大型活動・🔢 實體密碼</h3>
         <p>主控台加咗三張新卡，全部區職員登入後都睇到（唔會經成員系統公開出去）：</p>
@@ -13,7 +26,7 @@ export default function UpdatesPage() {
           <li>🔢 <b>實體密碼</b> — 淨係放要人喺現場先用得着嘅密碼（1802 房門鎖、影印機代碼等），按位置分組，一撳複製。後台會擋住電郵或網站登入資料，唔好當佢係密碼保險箱。<b>DDC 或以上</b>可以改，其他區職員可看。</li>
         </ul>
         <p>部署次序：先備份，跟住貼新 Code.gs 執行 <code>setupSheets()</code>（只會追加 <code>Links</code>、<code>KeyDates</code>、<code>Passcodes</code> 三張表、三張卡同三行權限，唔會郁現有資料同自訂權限），再更新原有 Web App 部署。三行新權限之後可以喺「⚙️ 權限／角色管理」逐個角色撳 👁／✏️ 再調整。</p>
-        <a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">下載完整 Code.gs v4.33.0</a>
+        <a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">下載目前最新版完整 Code.gs</a>
       </div>
       <div className="info-card">
         <h3>v4.32.0 — 🏕 旅團一卡三分頁・📇 聯絡簿私隠聯絡・📨 旅團聯絡區會</h3>
