@@ -365,6 +365,8 @@ export interface VenueLockConfigStatus {
   teamupPendingSub: string;
   teamupApprovedSub: string;
   teamupRejectedSub: string;
+  teamupDistrictSub?: string;
+  teamupDistrictReady?: boolean;
   teamupAttendeeFieldSet?: boolean;
   teamupReady: boolean;
   notifyStaffEmail: string;
@@ -1156,6 +1158,45 @@ export interface KeyDate {
   createdBy?: string;
   updatedAt?: string;
   updatedBy?: string;
+}
+
+/** 🗓️ 區會行事曆活動；時間按香港時間處理。 */
+export interface DistrictEvent {
+  id: string;
+  districtCode?: string;
+  title: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // inclusive YYYY-MM-DD
+  startTime?: string; // HH:MM, Hong Kong time
+  endTime?: string;
+  allDay: boolean;
+  location?: string;
+  category?: string;
+  description?: string;
+  active?: boolean;
+  createdAt?: string;
+  createdBy?: string;
+  /** Teamup modify_dt，做樂觀鎖；編輯／刪除必須原樣回傳。 */
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface DistrictEventBoard {
+  access: AccessLevel;
+  canCreate: boolean;
+  canEdit: boolean;
+  configured?: boolean;
+  source?: 'teamup' | 'demo';
+  subcalendarId?: string;
+  items: DistrictEvent[];
+}
+
+export interface DistrictCalendarSubcalendar { id: string; name: string; color?: string }
+export interface DistrictCalendarSubcalendarBoard {
+  items: DistrictCalendarSubcalendar[];
+  selectedId: string;
+  excludedIds: string[];
+  canConfigure: boolean;
 }
 
 /** 🔢 實體密碼：房門／影印機等「人要喺現場先用到」嘅密碼（刻意唔當機密，但只限已登入職員睇） */

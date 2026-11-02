@@ -11,7 +11,7 @@ import type {
   VenueBooking, StockItem, StockRequest, ActivityNotice, IncidentReport, DelegationBundle,
   Announcement, AwardsBoard, AwardMember, AwardType, Visit, VisitBoard, TroopDirectoryBoard, ScoutUnit, UnitSection,
   TroopContact, TroopContactsBoard, VisitRequest, VisitRequestsBoard,
-  AccessBoard, DistrictLink, KeyDate, Passcode,
+  AccessBoard, DistrictLink, KeyDate, Passcode, DistrictEvent, DistrictEventBoard, DistrictCalendarSubcalendarBoard,
   Circular, CircularsBoard, CircularStatus, DistrictFeedback, CourseProfile, CourseSetup, CourseSheetRaw, SetupCell, NoticeFields,
   CourseChange, CourseRevision, CourseOpsInfo, CourseRegNoticeRec, HubCoursesResult,
   DistrictTroopDirectory,
@@ -417,6 +417,18 @@ export const api = {
     callPost('saveKeyDate', { token, keyDate }),
   deleteKeyDate: (token: string, id: string): Promise<ApiResult<{ deleted: boolean; id: string }>> =>
     callPost('deleteKeyDate', { token, id }),
+
+  // ── 🗓️ 區會行事曆（v4.35.0；Teamup 直連；ADC+ 新增、DDC+／STAFF／管理員編輯）──
+  getDistrictEvents: (token: string, from?: string, to?: string): Promise<ApiResult<DistrictEventBoard>> =>
+    callGet('getDistrictEvents', { token, ...(from ? { from } : {}), ...(to ? { to } : {}) }),
+  getDistrictCalendarSubcalendars: (token: string): Promise<ApiResult<DistrictCalendarSubcalendarBoard>> =>
+    callPost('getDistrictCalendarSubcalendars', { token }),
+  saveDistrictCalendarSubcalendar: (token: string, subcalendarId: string): Promise<ApiResult<{ saved: boolean; subcalendarId: string; subcalendarName: string; warn?: string }>> =>
+    callPost('saveDistrictCalendarSubcalendar', { token, subcalendarId }),
+  saveDistrictEvent: (token: string, event: Partial<DistrictEvent>): Promise<ApiResult<{ saved: boolean; id: string; created: boolean; warn?: string }>> =>
+    callPost('saveDistrictEvent', { token, event }),
+  deleteDistrictEvent: (token: string, id: string, expectedUpdatedAt: string): Promise<ApiResult<{ deleted: boolean; id: string; warn?: string }>> =>
+    callPost('deleteDistrictEvent', { token, id, expectedUpdatedAt }),
 
   // ── 🔢 實體密碼（v4.33.0；Perms 行 passcodes，預設 DDC 或以上 ✏️、全部已登入職員 👁）──
   getPasscodes: (token: string): Promise<ApiResult<AccessBoard<Passcode>>> =>

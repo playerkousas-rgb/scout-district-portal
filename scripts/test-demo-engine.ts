@@ -53,8 +53,8 @@ check('getCards：權限全開 — 主卡全部 edit + 5 張子權限偽卡；�
   const ids = r.data.map((c: any) => c.cardId);
   const mainCards = r.data.filter((c: any) => !c.subPerm);
   const subCards = r.data.filter((c: any) => c.subPerm);
-  assert.strictEqual(mainCards.length, 17, 'v4.33.0 再加常用連結／重要日期／實體密碼三張主卡');
-  assert.strictEqual(freshDemoDb().schemaVersion, 8, '新示範資料用 schema v8');
+  assert.strictEqual(mainCards.length, 18, 'v4.35.0 再加 Teamup 區會行事曆卡');
+  assert.strictEqual(freshDemoDb().schemaVersion, 9, '新示範資料用 schema v9');
   assert.strictEqual(subCards.length, 5);
   assert.deepStrictEqual(subCards.map((c: any) => c.cardId).sort(), ['activity', 'troopContacts', 'troopDirectory', 'troopRequests', 'visit']);
   assert.ok(subCards.filter((c: any) => c.cardId !== 'troopContacts').every((c: any) => c.parentId === 'troop'));
@@ -64,6 +64,7 @@ check('getCards：權限全開 — 主卡全部 edit + 5 張子權限偽卡；�
   assert.ok(mainCards.some((c: any) => c.cardId === 'troop' && c.url === '/troop'), '只有一張旅團入口卡');
   assert.ok(ids.indexOf('circulars') >= 0, '區通告卡要喺示範版出現');
   assert.ok(ids.indexOf('debitNote') >= 0, 'DEBIT NOTE 要喺示範版提供虛構預覽');
+  assert.ok(ids.indexOf('districtCalendar') >= 0, '區會行事曆卡要喺示範版出現');
   assert.ok(r.data.every((c: any) => c.access === 'edit'));
   assert.strictEqual(ids.indexOf('awards'), -1, '成人獎勵提名唔喺示範範圍');
   assert.strictEqual(ids.indexOf('news'), -1, 'news 卡已移除（消息喺主控台頂）');
@@ -85,6 +86,9 @@ check('示範權限矩陣：rooms 全員可看，審批卡唔畀 ADC；mockAdmin
   assert.strictEqual(matrix.activity.STAFF, 'edit');
   assert.strictEqual(matrix.activity.DDC_TRAINING, 'edit');
   assert.strictEqual(matrix.activity.SYSADMIN, 'edit');
+  assert.strictEqual(matrix.districtCalendar.DDC_ADMIN, 'edit');
+  assert.strictEqual(matrix.districtCalendar.STAFF, 'edit');
+  assert.strictEqual(matrix.districtCalendar.ADC_SCOUT, 'view');
   assert.strictEqual(matrix.unit, undefined, '已刪卡不留權限行');
   assert.strictEqual(matrix.rooms.ADC_SCOUT, 'view');
   assert.strictEqual(matrix.rooms.STAFF, 'view');
@@ -433,7 +437,7 @@ check('DEBIT NOTE：示範整批匯入略過重複；有錯批次整批不寫', 
   assert.strictEqual(demoCall('listDebitNotes', { token: T.adc }, 'GET').data.length, before);
 });
 
-// ── 9.5 v4.33.0 三張新卡 ──
+// ── 9.5 v4.33.0–v4.35.0 新卡 ──
 check('LINKS：示範有樣本連結，加／改／刪都行得通；網址一定要 http(s)', () => {
   const first = demoCall('getLinks', { token: T.adc }, 'GET');
   assert.ok(first.ok);
@@ -483,6 +487,26 @@ check('KEY DATES：日期文字自動解析成排序用日子，解唔到都收�
   assert.ok(demoCall('deleteKeyDate', { token: T.adc, id: tbd.data.id }, 'POST').ok);
 });
 
+check('DISTRICT CALENDAR：示範資料明確標示不會寫 Teamup；本地示範 CRUD', () => {
+  const board = demoCall('getDistrictEvents', { token: T.adc }, 'GET');
+  assert.ok(board.ok && board.data.items.length >= 3);
+  assert.strictEqual(board.data.source, 'demo');
+  assert.strictEqual(board.data.configured, true);
+  assert.strictEqual(demoCall('getDistrictCalendarSubcalendars', { token: T.adc }, 'POST').ok, false, 'Demo 不可宣稱 Teamup 已連線');
+  assert.strictEqual(board.data.canCreate, true);
+  assert.strictEqual(board.data.canEdit, true, '示範身份 mockAdmin 權限全開');
+  const made = demoCall('saveDistrictEvent', { token: T.adc, event: { title: '測試行事曆活動', startDate: '2027-06-12', endDate: '2027-06-12', startTime: '09:00', endTime: '10:30', allDay: false, location: '區總部', category: '會議' } }, 'POST');
+  assert.ok(made.ok && made.data.created);
+  const edited = demoCall('saveDistrictEvent', { token: T.adc, event: { id: made.data.id, title: '修改後活動', startDate: '2027-06-12', endDate: '2027-06-13', allDay: true } }, 'POST');
+  assert.ok(edited.ok && !edited.data.created);
+  const after = demoCall('getDistrictEvents', { token: T.adc }, 'GET').data.items;
+  assert.strictEqual(after.find((event: any) => event.id === made.data.id).title, '修改後活動');
+  assert.strictEqual(demoCall('saveDistrictEvent', { token: T.adc, event: { title: '無效日期', startDate: '2027-02-30', endDate: '2027-02-30', allDay: true } }, 'POST').ok, false);
+  assert.ok(demoCall('deleteDistrictEvent', { token: T.adc, id: made.data.id }, 'POST').ok);
+  const archived = demoCall('getDistrictEvents', { token: T.adc }, 'GET').data.items;
+  assert.ok(!archived.some((event: any) => event.id === made.data.id), '軟刪除活動不再顯示於行事曆');
+});
+
 check('PASSCODES：實體密碼加得；但唔准放電郵／網站帳戶密碼', () => {
   const board = demoCall('getPasscodes', { token: T.adc }, 'GET');
   assert.ok(board.ok && board.data.items.length >= 3);
@@ -500,28 +524,29 @@ check('PASSCODES：實體密碼加得；但唔准放電郵／網站帳戶密碼'
   assert.ok(demoCall('deletePasscode', { token: T.adc, id: made.data.id }, 'POST').ok);
 });
 
-await checkAsync('舊示範 session（schema v7）升級：自動補三張卡同三份資料，舊資料唔郁', async () => {
+await checkAsync('舊示範 session（schema v7）升級：自動補四張卡及日曆資料，舊資料唔郁', async () => {
   resetDemoData();
   const raw = JSON.parse(JSON.stringify(freshDemoDb()));
   raw.schemaVersion = 7;
-  delete raw.links; delete raw.keyDates; delete raw.passcodes;
-  raw.cards = raw.cards.filter((c: any) => !['links', 'keyDates', 'passcodes'].includes(c.cardId));
-  ['links', 'keyDates', 'passcodes'].forEach((id) => { delete raw.matrix[id]; });
+  delete raw.links; delete raw.keyDates; delete raw.passcodes; delete raw.districtEvents;
+  raw.cards = raw.cards.filter((c: any) => !['links', 'keyDates', 'passcodes', 'districtCalendar'].includes(c.cardId));
+  ['links', 'keyDates', 'passcodes', 'districtCalendar'].forEach((id) => { delete raw.matrix[id]; });
   raw.announcements[0].title = '舊 session 嘅消息';
   demoStore.set(SNAPSHOT_KEY, JSON.stringify(raw));
 
   // 另開一個模組實例：記憶體冇 db，會照舊 session 快照行升級路徑
   const aged = await import('../lib/demo/engine.ts?schema=7');
   const cards = aged.demoCall('getCards', { token: T.adc }, 'GET').data.map((c: any) => c.cardId);
-  ['links', 'keyDates', 'passcodes'].forEach(id => assert.ok(cards.includes(id), `升級後應該有 ${id} 卡`));
+  ['links', 'keyDates', 'passcodes', 'districtCalendar'].forEach(id => assert.ok(cards.includes(id), `升級後應該有 ${id} 卡`));
   assert.ok(aged.demoCall('getLinks', { token: T.adc }, 'GET').data.items.length > 0);
   assert.ok(aged.demoCall('getKeyDates', { token: T.adc }, 'GET').data.items.length > 0);
   assert.ok(aged.demoCall('getPasscodes', { token: T.adc }, 'GET').data.items.length > 0);
+  assert.ok(aged.demoCall('getDistrictEvents', { token: T.adc }, 'GET').data.items.length > 0);
   assert.strictEqual(
     aged.demoCall('getAnnouncements', { token: T.adc }, 'GET').data[0].title, '舊 session 嘅消息',
     '升級唔應該洗走舊示範資料',
   );
-  assert.strictEqual(JSON.parse(demoStore.get(SNAPSHOT_KEY) as string).schemaVersion, 8, '升級後快照要寫返 v8');
+  assert.strictEqual(JSON.parse(demoStore.get(SNAPSHOT_KEY) as string).schemaVersion, 9, '升級後快照要寫返 v9');
   resetDemoData();
 });
 

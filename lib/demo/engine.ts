@@ -13,7 +13,7 @@ import {
   freshDemoDb, demoUserFor, demoRoomEvents, demoDistrictHqEvents, demoBudget, demoCourseProfile,
   demoCourseSetup, demoCourseSheetRaw, demoDefaultMatrix, demoDebitNotes,
   DEMO_CARDS, DEMO_SUB_PERMS, DEMO_ORG_GROUPS, DEMO_STAFF_ROWS, DEMO_HKSA_COUNCIL, DEMO_HKSA_DEPTS,
-  demoTroopContacts, demoVisitRequests, demoLinks, demoKeyDates, demoPasscodes,
+  demoTroopContacts, demoVisitRequests, demoLinks, demoKeyDates, demoPasscodes, demoDistrictEvents,
   DEMO_TOKEN, type DemoDb, type DemoUser,
 } from './seed.ts';
 import {
@@ -106,6 +106,16 @@ function loadDb(): DemoDb {
           if (!Array.isArray(db.keyDates)) db.keyDates = demoKeyDates();
           if (!Array.isArray(db.passcodes)) db.passcodes = demoPasscodes();
           db.schemaVersion = 8;
+          persistDb();
+        }
+        // v9（GS v4.35.0）：區會行事曆；保留既有示範資料並補新卡及資料。
+        if ((db.schemaVersion || 0) < 9) {
+          const card = DEMO_CARDS.find(c => c.cardId === 'districtCalendar');
+          if (card && !db.cards.some(c => c.cardId === 'districtCalendar')) db.cards.push({ ...card });
+          const defaults = demoDefaultMatrix();
+          if (!db.matrix.districtCalendar) db.matrix.districtCalendar = { ...defaults.districtCalendar };
+          if (!Array.isArray(db.districtEvents)) db.districtEvents = demoDistrictEvents();
+          db.schemaVersion = 9;
           persistDb();
         }
         return db;
@@ -881,6 +891,67 @@ export function demoCall(action: string, payload: AnyObj, method: 'GET' | 'POST'
       const before = d.keyDates.length;
       d.keyDates = d.keyDates.filter(x => x.id !== id);
       if (d.keyDates.length === before) return fail('找不到該紀錄');
+      persistDb(); return ok({ deleted: true, id });
+    }
+
+    case 'getDistrictCalendarSubcalendars':
+      return fail('示範環境不連接 Teamup；請在真實管理後端設定專用子日曆。');
+    case 'saveDistrictCalendarSubcalendar':
+      return fail('示範環境不會寫入 Teamup；請在真實管理後端設定專用子日曆。');
+
+    case 'getDistrictEvents': {
+      const u = userForToken(token);
+      if (!u) return fail('未登入或登入已過期（示範版）。');
+      const access = demoCardAccess(u, 'districtCalendar');
+      if (access !== 'edit' && access !== 'view') return fail('你沒有此功能嘅權限（示範版權限模擬）。');
+      const level = u.level ?? 5;
+      return ok({ access, canCreate: (access === 'edit' || access === 'view') && (!!u.mockAdmin || u.isSuper || (level <= 3 && u.role !== 'STAFF')),
+        canEdit: access === 'edit' && (!!u.mockAdmin || u.isSuper || level <= 2 || u.role === 'STAFF'), configured: true, source: 'demo', subcalendarId: 'demo-only',
+        items: d.districtEvents.filter(event => event.active !== false).slice().sort((a, b) => `${a.startDate}${a.startTime || ''}`.localeCompare(`${b.startDate}${b.startTime || ''}`)) });
+    }
+    case 'saveDistrictEvent': {
+      const u = userForToken(token);
+      if (!u) return fail('未登入或登入已過期（示範版）。');
+      const raw = (payload.event || payload) as AnyObj;
+      const id = String(raw.id || '').trim();
+      const cardAccess = demoCardAccess(u, 'districtCalendar');
+      const canEdit = cardAccess === 'edit' && (!!u.mockAdmin || u.isSuper || (u.level ?? 5) <= 2 || u.role === 'STAFF');
+      const canCreate = (cardAccess === 'edit' || cardAccess === 'view') && (!!u.mockAdmin || u.isSuper || (u.level ?? 5) <= 3);
+      if (id ? !canEdit : !canCreate) return fail(id ? '只有 DDC 或以上、區職員及管理員可以修改' : '只有 ADC 或以上可以新增');
+      const title = String(raw.title || '').trim();
+      const startDate = String(raw.startDate || '').trim();
+      const endDate = String(raw.endDate || startDate).trim();
+      const validDate = (v: string) => { if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false; const time = new Date(`${v}T00:00:00Z`).getTime(); return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === v; };
+      const allDay = raw.allDay === true || String(raw.allDay).toUpperCase() === 'TRUE';
+      const startTime = allDay ? '' : String(raw.startTime || '').trim();
+      const endTime = allDay ? '' : String(raw.endTime || '').trim();
+      if (!title || title.length > 120) return fail('活動名稱必填（上限 120 字）');
+      if (!validDate(startDate) || !validDate(endDate) || endDate < startDate) return fail('請輸入有效開始及結束日期');
+      if (!allDay && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(startTime) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(endTime))) return fail('請填有效開始及結束時間');
+      if (!allDay && endDate === startDate && endTime <= startTime) return fail('同日活動的結束時間必須晚於開始時間');
+      const location = String(raw.location || '').trim(); const category = String(raw.category || '').trim(); const description = String(raw.description || '').trim();
+      if (location.length > 160 || category.length > 40 || description.length > 2000) return fail('地點、分類或詳情超出字數限制');
+      const now = nowIso();
+      const fields = { title, startDate, endDate, startTime, endTime, allDay, location, category, description, active: true, deletedAt: '', deletedBy: '', updatedAt: now, updatedBy: u.email };
+      if (id) {
+        const found = d.districtEvents.find(event => event.id === id);
+        if (!found) return fail('找不到該區會活動');
+        Object.assign(found, fields); persistDb(); return ok({ saved: true, id, created: false });
+      }
+      const newId = genId('de');
+      d.districtEvents.push({ id: newId, districtCode: 'DEMO', createdAt: now, createdBy: u.email, ...fields });
+      persistDb(); return ok({ saved: true, id: newId, created: true });
+    }
+    case 'deleteDistrictEvent': {
+      const u = userForToken(token);
+      if (!u) return fail('未登入或登入已過期（示範版）。');
+      const canEdit = demoCardAccess(u, 'districtCalendar') === 'edit' && (!!u.mockAdmin || u.isSuper || (u.level ?? 5) <= 2 || u.role === 'STAFF');
+      if (!canEdit) return fail('只有 DDC 或以上、區職員及管理員可以刪除');
+      const id = String(payload.id || '').trim();
+      const found = d.districtEvents.find(event => event.id === id && event.active !== false);
+      if (!found) return fail('找不到該區會活動');
+      const now = nowIso();
+      Object.assign(found, { active: false, deletedAt: now, deletedBy: u.email, updatedAt: now, updatedBy: u.email });
       persistDb(); return ok({ deleted: true, id });
     }
 
