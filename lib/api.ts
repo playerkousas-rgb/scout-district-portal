@@ -418,7 +418,7 @@ export const api = {
   deleteKeyDate: (token: string, id: string): Promise<ApiResult<{ deleted: boolean; id: string }>> =>
     callPost('deleteKeyDate', { token, id }),
 
-  // ── 🗓️ 區會行事曆（v4.35.0；Teamup 直連；ADC+ 新增、DDC+／STAFF／管理員編輯）──
+  // ── 🗓️ 區會行事曆（v4.36.0；Teamup 直連；ADC+ 新增、DDC+／STAFF／管理員編輯）──
   getDistrictEvents: (token: string, from?: string, to?: string): Promise<ApiResult<DistrictEventBoard>> =>
     callGet('getDistrictEvents', { token, ...(from ? { from } : {}), ...(to ? { to } : {}) }),
   getDistrictCalendarSubcalendars: (token: string): Promise<ApiResult<DistrictCalendarSubcalendarBoard>> =>

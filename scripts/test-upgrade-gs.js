@@ -716,14 +716,16 @@ check('升級合併旅團卡：Cards 只餘 troop 一行，Perms 保留五行子
 });
 
 check('現行發布快照與開發源一致，原 v4.29.0 凍結快照保留', () => {
-  const current = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.35.0.gs'), 'utf8');
+  const current = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.36.0.gs'), 'utf8');
   assert.strictEqual(current, code);
   assert.ok(fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.32.0.gs'), 'utf8').includes("version: '4.32.0'"));
   assert.ok(fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.31.0.gs'), 'utf8').includes("version: '4.31.0'"));
   assert.ok(fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.30.0.gs'), 'utf8').includes("version: '4.30.0'"));
   const frozen = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.29.0.gs'), 'utf8');
   assert.ok(frozen.includes("version: '4.29.0'"));
-  assert.ok(code.includes("version: '4.35.0'"));
+  assert.ok(code.includes("version: '4.36.0'"));
+  const previous = fs.readFileSync(path.join(__dirname, '../gs/releases/Code-v4.35.0.gs'), 'utf8');
+  assert.ok(previous.includes("version: '4.35.0'"));
 });
 
 check('Teamup 區會行事曆採專用子日曆、server-side 授權及 append-only hash-chain audit，不建立本地事件表', () => {
@@ -732,6 +734,10 @@ check('Teamup 區會行事曆採專用子日曆、server-side 授權及 append-o
   assert.ok(code.includes("appendDistrictCalendarAudit_(result.id, action, t.email || '', beforeEvent, afterEvent)"));
   assert.ok(code.includes('function districtCalendarAuditReady_()'));
   assert.ok(code.includes('modify_dt'));
+  assert.ok(code.includes('function districtEventSourceType_(ev, c)'));
+  assert.ok(code.includes("category = sourceType === 'booking-pending'"));
+  assert.ok(code.includes('function districtEventWritable_(ev, subId)'));
+  assert.ok(code.includes("notes = '';"), '借場 notes／申請聯絡資料不回傳綜合行事曆');
   assert.ok(!code.includes("DISTRICT_EVENTS: 'DistrictEvents'"));
   assert.ok(!code.includes("name: SHEET.DISTRICT_EVENTS"));
 });

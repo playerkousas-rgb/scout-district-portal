@@ -434,7 +434,12 @@ check('子日曆清單後端讀取；借場三個子日曆不能選，專用子�
   assert.strictEqual(ctx.saveDistrictCalendarSubcalendar_(adc, '1004').ok, false, 'ADC 不可更改日曆設定');
 });
 
-check('Teamup 活動讀取以指定專用子日曆為範圍；權限由後端回傳', () => {
+check('前端資料包含區會／借場待確認／已確認時段；只讀借場資料並遮蔽申請備註', () => {
+  const stamp = '2027-01-01T00:00:00.000Z';
+  teamupEvents.set('venue-pending-1', { id: 'venue-pending-1', subcalendar_ids: [1001], title: '【申請】區總部 · 區會會議', location: '區總部', notes: '姓名：敏感姓名\n電話：5555 1234\n電郵：private@example.org', start_dt: '2027-04-18T10:00:00+08:00', end_dt: '2027-04-18T12:00:00+08:00', all_day: false, create_dt: stamp, modify_dt: stamp });
+  teamupEvents.set('venue-approved-1', { id: 'venue-approved-1', subcalendar_ids: [1002], title: '區總部（已批准）', location: '區總部', notes: '姓名：敏感姓名\n電話：5555 1234\n電郵：private@example.org', start_dt: '2027-04-19T14:00:00+08:00', end_dt: '2027-04-19T16:00:00+08:00', all_day: false, create_dt: stamp, modify_dt: stamp });
+  teamupEvents.set('venue-rejected-1', { id: 'venue-rejected-1', subcalendar_ids: [1003], title: '拒絕活動', start_dt: '2027-04-20T14:00:00+08:00', end_dt: '2027-04-20T15:00:00+08:00', all_day: false, create_dt: stamp, modify_dt: stamp });
+  teamupEvents.set('multi-calendar-1', { id: 'multi-calendar-1', subcalendar_ids: [1004, 1001], title: '跨日曆活動', start_dt: '2027-04-21T10:00:00+08:00', end_dt: '2027-04-21T11:00:00+08:00', all_day: false, create_dt: stamp, modify_dt: stamp });
   const board = ctx.getDistrictEvents_(adc, '2027-04-01', '2027-04-30');
   assert.strictEqual(board.ok, true);
   assert.strictEqual(board.data.access, 'view');
@@ -442,7 +447,23 @@ check('Teamup 活動讀取以指定專用子日曆為範圍；權限由後端回
   assert.strictEqual(board.data.source, 'teamup');
   assert.strictEqual(board.data.canCreate, true);
   assert.strictEqual(board.data.canEdit, false);
-  assert.strictEqual(board.data.items.length, 0);
+  assert.strictEqual(board.data.items.length, 2);
+  assert.strictEqual(board.data.includesBookings, true);
+  const pending = board.data.items.find(item => item.id === 'venue-pending-1');
+  const approved = board.data.items.find(item => item.id === 'venue-approved-1');
+  assert.strictEqual(pending.sourceType, 'booking-pending');
+  assert.strictEqual(pending.sourceLabel, '申請借用區總部');
+  assert.strictEqual(pending.readOnly, true);
+  assert.strictEqual(pending.description, '');
+  assert.strictEqual(pending.location, '', '借場自訂地點欄不回傳，避免混入申請人聯絡資料');
+  assert.strictEqual(approved.sourceType, 'booking-approved');
+  assert.strictEqual(approved.sourceLabel, '確認借用區總部');
+  assert.strictEqual(approved.readOnly, true);
+  assert.ok(!JSON.stringify(board).includes('5555 1234') && !JSON.stringify(board).includes('private@example.org'), '借場聯絡資料不得進入綜合行事曆回應');
+  assert.ok(!board.data.items.some(item => item.id === 'venue-rejected-1'), '拒絕借場不顯示在行事曆');
+  assert.ok(!board.data.items.some(item => item.id === 'multi-calendar-1'), '跨子日曆事件 fail closed，避免誤判來源');
+  assert.strictEqual(ctx.saveDistrictEvent_(ddc, { id: 'venue-pending-1', expectedUpdatedAt: stamp, title: '不應改借場', startDate: '2027-04-18', endDate: '2027-04-18', startTime: '10:00', endTime: '12:00' }).ok, false);
+  assert.strictEqual(ctx.deleteDistrictEvent_(ddc, 'venue-approved-1', stamp).ok, false);
   assert.ok(!JSON.stringify(board).includes('unit-test-token'), 'Teamup API Token 絕不可出現在 API response');
   assert.strictEqual(observedTeamupToken, 'unit-test-token', 'Teamup Token 只應由 server-side header 使用');
 });
@@ -457,10 +478,12 @@ check('ADC 新增活動會直接 POST 到 Teamup；Token 留在 server-side head
   assert.strictEqual(saved.location, '區總部');
   assert.strictEqual(saved.notes.includes('測試議程'), true);
   const board = ctx.getDistrictEvents_(adc, '2027-04-01', '2027-04-30');
-  assert.strictEqual(board.data.items[0].id, eventId);
-  assert.strictEqual(board.data.items[0].category, '會議');
-  assert.strictEqual(board.data.items[0].description, '測試議程');
-  currentVersion = board.data.items[0].updatedAt;
+  const districtItem = board.data.items.find(item => item.id === eventId);
+  assert.strictEqual(districtItem.sourceType, 'district');
+  assert.strictEqual(districtItem.sourceLabel, '區會行事曆');
+  assert.strictEqual(districtItem.category, '會議');
+  assert.strictEqual(districtItem.description, '測試議程');
+  currentVersion = districtItem.updatedAt;
   assert.ok(currentVersion);
 });
 
@@ -472,8 +495,9 @@ check('ADC 不能修改／刪除；DDC 可更新 Teamup，並拒絕過期版本�
   assert.strictEqual(updated.ok, true, updated.error);
   assert.strictEqual(teamupEvents.get(eventId).title, '改名');
   const board = ctx.getDistrictEvents_(ddc, '2027-04-01', '2027-04-30');
-  assert.strictEqual(board.data.items[0].title, '改名');
-  const freshVersion = board.data.items[0].updatedAt;
+  const updatedItem = board.data.items.find(item => item.id === eventId);
+  assert.strictEqual(updatedItem.title, '改名');
+  const freshVersion = updatedItem.updatedAt;
   assert.notStrictEqual(freshVersion, currentVersion);
   assert.strictEqual(ctx.saveDistrictEvent_(ddc, { ...patch, title: '舊版本覆寫', expectedUpdatedAt: currentVersion }).ok, false);
   assert.strictEqual(teamupEvents.get(eventId).title, '改名');
@@ -484,7 +508,7 @@ check('區職員可修改／刪除但不可新增；領袖不可新增；成功�
   assert.strictEqual(ctx.saveDistrictEvent_(staff, { title: '職員不應新增', startDate: '2027-05-02', endDate: '2027-05-02', allDay: true }).ok, false);
   const staffEdit = ctx.saveDistrictEvent_(staff, { id: eventId, expectedUpdatedAt: currentVersion, title: '職員修改', startDate: '2027-04-17', endDate: '2027-04-17', startTime: '19:00', endTime: '21:00' });
   assert.strictEqual(staffEdit.ok, true, staffEdit.error);
-  currentVersion = ctx.getDistrictEvents_(ddc, '2027-04-01', '2027-04-30').data.items[0].updatedAt;
+  currentVersion = ctx.getDistrictEvents_(ddc, '2027-04-01', '2027-04-30').data.items.find(item => item.id === eventId).updatedAt;
   assert.strictEqual(ctx.deleteDistrictEvent_(staff, eventId, currentVersion).ok, true);
   assert.strictEqual(ctx.saveDistrictEvent_(al, { title: '領袖不應新增', startDate: '2027-05-02', endDate: '2027-05-02', allDay: true }).ok, false);
   const rows = sheets.DistrictCalendarAudit._data.slice(1);
@@ -508,6 +532,11 @@ check('日期／欄位驗證後端執行，借場子日曆重疊時 fail closed'
   assert.strictEqual(ctx.getDistrictEvents_(adc, '2027-04-01', '2027-04-30').ok, false);
   assert.strictEqual(ctx.saveDistrictEvent_(adc, { title: '不應寫入', startDate: '2027-05-01', endDate: '2027-05-01', allDay: true }).ok, false);
   ctx.setConfigTextValue_('TEAMUP_DISTRICT_SUBCAL_ID', '1004', 'test');
+  ctx.setConfigTextValue_('TEAMUP_APPROVED_SUBCAL_ID', '1001', 'test');
+  const ambiguousBookings = ctx.getDistrictEvents_(adc, '2027-04-01', '2027-04-30');
+  assert.strictEqual(ambiguousBookings.data.includesBookings, false, 'pending／approved ID 相同時標示來源未完整');
+  assert.ok(!ambiguousBookings.data.items.some(item => item.id === 'venue-pending-1'), 'pending／approved ID 相同時隱藏來源含糊的借場事件');
+  ctx.setConfigTextValue_('TEAMUP_APPROVED_SUBCAL_ID', '1002', 'test');
 });
 
 // ───────────────────────── 🔢 實體密碼 ─────────────────────────
