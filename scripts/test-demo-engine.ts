@@ -53,7 +53,7 @@ check('getCards：權限全開 — 主卡全部 edit + 5 張子權限偽卡；�
   const ids = r.data.map((c: any) => c.cardId);
   const mainCards = r.data.filter((c: any) => !c.subPerm);
   const subCards = r.data.filter((c: any) => c.subPerm);
-  assert.strictEqual(mainCards.length, 18, 'v4.35.0 再加 Teamup 區會行事曆卡');
+  assert.strictEqual(mainCards.length, 18, 'v4.36.0 再加 Teamup 區會行事曆卡');
   assert.strictEqual(freshDemoDb().schemaVersion, 9, '新示範資料用 schema v9');
   assert.strictEqual(subCards.length, 5);
   assert.deepStrictEqual(subCards.map((c: any) => c.cardId).sort(), ['activity', 'troopContacts', 'troopDirectory', 'troopRequests', 'visit']);
@@ -437,7 +437,7 @@ check('DEBIT NOTE：示範整批匯入略過重複；有錯批次整批不寫', 
   assert.strictEqual(demoCall('listDebitNotes', { token: T.adc }, 'GET').data.length, before);
 });
 
-// ── 9.5 v4.33.0–v4.35.0 新卡 ──
+// ── 9.5 v4.33.0–v4.36.0 新卡 ──
 check('LINKS：示範有樣本連結，加／改／刪都行得通；網址一定要 http(s)', () => {
   const first = demoCall('getLinks', { token: T.adc }, 'GET');
   assert.ok(first.ok);

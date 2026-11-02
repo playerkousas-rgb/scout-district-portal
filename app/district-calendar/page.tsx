@@ -25,6 +25,7 @@ export default function DistrictCalendarPage() {
   const [canCreate, setCanCreate] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   const [configured, setConfigured] = useState(false);
+  const [includesBookings, setIncludesBookings] = useState(false);
   const [source, setSource] = useState<'teamup' | 'demo'>('teamup');
   const [subcalOptions, setSubcalOptions] = useState<Array<{ id: string; name: string; color?: string }>>([]);
   const [excludedSubcals, setExcludedSubcals] = useState<string[]>([]);
@@ -38,6 +39,7 @@ export default function DistrictCalendarPage() {
   const [selectedDay, setSelectedDay] = useState(isoLocalDay(new Date()));
   const [month, setMonth] = useState(() => { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), 1); });
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'district' | 'booking-pending' | 'booking-approved'>('all');
 
   const monthDays = useMemo(() => monthGridDays(month.getFullYear(), month.getMonth()), [month]);
   const monthStart = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}-01`;
@@ -49,7 +51,7 @@ export default function DistrictCalendarPage() {
       const r = await api.getDistrictEvents(token, from, to);
       if (r.ok && r.data) {
         setEvents(r.data.items || []); setCanCreate(!!r.data.canCreate); setCanEdit(!!r.data.canEdit);
-        setConfigured(r.data.configured !== false); setSource(r.data.source || 'teamup');
+        setConfigured(r.data.configured !== false); setIncludesBookings(!!r.data.includesBookings); setSource(r.data.source || 'teamup');
         if (r.data.subcalendarId) setSelectedSubcal(r.data.subcalendarId);
       } else setError(r.error || '載入 Teamup 行事曆失敗');
     } catch { setError('連線失敗：請確認區會後台已部署。'); }
@@ -73,16 +75,21 @@ export default function DistrictCalendarPage() {
     }).catch(() => setSubcalError('無法連接後端讀取 Teamup 子日曆'));
   }, [session]);
 
-  const visibleEvents = useMemo(() => events.filter(e => !categoryFilter || e.category === categoryFilter), [events, categoryFilter]);
+  const isDistrictEvent = (event: DistrictEvent) => event.sourceType !== 'booking-pending' && event.sourceType !== 'booking-approved' && !event.readOnly;
+  const visibleEvents = useMemo(() => events.filter(e =>
+    (sourceFilter === 'all' || (e.sourceType || 'district') === sourceFilter) &&
+    (!categoryFilter || e.category === categoryFilter)), [events, categoryFilter, sourceFilter]);
   const dayEvents = useMemo(() => visibleEvents.filter(e => eventOccursOn(e, selectedDay)), [visibleEvents, selectedDay]);
   const monthEvents = useMemo(() => visibleEvents.filter(e => e.startDate <= monthEnd && (e.endDate || e.startDate) >= monthStart)
     .sort((a, b) => `${a.startDate}${a.startTime || ''}`.localeCompare(`${b.startDate}${b.startTime || ''}`)), [visibleEvents, monthEnd, monthStart]);
-  const categories = useMemo(() => Array.from(new Set(events.map(e => e.category).filter((x): x is string => !!x))).sort(), [events]);
+  const categories = useMemo(() => Array.from(new Set(events.filter(e => !e.readOnly && e.sourceType !== 'booking-pending' && e.sourceType !== 'booking-approved')
+    .map(e => e.category).filter((x): x is string => !!x))).sort(), [events]);
 
   function flash(text: string) { setMessage(text); setError(''); window.setTimeout(() => setMessage(''), 3500); }
   function shiftMonth(delta: number) { setMonth(new Date(month.getFullYear(), month.getMonth() + delta, 1)); }
   function startNew(date = selectedDay) { setDraft(blankDraft(date)); setError(''); setMessage(''); }
   function startEdit(event: DistrictEvent) {
+    if (!isDistrictEvent(event)) return;
     setDraft({ id: event.id, title: event.title, startDate: event.startDate, endDate: event.endDate || event.startDate,
       startTime: event.startTime || '', endTime: event.endTime || '', allDay: !!event.allDay,
       location: event.location || '', category: event.category || '', description: event.description || '', expectedUpdatedAt: event.updatedAt || '' });
@@ -102,7 +109,7 @@ export default function DistrictCalendarPage() {
   }
 
   async function deleteEvent(event: DistrictEvent) {
-    if (!session || !confirm(`確定刪除「${event.title}」？`)) return;
+    if (!session || !isDistrictEvent(event) || !confirm(`確定刪除「${event.title}」？`)) return;
     setBusy(true); setError('');
     const result = await api.deleteDistrictEvent(session.token, event.id, event.updatedAt || '');
     setBusy(false);
@@ -133,15 +140,16 @@ export default function DistrictCalendarPage() {
   return <>
     <BackLink />
     <h1 className="page-title">🗓️ 區會行事曆</h1>
-    <p className="page-sub">區會會議、訓練及活動一站式安排，活動直接讀寫 Teamup 專用日曆。ADC 或以上可新增；DDC 或以上、區職員及管理員可修改和刪除。每次寫入由後端重新驗權並記錄操作者、時間及 hash-chain 稽核；香港時間。</p>
+    <p className="page-sub">整合 Teamup「區會行事曆」、「申請借用區總部」及「確認借用區總部」三類時段。借用時段只讀；區會活動直接讀寫 Teamup 專用子日曆。ADC 或以上可新增；DDC 或以上、區職員及管理員可修改／刪除區會活動。香港時間。</p>
     {message && <div className="success">✓ {message}</div>}
     {error && <div className="err" role="alert">{error}</div>}
     {source === 'demo' && <div className="dc-source-notice" role="note">示範環境：活動只存在本機示範資料，不會寫入 Teamup。真實 Teamup 整合須在已部署的 Apps Script 後端設定並實測。</div>}
-    {source !== 'demo' && !configured && <div className="dc-source-notice" role="status">尚未設定區會行事曆專用 Teamup 子日曆。請管理員選擇專用子日曆後，行事曆才會載入及開放寫入；借場的 pending／approved／rejected 子日曆不可選。</div>}
+    {source !== 'demo' && !configured && <div className="dc-source-notice" role="status">尚未設定區會行事曆專用 Teamup 子日曆。設定後可顯示區會活動；pending／approved 子日曆 ID 亦須已設，才會顯示區總部借用時段。</div>}
+    {source !== 'demo' && configured && !includesBookings && <div className="dc-source-notice" role="status">尚未完整設定 Teamup 的 pending／approved 子日曆 ID；目前借用時段可能未完整顯示。區會活動寫入仍只會使用專用子日曆。</div>}
     {source !== 'demo' && subcalError && <div className="dc-source-notice error" role="alert">{subcalError}</div>}
     {source !== 'demo' && (canManageAccounts(session) || session.isSuper) && subcalOptions.length > 0 && <section className="dc-calendar-shell" aria-label="Teamup 設定">
       <h2>Teamup 專用子日曆設定</h2>
-      <p className="page-sub">活動只會讀寫所選子日曆。後端會再次驗證選項，並拒絕借場流程使用中的子日曆。</p>
+      <p className="page-sub">區會活動只會讀寫所選子日曆；申請中及已確認借用另由既有子日曆唯讀載入。後端會再次驗證寫入目標，拒絕借場流程使用中的子日曆。</p>
       <div className="dc-calendar-actions">
         <select aria-label="區會行事曆 Teamup 子日曆" value={selectedSubcal} onChange={e => setSelectedSubcal(e.target.value)}>
           <option value="">選擇專用子日曆</option>
@@ -160,8 +168,14 @@ export default function DistrictCalendarPage() {
           <button className="mini-btn ghost" onClick={() => { const now = new Date(); const today = isoLocalDay(now); setMonth(new Date(now.getFullYear(), now.getMonth(), 1)); setSelectedDay(today); }}>今日</button>
         </div>
         <div className="dc-calendar-actions">
-          <select aria-label="按活動類別篩選" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
-            <option value="">全部類別</option>{categories.map(c => <option key={c} value={c}>{c}</option>)}
+          <select aria-label="按日曆來源篩選" value={sourceFilter} onChange={e => { const next = e.target.value as typeof sourceFilter; setSourceFilter(next); if (next === 'booking-pending' || next === 'booking-approved') setCategoryFilter(''); }}>
+            <option value="all">全部日曆</option>
+            <option value="district">區會行事曆</option>
+            <option value="booking-pending">申請借用區總部</option>
+            <option value="booking-approved">確認借用區總部</option>
+          </select>
+          <select aria-label="按區會活動類別篩選" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
+            <option value="">全部活動類別</option>{categories.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
           <button className="mini-btn ghost" onClick={exportIcs} disabled={!monthEvents.length}>📥 匯出本月 .ics</button>
           {configured && canCreate && !draft && <button className="btn-sm" onClick={() => startNew()}>＋ 新增活動</button>}
@@ -179,7 +193,7 @@ export default function DistrictCalendarPage() {
             onClick={() => { setSelectedDay(day); setDraft(null); }}>
             <span className="dc-day-number">{number}</span>
             <span className="dc-day-events">
-              {dayItems.slice(0, 2).map(event => <span className="dc-day-event" key={event.id} title={event.title}>{event.title}</span>)}
+              {dayItems.slice(0, 2).map(event => <span className={`dc-day-event source-${event.sourceType || 'district'}`} key={event.id} title={`${event.sourceLabel || '區會行事曆'}：${event.title}`}>{event.title}</span>)}
               {dayItems.length > 2 && <span className="dc-more">+{dayItems.length - 2} 項</span>}
             </span>
           </button>;
@@ -198,19 +212,19 @@ export default function DistrictCalendarPage() {
         <div className="info-card"><p className="muted">未有活動。{canCreate ? '可以新增會議、訓練或區會活動。' : ''}</p></div> :
         <div className="dc-event-list">{dayEvents.map(event => <article className="dc-event-card" key={event.id}>
           <div className="dc-event-time">{event.allDay ? '全日' : event.startTime || '時間待定'}{event.endTime && !event.allDay ? ` – ${event.endTime}` : ''}</div>
-          <div className="dc-event-body"><div className="dc-event-title-row"><h3>{event.title}</h3>{event.category && <span className="dc-event-category">{event.category}</span>}</div>
+          <div className="dc-event-body"><div className="dc-event-title-row"><h3>{event.title}</h3><span className={`dc-source-badge source-${event.sourceType || 'district'}`}>{event.sourceLabel || '區會行事曆'}</span>{isDistrictEvent(event) && event.category && <span className="dc-event-category">{event.category}</span>}</div>
             <p>{formatEventDateRange(event)}</p>
             {event.location && <p>📍 {event.location}</p>}{event.description && <p className="dc-event-description">{event.description}</p>}
           </div>
-          {configured && canEdit && <div className="dc-event-actions"><button className="mini-btn" disabled={busy} onClick={() => startEdit(event)}>✏️ 修改</button>
+          {configured && canEdit && isDistrictEvent(event) && <div className="dc-event-actions"><button className="mini-btn" disabled={busy} onClick={() => startEdit(event)}>✏️ 修改</button>
             <button className="mini-btn danger" disabled={busy} onClick={() => deleteEvent(event)}>刪除</button></div>}
         </article>)}</div>}
     </section>
 
-    {configured && canEdit && <section className="dc-agenda">
-      <div className="section-head"><div><h2>🗂 本月議程</h2><p>方便快速掃描及修改整月安排</p></div></div>
-      {monthEvents.length ? <div className="dc-month-agenda">{monthEvents.map(event => <button key={event.id} className="dc-month-row" onClick={() => { setSelectedDay(event.startDate); startEdit(event); }}>
-        <time>{event.startDate.slice(5).replace('-', '/')} {event.allDay ? '' : event.startTime}</time><b>{event.title}</b><span>{event.location || event.category || ''}</span>
+    {configured && <section className="dc-agenda">
+      <div className="section-head"><div><h2>🗂 本月議程</h2><p>區會活動與區總部申請／確認借用時段</p></div></div>
+      {monthEvents.length ? <div className="dc-month-agenda">{monthEvents.map(event => <button key={event.id} className={`dc-month-row source-${event.sourceType || 'district'}`} onClick={() => { setSelectedDay(event.startDate); if (canEdit && isDistrictEvent(event)) startEdit(event); }}>
+        <time>{event.startDate.slice(5).replace('-', '/')} {event.allDay ? '' : event.startTime}</time><b>{event.title}</b><span>{event.sourceLabel || event.category || event.location || ''}</span>
       </button>)}</div> : <p className="muted">本月未有活動。</p>}
     </section>}
 

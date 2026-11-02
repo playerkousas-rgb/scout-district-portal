@@ -24,6 +24,7 @@
 
 ## 現有快照
 
+- `Code-v4.36.0.gs` — 🗓️ 管理系統行事曆合併顯示區會活動、區總部申請中及已確認借用；借場項目唯讀，不回傳 notes／申請人聯絡資料；只有專用區會子日曆可寫。
 - `Code-v4.35.0.gs` — 🗓️ Teamup 區會行事曆：Teamup 為唯一活動資料來源；ADC+（不包括 STAFF）新增，DDC+／STAFF／管理員編輯刪除；專用子日曆隔離借場流程，server-side re-auth、ScriptLock、樂觀版本檢查及 append-only hash-chain 操作稽核。
 - `Code-v4.33.0.gs` — 三張新卡：🔗 常用外部連結（Links 表；全部區職員可看，ADC 或以上可改）、📅 重要日期／大型活動（KeyDates 表；全部區職員可看，DDC 或以上可加，後台自動解析日期文字做排序欄）、🔢 實體密碼（Passcodes 表；房門／影印機等實體密碼，全部區職員可看，DDC 或以上可改，後台擋低電郵／網站帳戶密碼）。
 - `Code-v4.32.0.gs` — 旅團一卡三分頁：五行子分頁權限入 Perms 表（四行歸旅團、私隠聯絡歸聯絡簿；取代固定政策）、TroopContacts（ADC 支部範圍＋冇團長見旅長）、VisitRequests（公開提交、回覆可選）；刪除 `unit` 卡及 Perms 行。

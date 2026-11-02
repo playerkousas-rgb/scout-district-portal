@@ -3,7 +3,7 @@
 區職員端嘅統一管理平台。**借場 / 借物資 / 活動知會 / 訓練班目錄 + 報名批核** 全部由一份
 `gs/Code.gs`（Google Apps Script 後台）＋ 呢個 Next.js 前端 ＋ 一個 `/api/proxy` ＋ 一個 API Key 完成。
 
-> **本分支 v4.35.0：新增 Teamup 直連「區會行事曆」；並包含 v4.32.0「旅團」一卡三分頁＋子分頁權限、🔒 旅團聯絡（聯絡簿）、📨 旅團聯絡區會。** 原「旅團探訪」「旅團資料」「活動知會」三卡合併為一張「旅團」卡（`/troop`，入面分「旅團探訪」「旅團資料」「活動知會」三個大分頁；「📨 申請邀請」留在旅團探訪內）。旅團四個子分頁連同歸入「聯絡簿」嘅 🔒 旅團聯絡，合共五行 Perms 子權限，由超管用 👁／✏️ 逐行設定（之前係固定政策，改唔到）。新設私隠 `TroopContacts` 表，只喺聯絡簿旅團分頁按權限顯示（支部 ADC 只見自己支部，自己支部未有團長就只見旅長；絕不流入成員端公開回應）同 `VisitRequests` 表（成員端申請探訪／邀請區幹部出席，回覆聯絡可選，同「你講我聽」一樣；申請不會自動變成探訪紀錄）。探訪報告日期預設：**童軍年度＝每年 1 月至 12 月**，舊「9 月–8 月」預設保留但改名「學年」。升級時 Cards 表會移除舊三張合併卡行換一張 troop 卡，`unit` 主卡及 Perms 行一併刪除；Perms 原 `visit`／`troopDirectory`／`activity` 設定保留並補 `troopContacts`／`troopRequests`；舊連結 `/visit`、`/troop-directory`、`/activity-notices` 會自動轉去新分頁。**尚未合併／部署正式環境，亦未在真實 Apps Script／Sheet 驗證。** 升級前先備份並閱讀 [GS 升級步驟](docs/gs-upgrade-no-data-loss.md)。
+> **本分支 v4.36.0：新增 Teamup 直連「區會行事曆」；並包含 v4.32.0「旅團」一卡三分頁＋子分頁權限、🔒 旅團聯絡（聯絡簿）、📨 旅團聯絡區會。** 原「旅團探訪」「旅團資料」「活動知會」三卡合併為一張「旅團」卡（`/troop`，入面分「旅團探訪」「旅團資料」「活動知會」三個大分頁；「📨 申請邀請」留在旅團探訪內）。旅團四個子分頁連同歸入「聯絡簿」嘅 🔒 旅團聯絡，合共五行 Perms 子權限，由超管用 👁／✏️ 逐行設定（之前係固定政策，改唔到）。新設私隠 `TroopContacts` 表，只喺聯絡簿旅團分頁按權限顯示（支部 ADC 只見自己支部，自己支部未有團長就只見旅長；絕不流入成員端公開回應）同 `VisitRequests` 表（成員端申請探訪／邀請區幹部出席，回覆聯絡可選，同「你講我聽」一樣；申請不會自動變成探訪紀錄）。探訪報告日期預設：**童軍年度＝每年 1 月至 12 月**，舊「9 月–8 月」預設保留但改名「學年」。升級時 Cards 表會移除舊三張合併卡行換一張 troop 卡，`unit` 主卡及 Perms 行一併刪除；Perms 原 `visit`／`troopDirectory`／`activity` 設定保留並補 `troopContacts`／`troopRequests`；舊連結 `/visit`、`/troop-directory`、`/activity-notices` 會自動轉去新分頁。**尚未合併／部署正式環境，亦未在真實 Apps Script／Sheet 驗證。** 升級前先備份並閱讀 [GS 升級步驟](docs/gs-upgrade-no-data-loss.md)。
 >
 > 公開報名端（申請人填表嗰邊）係另一個 repo：**member-portal**。呢邊只做「區職員審批」。
 
@@ -102,17 +102,18 @@
 
 ---
 
-## 🗓️ 區會行事曆（v4.35.0；Teamup 直連）
+## 🗓️ 區會行事曆（v4.36.0；Teamup 直連）
 
 新增管理系統卡片「區會行事曆」（`/district-calendar`），活動以 **Teamup 為唯一資料來源**；管理系統直接載入 Teamup 專用子日曆，新增／修改／刪除均由 Apps Script 後端呼叫 Teamup API。Google Sheet 不存第二份活動內容，只保留受保護的操作稽核表。
 
 - **月曆＋議程**：星期一至日月視圖、當日議程、本月清單及類別篩選；活動支援全日／香港時間／跨日／地點／詳情。
+- **取代 Teamup 內嵌視圖**：同一月曆同時顯示區會活動、區總部申請中借用、已確認借用；待批／確認借用只讀，拒絕項目不顯示，並以來源篩選及顏色區分。借場的 notes／申請人聯絡資料不會隨綜合行事曆 API 回傳。
 - **角色權限**：ADC 或以上（不包括 STAFF）可新增；DDC 或以上、`STAFF` 及管理員可修改／刪除。每個後端 action 都重新驗 token、角色及卡片 Perms；不能靠前端按鈕顯示控制授權。
 - **README 審核／ADMIN APP 參考**：按參考 repo `BUILD.md` §7（ADMIN APP 接入邊界）及 `docs/19-ecportal-troop-case.md` §8（append-only audit／`ScriptLock`）採用 server-side action 白名單、每次重新授權、樂觀版本檢查（Teamup `modify_dt`）及 append-only `DistrictCalendarAudit`（操作者／事件 ID／操作／時間／before/after hash／`previousHash` 鏈）。參考 repo 的匿名申請收件匣／2FA 不適用於此既有登入入口，沒有照搬。這個功能沒有另加活動待批流程；使用者指定的角色本身即具直接寫入權限。
-- **日曆隔離**：管理員從 Teamup 即時讀取子日曆後設定 `TEAMUP_DISTRICT_SUBCAL_ID`；後端確認 ID 屬於目前 Teamup 日曆，並拒絕與借場的 `TEAMUP_PENDING_SUBCAL_ID`、`TEAMUP_APPROVED_SUBCAL_ID`、`TEAMUP_REJECTED_SUBCAL_ID` 重疊。Teamup Token 只在 Apps Script Config／後端 header，從不回傳前端。
+- **日曆隔離**：管理員從 Teamup 即時讀取子日曆後設定 `TEAMUP_DISTRICT_SUBCAL_ID`；後端確認 ID 屬於目前 Teamup 日曆，並拒絕把區會寫入目標設成借場的 `TEAMUP_PENDING_SUBCAL_ID`、`TEAMUP_APPROVED_SUBCAL_ID`、`TEAMUP_REJECTED_SUBCAL_ID`。讀取時則把區會專用、pending、approved 三類合併；只有專用區會事件可修改／刪除。Teamup Token 只在 Apps Script Config／後端 header，從不回傳前端。
 - **稽核／刪除**：刪除直接呼叫 Teamup DELETE，稽核表保留刪除操作者與時間；Sheet 設為受保護表。Teamup 活動仍以 Teamup 本身為準。
 - **Demo 限制**：示範版只操作本機示範資料，頁面會明確標示不會寫 Teamup。
-- **升級**：備份後更新 `gs/Code.gs`，執行 `setupSheets()`（會補建 `DistrictCalendarAudit`、卡片及預設 Perms），設定 Teamup token、日曆 key 並在管理頁選擇專用子日曆，再部署 Web App。不可把借場子日曆選作區會日曆。
+- **升級／部署**：這次 v4.36 綜合顯示沒有新增 Sheet／欄位，**只為顯示借場時段不需要執行 `setupSheets()`**；但 Apps Script `getDistrictEvents_()` 原本只查區會子日曆，所以要讓借場時段實際出現，仍須把更新後 `gs/Code.gs` 部署到 Apps Script，並核實 Teamup token、日曆 key、pending／approved 子日曆 ID。若首次啟用 v4.35 區會活動寫入，而 `DistrictCalendarAudit` 尚未建立，才需執行一次 `setupSheets()`；它是區會新增／修改／刪除的稽核前置條件，並非本次顯示功能的要求。公開網站的 WordPress 頁面不在本 repo；若要正式替換原公開嵌入頁，仍須另行更新該頁面的嵌入／導向。
 - **併發限制／驗收狀態**：`ScriptLock` 序列化本管理系統的寫入，`modify_dt` 可偵測讀取前已存在的外部修改；Teamup API 未提供此流程可用的 compare-and-swap，若有人同時直接在 Teamup 編輯同一活動，GET 與 PUT 之間仍有極窄競爭窗口，建議以管理系統作此專用子日曆的唯一編輯入口。自動測試使用 mock Teamup API；目前未在有權限的正式 Teamup 日曆／Apps Script 部署上執行真實 CRUD，因此不宣稱線上整合已驗收。上線前須以測試日曆實測讀取、建立、修改、刪除、權限拒絕及稽核鏈。
 
 ## 🔗 常用連結 / 📅 重要日期 / 🔢 實體密碼（v4.33.0）
@@ -390,7 +391,7 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 
 | 檔案 | 用途 |
 |---|---|
-| `gs/Code.gs` | 完整統一後台 v4.35.0（Teamup 區會行事曆；Apps Script 須由區方自行部署，升級前依只追加指引備份） |
+| `gs/Code.gs` | 完整統一後台 v4.36.0（Teamup 區會行事曆；Apps Script 須由區方自行部署，升級前依只追加指引備份） |
 | `public/downloads/Code.gs.txt` | 與 `gs/Code.gs` 同一份內容，供網站「更新／下載」直接下載 |
 | `gs/Code.gs.course.js` | 每個訓練班嘅收表 Script 模板 |
 | `app/api/proxy/route.ts` | 前端 → Apps Script 嘅代理（API Key 唔出前端） |
@@ -405,8 +406,8 @@ member-portal 嗰邊要開白名單同畫 QR，改法見 [`docs/member-gs-handsh
 | `scripts/mock-gs-server.js` | 本機模擬 Apps Script 後台（啟動時會顯示僅本機使用的 `PORTAL_SKW_MASTER_PASSWORD` 與 `PORTAL_SKW_MASTER_BRIDGE_SECRET` 假值；切勿用於正式環境） |
 | `scripts/test-awards-logic.ts` | 獎勵夠期推算／Excel 匯入解析測試（24 項，`node --experimental-strip-types`） |
 | `scripts/check-member-alignment.js` | 成員系統 ↔ 後台對齊檢查（action 缺漏 / proxy 白名單 / 安全邊界） |
-| `app/links/`、`app/key-dates/`、`app/passcodes/`、`app/district-calendar/` | 常用外部連結 / 重要日期 / 實體密碼 / Teamup 區會行事曆（v4.33.0–v4.35.0） |
+| `app/links/`、`app/key-dates/`、`app/passcodes/`、`app/district-calendar/` | 常用外部連結 / 重要日期 / 實體密碼 / Teamup 區會行事曆（v4.33.0–v4.36.0） |
 | `lib/keyDates.ts` | 日期自由文字解析（`9Nov2026`／`17-18Apr2027`／`2027`）、排序、`.ics` 產生 |
-| `scripts/test-links-keydates-gs.js` | 三張新卡後台測試：追加式 `setupSheets`、權限門檻、CRUD、日期解析（37 項） |
+| `scripts/test-links-keydates-gs.js` | 三張新卡及區會行事曆後台測試：追加式 `setupSheets`、權限門檻、Teamup CRUD／借場唯讀、日期解析（43 項） |
 | `scripts/test-key-dates.ts` | 日期文字解析／顯示／ICS 測試（27 項，`node --experimental-strip-types`） |
 | `scripts/test-new-cards-ui.js` | 三張新卡真 TSX 渲染測試：唯讀／可編輯畫面差異（10 項） |

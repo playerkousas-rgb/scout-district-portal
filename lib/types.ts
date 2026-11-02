@@ -1179,6 +1179,9 @@ export interface DistrictEvent {
   /** Teamup modify_dt，做樂觀鎖；編輯／刪除必須原樣回傳。 */
   updatedAt?: string;
   updatedBy?: string;
+  sourceType?: 'district' | 'booking-pending' | 'booking-approved';
+  sourceLabel?: string;
+  readOnly?: boolean;
 }
 
 export interface DistrictEventBoard {
@@ -1188,6 +1191,7 @@ export interface DistrictEventBoard {
   configured?: boolean;
   source?: 'teamup' | 'demo';
   subcalendarId?: string;
+  includesBookings?: boolean;
   items: DistrictEvent[];
 }
 

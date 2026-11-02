@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.35.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.36.0
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -386,7 +386,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.35.0',
+      version: '4.36.0',
       feedbackReady: feedbackReady_(),
       dcFeedbackReady: dcFeedbackReady_(),
       troopContactsReady: troopContactsReady_(),
@@ -2036,7 +2036,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.35.0',
+    version: '4.36.0',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -5045,12 +5045,18 @@ function districtTeamupNotes_(category, description) {
   var prefix = category ? '活動類別：' + String(category).replace(/[\r\n]+/g, ' ') + '\n' : '';
   return prefix + String(description || '');
 }
-function districtEventFromTeamup_(ev) {
+function districtEventFromTeamup_(ev, sourceType) {
   ev = ev || {};
   var notes = String(ev.notes || '');
   var category = '';
-  var meta = notes.match(/^活動類別：([^\r\n]+)\r?\n/);
-  if (meta) { category = meta[1].trim(); notes = notes.slice(meta[0].length); }
+  if (sourceType === 'district') {
+    var meta = notes.match(/^活動類別：([^\r\n]+)\r?\n/);
+    if (meta) { category = meta[1].trim(); notes = notes.slice(meta[0].length); }
+  } else {
+    // 借場事件 notes 含申請人聯絡資料；此合併月曆只需顯示時段／狀態，不回傳備註或聯絡資料。
+    notes = '';
+    category = sourceType === 'booking-pending' ? '申請借用區總部' : '確認借用區總部';
+  }
   var start = ev.start_dt || ev.startDate || '';
   var end = ev.end_dt || ev.endDate || start;
   var allDay = ev.all_day === true || ev.allDay === true || String(ev.all_day).toLowerCase() === 'true';
@@ -5058,17 +5064,35 @@ function districtEventFromTeamup_(ev) {
     id: String(ev.id || ''), title: String(ev.title || ''),
     startDate: districtEventDate_(start), endDate: districtEventDate_(end) || districtEventDate_(start),
     startTime: allDay ? '' : districtEventTime_(start), endTime: allDay ? '' : districtEventTime_(end),
-    allDay: allDay, location: String(ev.location || ''), category: category,
-    description: notes, updatedAt: String(ev.modify_dt || ev.modified_dt || ev.update_dt || ev.updated_at || ''),
+    allDay: allDay, location: sourceType === 'district' ? String(ev.location || '') : '', category: category,
+    description: notes, sourceType: sourceType,
+    sourceLabel: sourceType === 'district' ? '區會行事曆' : category,
+    readOnly: sourceType !== 'district',
+    updatedAt: String(ev.modify_dt || ev.modified_dt || ev.update_dt || ev.updated_at || ''),
     createdAt: String(ev.create_dt || ev.created_dt || ev.created_at || ''), active: true,
   };
+}
+function districtBookingSourcesReady_(c) {
+  var pending = String(c.pendingSub || ''), approved = String(c.approvedSub || ''), rejected = String(c.rejectedSub || '');
+  return !!(pending && approved && pending !== approved && pending !== rejected && approved !== rejected);
+}
+function districtEventSourceType_(ev, c) {
+  var ids = Array.isArray(ev && ev.subcalendar_ids) ? ev.subcalendar_ids.map(String) : [];
+  // 只接受單一已識別來源，避免跨子日曆事件被錯誤編輯或重複呈現。
+  if (ids.length !== 1) return '';
+  if (ids[0] === String(c.districtSub)) return 'district';
+  if (c.rejectedSub && ids[0] === String(c.rejectedSub)) return '';
+  if (c.pendingSub && c.approvedSub && String(c.pendingSub) === String(c.approvedSub)) return '';
+  if (c.pendingSub && ids[0] === String(c.pendingSub)) return 'booking-pending';
+  if (c.approvedSub && ids[0] === String(c.approvedSub)) return 'booking-approved';
+  return '';
 }
 function getDistrictEvents_(token, from, to) {
   var t = requireCardView_(token, 'districtCalendar'); if (t.error) return err(t.error);
   var c = teamupCfg_();
   var canCreate = districtEventCanCreate_(t), canEdit = t.access === 'edit' && districtEventCanEdit_(t);
   if (!c.apiKey || !c.calendarId) return err('Teamup 尚未設定 TEAMUP_API_KEY／TEAMUP_CALENDAR_KEY；請管理員聯絡系統維護者');
-  if (!c.districtSub) return ok({ access: t.access, canCreate: canCreate, canEdit: canEdit, configured: false, source: 'teamup', items: [] });
+  if (!c.districtSub) return ok({ access: t.access, canCreate: canCreate, canEdit: canEdit, configured: false, includesBookings: false, source: 'teamup', items: [] });
   if ([c.pendingSub, c.approvedSub, c.rejectedSub].filter(Boolean).map(String).indexOf(String(c.districtSub)) >= 0) return err('安全檢查拒絕：TEAMUP_DISTRICT_SUBCAL_ID 與借場流程子日曆重疊，請管理員更換專用日曆');
   var start = String(from || '').trim(), end = String(to || '').trim();
   if (!start || !end) {
@@ -5077,8 +5101,10 @@ function getDistrictEvents_(token, from, to) {
   }
   if (!districtDateValid_(start) || !districtDateValid_(end) || end < start) return err('行事曆日期範圍無效');
   if ((new Date(end + 'T00:00:00Z') - new Date(start + 'T00:00:00Z')) / 86400000 > 62) return err('一次最多讀取 63 日行事曆');
+  var subIds = [c.districtSub, c.pendingSub, c.approvedSub].filter(Boolean).map(String).filter(function (id, index, all) { return all.indexOf(id) === index; });
+  var subQuery = subIds.map(function (id) { return 'subcalendarId%5B%5D=' + encodeURIComponent(id); }).join('&');
   var url = districtCalendarUrl_('events') + '?startDate=' + encodeURIComponent(start) + '&endDate=' + encodeURIComponent(end)
-    + '&subcalendarId%5B%5D=' + encodeURIComponent(c.districtSub) + '&tz=Asia%2FHong_Kong';
+    + '&' + subQuery + '&tz=Asia%2FHong_Kong';
   var res;
   try { res = teamupFetch_(url, { method: 'get' }); }
   catch (e) { return err('連接 Teamup 失敗，請稍後再試'); }
@@ -5086,10 +5112,12 @@ function getDistrictEvents_(token, from, to) {
   var data = {};
   try { data = JSON.parse(res.text || '{}'); } catch (ignore) { return err('Teamup 活動回應格式無效'); }
   var rawItems = Array.isArray(data.events) ? data.events : (Array.isArray(data) ? data : []);
-  var items = rawItems.filter(function (ev) { return !Array.isArray(ev.subcalendar_ids) || districtEventBelongs_(ev, c.districtSub); })
-    .map(districtEventFromTeamup_).filter(function (x) { return x.id && x.title && x.startDate; });
+  var items = rawItems.map(function (ev) { return { event: ev, sourceType: districtEventSourceType_(ev, c) }; })
+    .filter(function (row) { return !!row.sourceType; })
+    .map(function (row) { return districtEventFromTeamup_(row.event, row.sourceType); })
+    .filter(function (x) { return x.id && x.title && x.startDate; });
   items.sort(function (a, b) { return (a.startDate + (a.startTime || '')).localeCompare(b.startDate + (b.startTime || '')) || a.title.localeCompare(b.title); });
-  return ok({ access: t.access, canCreate: canCreate, canEdit: canEdit, configured: true, source: 'teamup', subcalendarId: c.districtSub, items: items });
+  return ok({ access: t.access, canCreate: canCreate, canEdit: canEdit, configured: true, source: 'teamup', subcalendarId: c.districtSub, includesBookings: districtBookingSourcesReady_(c), items: items });
 }
 function districtEventPayload_(raw, actor) {
   raw = raw || {};
@@ -5120,9 +5148,9 @@ function districtEventPayload_(raw, actor) {
     start_dt: timeValue(startDate, startTime, false), end_dt: timeValue(endDate, endTime, true), all_day: allDay,
   }, expectedUpdatedAt: String(raw.expectedUpdatedAt || '').trim() };
 }
-function districtEventBelongs_(ev, subId) {
+function districtEventWritable_(ev, subId) {
   var ids = Array.isArray(ev && ev.subcalendar_ids) ? ev.subcalendar_ids.map(String) : [];
-  return ids.indexOf(String(subId)) >= 0;
+  return ids.length === 1 && ids[0] === String(subId);
 }
 function districtEventConflict_(actual, expected) {
   if (!expected) return true;
@@ -5185,7 +5213,7 @@ function saveDistrictEvent_(token, raw) {
       if (currentRes.code < 200 || currentRes.code >= 300) return err(districtTeamupError_(currentRes, '讀取待編輯 Teamup 活動失敗'));
       var currentData = JSON.parse(currentRes.text || '{}'), current = currentData.event || currentData;
       beforeEvent = current;
-      if (!districtEventBelongs_(current, setup.config.districtSub)) return err('找不到該區會活動，或活動不屬於專用區會子日曆');
+      if (!districtEventWritable_(current, setup.config.districtSub)) return err('該活動不是區會專用子日曆中的單一區會事件，不能由此處修改');
       var actualVersion = String(current.modify_dt || current.modified_dt || current.update_dt || current.updated_at || '');
       if (districtEventConflict_(actualVersion, parsed.expectedUpdatedAt)) return err('活動已被其他人修改；已停止覆寫，請重新載入後再試。');
       parsed.payload.subcalendar_ids = current.subcalendar_ids;
@@ -5220,7 +5248,7 @@ function deleteDistrictEvent_(token, id, expectedUpdatedAt) {
     if (currentRes.code < 200 || currentRes.code >= 300) return err(districtTeamupError_(currentRes, '讀取待刪除 Teamup 活動失敗'));
     var data = JSON.parse(currentRes.text || '{}'), current = data.event || data;
     beforeEvent = current;
-    if (!districtEventBelongs_(current, setup.config.districtSub)) return err('找不到該區會活動，或活動不屬於專用區會子日曆');
+    if (!districtEventWritable_(current, setup.config.districtSub)) return err('該活動不是區會專用子日曆中的單一區會事件，不能由此處刪除');
     var actual = String(current.modify_dt || current.modified_dt || current.update_dt || current.updated_at || '');
     if (districtEventConflict_(actual, expected)) return err('活動已被其他人修改；已停止刪除，請重新載入後再試。');
     var deleted = teamupFetch_(url, { method: 'delete' });

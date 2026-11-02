@@ -108,7 +108,7 @@ function loadDb(): DemoDb {
           db.schemaVersion = 8;
           persistDb();
         }
-        // v9（GS v4.35.0）：區會行事曆；保留既有示範資料並補新卡及資料。
+        // v9（GS v4.36.0）：區會行事曆；保留既有示範資料並補新卡及資料。
         if ((db.schemaVersion || 0) < 9) {
           const card = DEMO_CARDS.find(c => c.cardId === 'districtCalendar');
           if (card && !db.cards.some(c => c.cardId === 'districtCalendar')) db.cards.push({ ...card });

@@ -1241,7 +1241,7 @@ a{color:inherit;text-decoration:none;}
   .pc-code{width:100%;text-align:center;}
 }
 
-/* ===================== v4.35.0：Teamup 區會行事曆 ===================== */
+/* ===================== v4.36.0：Teamup 區會行事曆 ===================== */
 .dc-calendar-shell,.dc-agenda{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin:16px 0;box-shadow:0 2px 9px rgba(15,23,42,.035);}
 .dc-calendar-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;}
 .dc-month-controls,.dc-calendar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -1262,6 +1262,13 @@ a{color:inherit;text-decoration:none;}
 .dc-event-title-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}.dc-event-title-row h3{margin:0;color:#0f172a;font-size:15px;}.dc-event-category{border-radius:999px;padding:2px 8px;background:#f1f5f9;color:#475569;font-size:10px;font-weight:800;}
 .dc-event-body p.dc-event-description{color:#334155;line-height:1.6;}.dc-event-actions{display:flex;gap:5px;}.dc-month-agenda{display:flex;flex-direction:column;}.dc-month-row{width:100%;display:grid;grid-template-columns:115px minmax(120px,1fr) minmax(80px,auto);gap:10px;padding:9px 5px;border:0;border-top:1px solid #eef2f7;background:white;text-align:left;cursor:pointer;color:#334155;font-size:12px;}.dc-month-row:hover{background:#f8fafc;}.dc-month-row time{color:#0f766e;font-weight:800;}.dc-month-row span{text-align:right;color:#64748b;}
 .dc-event-form{margin:16px 0;border-color:#5eead4!important;}.dc-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;}.dc-field{display:flex;flex-direction:column;gap:5px;color:#64748b;font-size:12px;font-weight:700;}.dc-field.wide{grid-column:1/-1;}.dc-field input:not([type=checkbox]),.dc-field select,.dc-field textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:9px 11px;color:#0f172a;font:inherit;font-size:13.5px;background:#fff;}.dc-field textarea{resize:vertical;line-height:1.6;}.dc-field input:focus,.dc-field textarea:focus{outline:2px solid #99f6e4;border-color:#0f766e;}.dc-field.dc-checkbox{flex-direction:row;align-items:center;gap:8px;color:#334155;}.dc-field.dc-checkbox input{width:16px;height:16px;}.dc-form-actions{display:flex;gap:8px;margin-top:12px;}
-@media(max-width:700px){.dc-calendar-shell,.dc-agenda{padding:11px;margin:12px -4px;}.dc-calendar-toolbar{align-items:flex-start;}.dc-calendar-actions{width:100%;}.dc-calendar-actions select{flex:1;}.dc-calendar-actions button{flex:1;}.dc-day{min-height:66px;padding:3px;}.dc-day-number{width:22px;height:22px;}.dc-day-event{font-size:9px;padding:2px;}.dc-day-events .dc-day-event:nth-child(n+2){display:none;}.dc-event-card{grid-template-columns:1fr;gap:6px;}.dc-event-actions{width:100%;}.dc-event-actions button{flex:1;}.dc-form-grid{grid-template-columns:1fr;}.dc-field.wide{grid-column:auto;}.dc-month-row{grid-template-columns:80px 1fr;}.dc-month-row span{grid-column:2;text-align:left;}}
+@media(max-width:700px){.dc-calendar-shell,.dc-agenda{padding:11px;margin:12px -4px;}.dc-calendar-toolbar{align-items:flex-start;}.dc-calendar-actions{width:100%;}.dc-calendar-actions select{flex:1;}.dc-calendar-actions button{flex:1;}.dc-day{min-height:66px;padding:3px;}.dc-day-number{width:22px;height:22px;}.dc-day-event{font-size:9px;padding:2px;}.dc-day-events .dc-day-event:nth-child(n+3){display:none;}.dc-event-card{grid-template-columns:1fr;gap:6px;}.dc-event-actions{width:100%;}.dc-event-actions button{flex:1;}.dc-form-grid{grid-template-columns:1fr;}.dc-field.wide{grid-column:auto;}.dc-month-row{grid-template-columns:80px 1fr;}.dc-month-row span{grid-column:2;text-align:left;}}
 .dc-source-notice{background:#eff6ff;border:1px solid #93c5fd;border-left:5px solid #2563eb;border-radius:10px;padding:11px 14px;margin:12px 0;color:#1e3a8a;font-size:13px;line-height:1.65;}
 .dc-source-notice.error{background:#fef2f2;border-color:#fecaca;border-left-color:#dc2626;color:#991b1b;}
+.dc-day-event.source-district,.dc-source-badge.source-district{background:#ccfbf1;color:#115e59;}
+.dc-day-event.source-booking-pending,.dc-source-badge.source-booking-pending{background:#fef3c7;color:#92400e;}
+.dc-day-event.source-booking-approved,.dc-source-badge.source-booking-approved{background:#dbeafe;color:#1e40af;}
+.dc-source-badge{border-radius:999px;padding:2px 8px;font-size:10px;font-weight:800;}
+.dc-month-row.source-booking-pending{border-left:3px solid #f59e0b;padding-left:8px;}
+.dc-month-row.source-booking-approved{border-left:3px solid #2563eb;padding-left:8px;}
+.dc-month-row.source-district{border-left:3px solid #0f766e;padding-left:8px;}
