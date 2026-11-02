@@ -13,6 +13,7 @@ import type {
   VenueLockInfo,
 } from '@/lib/types';
 import BackLink, { BackBar } from '@/components/BackLink';
+import { teamupPublicKey } from '@/lib/teamupHqIcs';
 
 const REQUIRED_GS_VERSION = '4.24.0';
 
@@ -92,6 +93,8 @@ export default function VenueRegsPage() {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [failedBooking, setFailedBooking] = useState<VenueBooking | null>(null);
+  const [teamupCalendarUrl, setTeamupCalendarUrl] = useState('');
+  const [teamupCalendarError, setTeamupCalendarError] = useState('');
 
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'other'>('all');
   const [vDraft, setVDraft] = useState<Venue>({ ...EMPTY_VENUE });
@@ -136,13 +139,15 @@ export default function VenueRegsPage() {
       Promise<Awaited<ReturnType<typeof api.listVenues>>>,
       Promise<Awaited<ReturnType<typeof api.health>>>,
       Promise<Awaited<ReturnType<typeof api.getVenueLockConfig>> | null>,
+      Promise<Awaited<ReturnType<typeof api.getTeamupCalendarUrl>> | null>,
     ] = [
       api.getVenueBookings(s.token),
       api.listVenues(),
       api.health(),
       canApproveHq(s) ? api.getVenueLockConfig(s.token) : Promise.resolve(null),
+      canApproveHq(s) ? api.getTeamupCalendarUrl() : Promise.resolve(null),
     ];
-    const [b, v, h, c] = await Promise.all(tasks);
+    const [b, v, h, c, publicInfo] = await Promise.all(tasks);
     if (b.ok && b.data) setBookings(b.data);
     else setError(b.error || '無法載入借場申請');
 
@@ -153,6 +158,14 @@ export default function VenueRegsPage() {
     }
     if (h.ok && h.data) setHealth(h.data);
     if (c && c.ok && c.data) applyCfgStatus(c.data);
+    if (publicInfo?.ok && publicInfo.data) {
+      const key = teamupPublicKey(publicInfo.data.url || '');
+      setTeamupCalendarUrl(key ? `https://teamup.com/${key}` : '');
+      setTeamupCalendarError(key ? '' : '未設定有效的 Teamup 公開分享連結；請管理員核實 Config 的 TEAMUP_BOOKING_URL。');
+    } else if (canApproveHq(s)) {
+      setTeamupCalendarUrl('');
+      setTeamupCalendarError(publicInfo?.error || '暫時未能讀取 Teamup 公開分享連結。');
+    }
     setLoading(false);
   }
 
@@ -845,6 +858,31 @@ export default function VenueRegsPage() {
           </div>
         )}
       </section>
+
+      {hq && (
+        <section className="info-card" style={{ borderLeft: '4px solid #0f766e', marginBottom: 16 }} aria-label="Teamup 場地借用日曆">
+          <div className="section-head">
+            <div>
+              <h3>📅 Teamup 場地借用日曆</h3>
+              <p>審批前查看申請中及已確認時段；如 Teamup 有重疊預約，請先核對日期及時段再批核。</p>
+            </div>
+            {teamupCalendarUrl && <a className="mini-btn" href={teamupCalendarUrl} target="_blank" rel="noopener noreferrer">↗ 新分頁開啟</a>}
+          </div>
+          {teamupCalendarUrl ? (
+            <div style={{ width: '100%', overflow: 'hidden', border: '1px solid #cbd5e1', borderRadius: 10, background: '#fff' }}>
+              <iframe
+                title="Teamup 場地借用日曆（申請中及確認借用）"
+                src={teamupCalendarUrl}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                style={{ display: 'block', width: '100%', height: 'min(72vh, 760px)', minHeight: 480, border: 0 }}
+              />
+            </div>
+          ) : (
+            <div className="dc-source-notice" role="status">{teamupCalendarError || 'Teamup 公開日曆未設定，暫時無法顯示預約時段。'}</div>
+          )}
+        </section>
+      )}
 
       {/* 申請審批列表 */}
       <section className="info-card" style={{ borderLeft: '4px solid #dc2626' }}>

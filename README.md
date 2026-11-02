@@ -108,6 +108,7 @@
 
 - **月曆＋議程**：星期一至日月視圖、當日議程、本月清單及類別篩選；活動支援全日／香港時間／跨日／地點／詳情。
 - **取代 Teamup 內嵌視圖**：同一月曆同時顯示區會活動、區總部申請中借用、已確認借用；待批／確認借用只讀，拒絕項目不顯示，並以來源篩選及顏色區分。借場的 notes／申請人聯絡資料不會隨綜合行事曆 API 回傳。
+- **場地借用第一階段批核**：`/venue-regs` 審批頁重新嵌入既有 Teamup 公開日曆，讓批核者查看申請中及已確認時段；分享 URL 經既有 Vercel server-side 來源取得及驗證，不傳 API Token 到瀏覽器。此 iframe 顯示不改 Apps Script／Sheet，亦不需 `setupSheets()`；批核送出時仍由後端重查已確認時段衝突。
 - **角色權限**：ADC 或以上（不包括 STAFF）可新增；DDC 或以上、`STAFF` 及管理員可修改／刪除。每個後端 action 都重新驗 token、角色及卡片 Perms；不能靠前端按鈕顯示控制授權。
 - **README 審核／ADMIN APP 參考**：按參考 repo `BUILD.md` §7（ADMIN APP 接入邊界）及 `docs/19-ecportal-troop-case.md` §8（append-only audit／`ScriptLock`）採用 server-side action 白名單、每次重新授權、樂觀版本檢查（Teamup `modify_dt`）及 append-only `DistrictCalendarAudit`（操作者／事件 ID／操作／時間／before/after hash／`previousHash` 鏈）。參考 repo 的匿名申請收件匣／2FA 不適用於此既有登入入口，沒有照搬。這個功能沒有另加活動待批流程；使用者指定的角色本身即具直接寫入權限。
 - **日曆隔離**：管理員從 Teamup 即時讀取子日曆後設定 `TEAMUP_DISTRICT_SUBCAL_ID`；後端確認 ID 屬於目前 Teamup 日曆，並拒絕把區會寫入目標設成借場的 `TEAMUP_PENDING_SUBCAL_ID`、`TEAMUP_APPROVED_SUBCAL_ID`、`TEAMUP_REJECTED_SUBCAL_ID`。讀取時則把區會專用、pending、approved 三類合併；只有專用區會事件可修改／刪除。Teamup Token 只在 Apps Script Config／後端 header，從不回傳前端。
