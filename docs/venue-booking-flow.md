@@ -7,6 +7,8 @@
 借場**寫入與審批**仍由同一個 Apps Script 後台（管理系統 + 成員系統共用）完成；
 下方房間**唯讀查閱**獨立由現有 Vercel 前端的 `/api/rooms/hq` 讀公開 iCalendar，毋須另起部署或更動正式 GS v4.18.0。
 
+`/venue-regs` 場地借用審批頁亦嵌入 Teamup 公開日曆，讓第一階段批核者直接查看申請中及已確認的日程。Vercel 只讀取共用後台已公開的 `TEAMUP_BOOKING_URL`（必要時沿用既有公開後備來源），並驗證分享連結網域；瀏覽器只收到 Teamup 公開分享 URL，不會收到 `TEAMUP_API_KEY`。這是前端／Vercel 顯示功能，**不改 Apps Script、Sheet，也不需要執行 `setupSheets()`**。批核時後端現有紅色已批時段重疊檢查仍會再做最後防線。
+
 ## 流程
 ```
 申請人（member-portal）填借用申請表
@@ -15,6 +17,7 @@
       │  → Teamup「申請中」子日曆建【申請】事件（寫入 teamupEventId）
       ▼
 區職員登入管理系統 → 場地借用審批 (/venue-regs)
+      │  審批頁嵌入既有 Teamup 公開行事曆，供批核者核對申請中／已確認時段
       │  點「✅ 批准」→ 前端 call confirmVenueBooking
       ▼
 後台 confirmVenueBooking_（status=approved）：

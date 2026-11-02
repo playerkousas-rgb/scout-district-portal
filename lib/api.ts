@@ -101,7 +101,17 @@ export const api = {
 
   getConfig: (): Promise<ApiResult<DistrictConfig>> => callGet('getConfig'),
   /** 公開設定（成員系統同一份）：旅號清單 troopList 等 */
-  getPublicInfo: (): Promise<ApiResult<{ districtName: string; districtCode: string; troopList?: string[]; locked?: boolean }>> => callGet('getPublicInfo'),
+  getPublicInfo: (): Promise<ApiResult<{ districtName: string; districtCode: string; troopList?: string[]; locked?: boolean; teamupBookingUrl?: string }>> => callGet('getPublicInfo'),
+  /** Teamup 已公開分享日曆網址（Vercel server-side 解析；不回傳 API Token） */
+  getTeamupCalendarUrl: async (): Promise<ApiResult<{ url: string }>> => {
+    if (isDemoMode()) return { ok: false, error: '示範環境沒有即時 Teamup 日曆' };
+    try {
+      const response = await fetch('/api/teamup/calendar-url', { cache: 'no-store' });
+      return await response.json();
+    } catch {
+      return { ok: false, error: 'Teamup 公開日曆連線失敗' };
+    }
+  },
 
   getCards: async (token: string): Promise<ApiResult<CardDef[]>> => {
     const r = await callGet<CardDef[]>('getCards', { token });

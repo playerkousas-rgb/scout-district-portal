@@ -11,6 +11,7 @@ export default function UpdatesPage() {
           <li>區會活動可依既有 ADC 新增、DDC／STAFF／管理員編輯規則寫入專用子日曆。</li>
           <li>區總部申請中及已確認借用只讀顯示，以來源顏色／篩選區分；借場活動只能由借場流程修改，行事曆不能誤改或刪除。</li>
           <li>拒絕項目不顯示；借場 Teamup notes 和申請人聯絡資料不會被綜合行事曆 API 傳到前端。</li>
+          <li>場地借用第一階段批核頁重新嵌入 Teamup 公開日曆，方便批核者核對申請中及已確認時段；這是前端／Vercel 顯示，不改 Apps Script／Sheet，也不需執行 setupSheets()。</li>
         </ul>
         <p>這次綜合顯示沒有新增 Sheet／欄位，單為顯示借用時段不需執行 <code>setupSheets()</code>。但 Apps Script 原本只回傳區會子日曆，故須部署更新後的 <code>Code.gs</code>，並設定 Teamup pending／approved 子日曆 ID，才會有借用資料。若首次啟用 v4.35 區會活動新增／修改／刪除功能，而稽核表尚不存在，才需要執行一次 <code>setupSheets()</code>。WordPress 公開頁面不在本 repo 內，仍須另行更新嵌入頁才會替換原公開頁。</p>
         <a className="btn-sm" href="/downloads/Code.gs.txt" download="Code.gs.txt">下載完整 Code.gs v4.36.0</a>
