@@ -350,3 +350,108 @@ export function downloadXlsx(sheets: XlsxSheet[], filename: string): void {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
+
+function colRefToIndex(ref: string): number {
+  const letters = ref.replace(/\d+/g, '').toUpperCase();
+  let n = 0;
+  for (let i = 0; i < letters.length; i++) n = n * 26 + (letters.charCodeAt(i) - 64);
+  return Math.max(0, n - 1);
+}
+
+async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
+  const ds = new DecompressionStream('deflate-raw');
+  const writer = ds.writable.getWriter();
+  writer.write(data as unknown as BufferSource);
+  writer.close();
+  const res = new Response(ds.readable);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+/** 瀏覽器端讀取 .xlsx 第一張工作表（支援 STORE 及 DEFLATE 壓縮） */
+export async function parseXlsxFirstSheet(buf: ArrayBuffer): Promise<string[][]> {
+  const bytes = new Uint8Array(buf);
+  const view = new DataView(buf);
+  const dec = new TextDecoder('utf-8');
+
+  // Find End of Central Directory (PK\x05\x06)
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('唔係有效嘅 .xlsx 檔案（搵唔到 ZIP 目錄）');
+
+  const cdOffset = view.getUint32(eocd + 16, true);
+  const cdCount = view.getUint16(eocd + 10, true);
+  const entries = new Map<string, { method: number; compSize: number; localOffset: number }>();
+
+  let pos = cdOffset;
+  for (let i = 0; i < cdCount && pos + 46 <= bytes.length; i++) {
+    if (view.getUint32(pos, true) !== 0x02014b50) break;
+    const method = view.getUint16(pos + 10, true);
+    const compSize = view.getUint32(pos + 20, true);
+    const nameLen = view.getUint16(pos + 28, true);
+    const extraLen = view.getUint16(pos + 30, true);
+    const commentLen = view.getUint16(pos + 32, true);
+    const localOffset = view.getUint32(pos + 42, true);
+    const name = dec.decode(bytes.subarray(pos + 46, pos + 46 + nameLen));
+    entries.set(name, { method, compSize, localOffset });
+    pos += 46 + nameLen + extraLen + commentLen;
+  }
+
+  async function readEntry(name: string): Promise<string | null> {
+    const e = entries.get(name);
+    if (!e) return null;
+    const lo = e.localOffset;
+    if (view.getUint32(lo, true) !== 0x04034b50) return null;
+    const fnLen = view.getUint16(lo + 26, true);
+    const exLen = view.getUint16(lo + 28, true);
+    const start = lo + 30 + fnLen + exLen;
+    const slice = bytes.subarray(start, start + e.compSize);
+    const out = e.method === 0 ? slice : e.method === 8 ? await inflateRaw(slice) : slice;
+    return dec.decode(out);
+  }
+
+  const ssXml = await readEntry('xl/sharedStrings.xml');
+  const sheetXml = await readEntry('xl/worksheets/sheet1.xml');
+  if (!sheetXml) throw new Error('搵唔到第一張工作表（xl/worksheets/sheet1.xml）');
+
+  const parser = new DOMParser();
+  const sharedStrings: string[] = [];
+  if (ssXml) {
+    const ssDoc = parser.parseFromString(ssXml, 'application/xml');
+    const sis = ssDoc.getElementsByTagName('si');
+    for (let i = 0; i < sis.length; i++) {
+      const ts = sis[i].getElementsByTagName('t');
+      let txt = '';
+      for (let j = 0; j < ts.length; j++) txt += ts[j].textContent || '';
+      sharedStrings.push(txt);
+    }
+  }
+
+  const sDoc = parser.parseFromString(sheetXml, 'application/xml');
+  const rowEls = sDoc.getElementsByTagName('row');
+  const rows: string[][] = [];
+  for (let i = 0; i < rowEls.length; i++) {
+    const row: string[] = [];
+    const cells = rowEls[i].getElementsByTagName('c');
+    for (let j = 0; j < cells.length; j++) {
+      const c = cells[j];
+      const ref = c.getAttribute('r') || '';
+      const colIdx = ref ? colRefToIndex(ref) : j;
+      const t = c.getAttribute('t') || '';
+      let val = '';
+      if (t === 's') {
+        const v = c.getElementsByTagName('v')[0]?.textContent;
+        val = v !== undefined && v !== null ? (sharedStrings[Number(v)] ?? '') : '';
+      } else if (t === 'inlineStr') {
+        const ts = c.getElementsByTagName('t');
+        for (let k = 0; k < ts.length; k++) val += ts[k].textContent || '';
+      } else {
+        val = c.getElementsByTagName('v')[0]?.textContent || '';
+      }
+      row[colIdx] = val;
+    }
+    rows.push(row);
+  }
+  return rows;
+}

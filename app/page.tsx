@@ -89,19 +89,36 @@ export default function HomePage() {
   }, [session]);
 
   async function loadCards(s: UserSession) {
-    setLoading(true); setError('');
+    const cacheKey = `sdp_cards_${districtCode || ''}_${s.email || ''}`;
+    let hasCached = false;
+    try {
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached) as Parameters<typeof dashboardCards>[0];
+        if (Array.isArray(parsed) && parsed.length) {
+          const defaults = dashboardCards(parsed, s);
+          const saved = loadCardOrder(districtCode || '', s.email || '');
+          setCardOrder(saved);
+          setCards(applyCardOrder(defaults, saved));
+          hasCached = true;
+        }
+      }
+    } catch {}
+    if (!hasCached) setLoading(true);
+    setError('');
     try {
       const r = await api.getCards(s.token);
       // 後台已過濾：隱藏卡片只會回傳俾超管（enabled=false 用作標示）
       if (r.ok && r.data) {
+        try { sessionStorage.setItem(cacheKey, JSON.stringify(r.data)); } catch {}
         const defaults = dashboardCards(r.data, s);
         const saved = loadCardOrder(districtCode || '', s.email || '');
         setCardOrder(saved);
         setCards(applyCardOrder(defaults, saved));
       }
-      else setError(r.error || '無法載入卡片');
+      else if (!hasCached) setError(r.error || '無法載入卡片');
     } catch {
-      setError('連線失敗：請確認該區後台網址已設定且已部署。');
+      if (!hasCached) setError('連線失敗：請確認該區後台網址已設定且已部署。');
     } finally { setLoading(false); }
   }
 
@@ -370,6 +387,28 @@ export default function HomePage() {
             {canDelegate(session) && <button className="admin-btn hero-ghost" onClick={() => router.push(withDistrict('/delegate'))}>🤝 授權／收回</button>}
             {session.isAdmin && <button className="admin-btn hero-ghost" onClick={() => router.push(withDistrict('/plugins'))}>🧩 外掛市集</button>}
             {session.isAdmin && <button className="admin-btn hero-ghost" onClick={() => router.push(withDistrict('/admin'))}>⚙️ 權限/角色</button>}
+            {(session.isAdmin || cards.some(c => c.cardId === 'venueRegs' && c.access === 'edit')) && (
+              <button
+                className="admin-btn hero-ghost"
+                onClick={async () => {
+                  if (!confirm('確定要透過 TTLock 網關遙距一鍵開門？')) return;
+                  try {
+                    const res = await fetch('/api/proxy', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'venueUnlock', token: session.token }),
+                    });
+                    const data = await res.json();
+                    if (data.ok) alert('🔓 已成功發送一鍵開門指令！');
+                    else alert(data.error || '遙距開門失敗（請確認後端 GS 已支援 venueUnlock 及網關在線）');
+                  } catch {
+                    alert('連線失敗，無法發送開門指令。');
+                  }
+                }}
+              >
+                🔓 一鍵開門
+              </button>
+            )}
             <button className="admin-btn hero-ghost" onClick={() => setShowPw(v => !v)}>🔑 改密碼</button>
             <button className="admin-btn hero-ghost" onClick={logout}>登出</button>
           </div>

@@ -13,6 +13,8 @@ export default function TroopDirectoryEditor({ board, canEdit, token, reload, fl
   const [paste, setPaste] = useState('');
   const [saving, setSaving] = useState(false);
   const [editingRoster, setEditingRoster] = useState(false);
+  const [publicFilter, setPublicFilter] = useState<'all' | 'public' | 'private'>('all');
+  const [sortOrder, setSortOrder] = useState<'troop' | 'publicFirst' | 'privateFirst'>('troop');
   const publicFieldsReady = board.publicTroopFieldsReady === true;
 
   function setCell(i: number, patch: Partial<ScoutUnit>) {
@@ -44,10 +46,45 @@ export default function TroopDirectoryEditor({ board, canEdit, token, reload, fl
     else setError(r.error || '儲存失敗');
   }
 
+  const sortedUnits = sortUnits(board.units);
+  const publicCount = sortedUnits.filter(u => u.publicVisible !== false).length;
+  const privateCount = sortedUnits.length - publicCount;
+  const displayedUnits = sortedUnits
+    .filter(u => publicFilter === 'all' ? true : publicFilter === 'public' ? u.publicVisible !== false : u.publicVisible === false)
+    .sort((a, b) => {
+      if (sortOrder === 'troop') return 0;
+      const aPub = a.publicVisible !== false ? 1 : 0;
+      const bPub = b.publicVisible !== false ? 1 : 0;
+      return sortOrder === 'publicFirst' ? bPub - aPub : aPub - bPub;
+    });
+
   return (
     <>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button type="button" className={`mini-btn${publicFilter === 'all' ? ' primary' : ''}`} onClick={() => setPublicFilter('all')}>
+            全部 ({sortedUnits.length})
+          </button>
+          <button type="button" className={`mini-btn${publicFilter === 'public' ? ' primary' : ''}`} onClick={() => setPublicFilter('public')}>
+            公開旅 ({publicCount})
+          </button>
+          <button type="button" className={`mini-btn${publicFilter === 'private' ? ' primary' : ''}`} onClick={() => setPublicFilter('private')}>
+            非公開旅 ({privateCount})
+          </button>
+        </div>
+        <select
+          aria-label="排序方式"
+          value={sortOrder}
+          onChange={e => setSortOrder(e.target.value as 'troop' | 'publicFirst' | 'privateFirst')}
+          style={{ marginLeft: 'auto', padding: '4px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 13 }}
+        >
+          <option value="troop">排序：按旅號</option>
+          <option value="publicFirst">排序：公開旅優先</option>
+          <option value="privateFirst">排序：非公開旅優先</option>
+        </select>
+      </div>
       <div className="unit-editor-grid">
-        {sortUnits(board.units).map(unit => <article key={unit.troop} className="info-card">
+        {displayedUnits.map(unit => <article key={unit.troop} className="info-card">
           <h3>{unit.label || `第 ${unit.troop} 旅`}</h3><p>{unit.org || '—'}</p>
           <div className="vs-card-sections">{activeSections(unit).map(section => <span key={section} className="vs-chip on">{SECTION_LABEL[section]}</span>)}</div>
           {unit.meetingTime && <p>集會時間：{unit.meetingTime}</p>}

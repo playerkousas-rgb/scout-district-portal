@@ -13,8 +13,9 @@ import { canManageBudget } from '@/lib/accountRoles';
 import BackLink, { BackBar } from '@/components/BackLink';
 import { SOURCES } from '@/lib/externalSources';
 import {
-  BUDGET_TYPE_LABEL, budgetStatusKind, type BudgetRow, type BudgetSummary,
+  BUDGET_TYPE_LABEL, budgetStatusKind, parseBudgetCsv, parseBudgetRows, type BudgetRow, type BudgetSummary,
 } from '@/lib/externalParsers';
+import { parseXlsxFirstSheet } from '@/lib/xlsx';
 
 type View = 'month' | 'section' | 'list';
 const VIEWS: { id: View; label: string }[] = [
@@ -191,6 +192,35 @@ export default function BudgetPage() {
 
       <div className="bud-toolbar">
         <a className="mini-btn" href={sheetUrl} target="_blank" rel="noopener">📗 開啟 Google Sheet ↗</a>
+        <label className="mini-btn ghost" style={{ cursor: 'pointer' }}>
+          📥 匯入 Excel (.xlsx / .csv)
+          <input
+            type="file"
+            accept=".xlsx,.csv"
+            style={{ display: 'none' }}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (!file) return;
+              setError('');
+              setStale('');
+              try {
+                const parsed = /\.xlsx$/i.test(file.name)
+                  ? parseBudgetRows(await parseXlsxFirstSheet(await file.arrayBuffer()))
+                  : parseBudgetCsv(await file.text());
+                if (!parsed.rows.length) {
+                  setError(`「${file.name}」讀唔到任何預算活動列，請確認第 1 欄係月份（例如 2026-04）、第 2 欄係支部、第 3 欄係活動名稱。`);
+                  return;
+                }
+                setRows(parsed.rows);
+                setSummary(parsed.summary);
+                setFetchedAt(new Date().toISOString());
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Excel 讀取失敗');
+              }
+            }}
+          />
+        </label>
         <button className="mini-btn ghost" onClick={() => setReloadKey(k => k + 1)} disabled={loading}>🔄 重新讀取</button>
         {canEditUrl && (
           <button
