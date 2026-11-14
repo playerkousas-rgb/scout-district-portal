@@ -170,6 +170,17 @@ export default function HomePage() {
       if (from !== null && from !== i) moveCard(from, i);
     },
     onDragEnd: () => { dragFrom.current = null; },
+    'data-card-index': i,
+    onTouchStart: () => { dragFrom.current = i; },
+    onTouchEnd: (e: React.TouchEvent) => {
+      const from = dragFrom.current;
+      dragFrom.current = null;
+      if (from === null || !e.changedTouches?.[0]) return;
+      const t = e.changedTouches[0];
+      const el = document.elementFromPoint(t.clientX, t.clientY)?.closest('[data-card-index]') as HTMLElement | null;
+      const to = el ? Number(el.dataset.cardIndex) : NaN;
+      if (!Number.isNaN(to) && to !== from) moveCard(from, to);
+    },
   });
 
   async function handleLogin(e: React.FormEvent) {
