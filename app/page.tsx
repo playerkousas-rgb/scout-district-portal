@@ -41,6 +41,19 @@ export default function HomePage() {
   const [lockMsg, setLockMsg] = useState('');
   const [mode, setMode] = useState<LoginMode>('login');
   const [info, setInfo] = useState('');
+  const [installPrompt, setInstallPrompt] = useState<(Event & { prompt?: () => Promise<void> }) | null>(null);
+  const [isStandalone, setIsStandalone] = useState(true);
+
+  useEffect(() => {
+    const standalone = window.matchMedia?.('(display-mode: standalone)').matches || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+    setIsStandalone(!!standalone);
+    const onPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e as Event & { prompt?: () => Promise<void> });
+    };
+    window.addEventListener('beforeinstallprompt', onPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', onPrompt);
+  }, []);
 
   // 忘記密碼 / 重設
   const [resetToken, setResetToken] = useState('');
@@ -406,10 +419,25 @@ export default function HomePage() {
                   }
                 }}
               >
-                🔓 一鍵開門
+                🔓 開門
               </button>
             )}
             <button className="admin-btn hero-ghost" onClick={() => setShowPw(v => !v)}>🔑 改密碼</button>
+            {!isStandalone && (
+              <button
+                className="admin-btn hero-ghost"
+                onClick={async () => {
+                  if (installPrompt?.prompt) {
+                    await installPrompt.prompt();
+                    setInstallPrompt(null);
+                  } else {
+                    alert('📲 加入主畫面方法：\n\n• iPhone / iPad (Safari)：點底部「分享」圖示 ⬆️ →「加入主畫面」\n• Android (Chrome)：點右上角「⋮」→「安裝應用程式」／「加到主畫面」\n\n加入後日後改版會自動更新，唔使重新加入。');
+                  }
+                }}
+              >
+                📲 加入主畫面
+              </button>
+            )}
             <button className="admin-btn hero-ghost" onClick={logout}>登出</button>
           </div>
         </div>
