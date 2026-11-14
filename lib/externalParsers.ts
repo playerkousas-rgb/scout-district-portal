@@ -265,8 +265,21 @@ export function normalizeMonth(v: string): string {
   return t;
 }
 
-export function parseBudgetCsv(text: string): { rows: BudgetRow[]; summary: BudgetSummary[] } {
-  const raw = parseCsv(text);
+function normalizeBudgetMonth(v: string): string {
+  const s = v.trim();
+  if (!s) return '';
+  // Excel serial date (e.g. 45000 - 55000)
+  if (/^\d{5}(\.\d+)?$/.test(s)) {
+    const n = Math.floor(Number(s));
+    if (n > 30000 && n < 70000) {
+      const d = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    }
+  }
+  return normalizeMonth(s);
+}
+
+export function parseBudgetRows(raw: unknown[][]): { rows: BudgetRow[]; summary: BudgetSummary[] } {
   const rows: BudgetRow[] = [];
   const summary: BudgetSummary[] = [];
   raw.forEach((r) => {
@@ -278,8 +291,8 @@ export function parseBudgetCsv(text: string): { rows: BudgetRow[]; summary: Budg
       if (amt !== null) summary.push({ label: c(3) || '總計', amount: amt });
       return;
     }
-    if (/月份/.test(a) || /支部/.test(b) && /活動/.test(act)) return; // 表頭
-    if (!/\d{4}/.test(a)) return;                                   // 唔似月份
+    if (/^(月份|month|日期)/i.test(a) || (/支部|section/i.test(b) && /活動|activity/i.test(act))) return; // 表頭
+    if (!/\d/.test(a)) return;                                   // 唔似月份/日期
     const extras = r.slice(9).map(x => String(x ?? '').trim()).filter(Boolean);
     let status = '';
     const notes: string[] = [];
@@ -291,13 +304,17 @@ export function parseBudgetCsv(text: string): { rows: BudgetRow[]; summary: Budg
     });
     const hc = parseMoney(c(4));
     rows.push({
-      month: normalizeMonth(a), section: b, activity: act, fee: c(3),
+      month: normalizeBudgetMonth(a), section: b, activity: act, fee: c(3),
       headcount: hc, subsidy: parseMoney(c(5)), ccSubmission: c(6),
       typeCode: c(7).toUpperCase(), sectionCode: c(8).toUpperCase(),
       status, notes: notes.join('；'), links,
     });
   });
   return { rows, summary };
+}
+
+export function parseBudgetCsv(text: string): { rows: BudgetRow[]; summary: BudgetSummary[] } {
+  return parseBudgetRows(parseCsv(text));
 }
 
 export const BUDGET_TYPE_LABEL: Record<string, string> = { T: '訓練', M: '會議', A: '活動', S: '社區服務', Y: '儀式典禮' };

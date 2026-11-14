@@ -7,6 +7,12 @@ import { Analytics } from '@vercel/analytics/next';
 export const metadata: Metadata = {
   title: '童軍區管理平台',
   description: '統一前端 · 各區獨立後台 · 多區管理系統',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: '區管理系統',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -17,6 +23,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <DistrictShell>{children}</DistrictShell>
         </Suspense>
         <Analytics />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'}).catch(function(){});});}`,
+          }}
+        />
       </body>
     </html>
   );

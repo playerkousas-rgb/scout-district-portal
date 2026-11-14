@@ -156,6 +156,26 @@ export async function createPasscode({ phone, startDate, endDate, name }) {
   const token = await getAccessToken();
   const clientId = requiredEnv('TTLOCK_CLIENT_ID');
 
+  // 優先重用已過期嘅現有密碼槽位（例如「限時1」～「限時30」），避免建立未經藍牙開通嘅新槽位
+  const now = Date.now();
+  try {
+    const existing = await listExistingPasscodes({ lockId, token, clientId });
+    const expiredSlot = existing.find((p) => Number(p.endDate || 0) > 0 && Number(p.endDate) < now);
+    if (expiredSlot && expiredSlot.keyboardPwdId) {
+      const r = await callChangePasscode({
+        lockId, token, clientId,
+        keyboardPwdId: expiredSlot.keyboardPwdId,
+        passcode,
+        name: expiredSlot.keyboardPwdName || name,
+        start,
+        end,
+      });
+      return { success: true, passcode: r.passcode, validFrom: start, validTo: end, reusedId: r.keyboardPwdId };
+    }
+  } catch (e) {
+    console.warn(`[TTLock] 重用過期槽位失敗，改為嘗試新建：${e.message}`);
+  }
+
   // 撞碼自動重試：同一鎖同一時段密碼不可重複，香港電話頭碼極易相撞。
   let candidate = passcode;
   let lastErr = null;
@@ -177,4 +197,31 @@ export async function createPasscode({ phone, startDate, endDate, name }) {
     + '請確認：1) 網關在線 2) TTLOCK_LOCK_ID 正確 3) 密碼長度設 6 位 (TTLOCK_PASSCODE_LENGTH) '
     + '4) 區域 TTLOCK_API_BASE 正確。或設 TTLOCK_DISABLED=1 先跳過 TTLock。'
   );
+}
+
+/**
+ * 透過 TTLock 網關遙距一鍵開門（/v3/lock/unlock）
+ */
+export async function remoteUnlock() {
+  const lockId = requiredEnv('TTLOCK_LOCK_ID');
+  const token = await getAccessToken();
+  const clientId = requiredEnv('TTLOCK_CLIENT_ID');
+
+  const body = new URLSearchParams({
+    clientId,
+    accessToken: token,
+    lockId: String(lockId),
+    date: String(Date.now()),
+  });
+
+  const res = await fetch(`${getApiBase()}/v3/lock/unlock`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const data = await res.json();
+  if (data.errcode && data.errcode !== 0) {
+    throw new Error(`TTLock 遙距開門失敗 (${data.errcode}): ${data.errmsg || JSON.stringify(data)}`);
+  }
+  return { success: true, lockId };
 }

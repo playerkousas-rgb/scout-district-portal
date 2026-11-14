@@ -227,6 +227,7 @@ function NominateTab({ board, year, setYear, canEdit, token, reload, flash, setE
   const thisYear = new Date().getFullYear();
   const [includeInactive, setIncludeInactive] = useState(false);
   const [picked, setPicked] = useState<Record<string, Eligibility>>({});   // key = memberId:code
+  const [editing, setEditing] = useState<Partial<AwardMember> | null>(null);
   const [saving, setSaving] = useState(false);
 
   function toggle(e: Eligibility) {
@@ -373,6 +374,7 @@ function NominateTab({ board, year, setYear, canEdit, token, reload, flash, setE
                       {canEdit && <th style={{ width: 34 }} title="打勾＝已頒獎，之後可以一次過寫入名冊">✅</th>}
                       <th>姓名</th><th>旅團</th><th>職位</th>
                       <th>建議提名</th><th>由邊度計起</th><th>已夠期</th>
+                      {canEdit && <th style={{ width: 64 }}>資料</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -401,6 +403,18 @@ function NominateTab({ board, year, setYear, canEdit, token, reload, flash, setE
                           {e.noRule ? <span className="aw-tag">冇年期規定</span>
                             : e.waited === 0 ? '啱啱夠' : `已過 ${e.waited} 年`}
                         </td>
+                        {canEdit && (
+                          <td>
+                            <button
+                              type="button"
+                              className="mini-btn"
+                              onClick={() => setEditing(e.member)}
+                              title="修改領袖身份資料"
+                            >
+                              ✏️
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -452,6 +466,15 @@ function NominateTab({ board, year, setYear, canEdit, token, reload, flash, setE
         名冊狀態揀「沒有提名資格」嘅人唔會出現喺任何提名建議。<br />
         年期全部喺「⚙️ 年期設定」改，改完即刻重算。
       </div>
+
+      {editing && (
+        <MemberModal
+          draft={editing} types={board.types} token={token}
+          onClose={() => setEditing(null)}
+          onSaved={async () => { setEditing(null); flash('已更新領袖資料 ✅'); await reload(); }}
+          setError={setError}
+        />
+      )}
     </>
   );
 }

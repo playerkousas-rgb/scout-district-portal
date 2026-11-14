@@ -629,6 +629,30 @@ export default function VenueRegsPage() {
               Sheet 回傳欄：{cfgStatus.sheetHasPasscodeCol && cfgStatus.sheetHasPwdRefCol ? 'passcode + pwdRef 就緒 ✓' : '儲存設定時自動補齊'}
             </span>
           )}
+          {!ttlockDisabled && lockCredsOk && lockIdOk && (
+            <button
+              type="button"
+              className="mini-btn primary"
+              style={{ marginLeft: 'auto' }}
+              onClick={async () => {
+                if (!session?.token || !confirm('確定要透過 TTLock 網關遙距一鍵開門？')) return;
+                try {
+                  const res = await fetch('/api/proxy', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'venueUnlock', token: session.token }),
+                  });
+                  const data = await res.json();
+                  if (data.ok) alert('🔓 已成功發送一鍵開門指令！');
+                  else alert(data.error || '遙距開門失敗（請確認後端 GS 已支援 venueUnlock 及網關在線）');
+                } catch {
+                  alert('連線失敗，無法發送開門指令。');
+                }
+              }}
+            >
+              🔓 一鍵開門
+            </button>
+          )}
         </div>
 
         {showCfgPanel && hq && (
