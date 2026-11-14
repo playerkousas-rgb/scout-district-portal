@@ -292,7 +292,7 @@ export function parseBudgetRows(raw: unknown[][]): { rows: BudgetRow[]; summary:
       return;
     }
     if (/^(月份|month|日期)/i.test(a) || (/支部|section/i.test(b) && /活動|activity/i.test(act))) return; // 表頭
-    if (!/\d/.test(a)) return;                                   // 唔似月份/日期
+    if (!act && parseMoney(c(5)) === null) return;               // 無活動名亦無金額嘅空列/備註列
     const extras = r.slice(9).map(x => String(x ?? '').trim()).filter(Boolean);
     let status = '';
     const notes: string[] = [];
