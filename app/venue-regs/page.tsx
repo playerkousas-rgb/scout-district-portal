@@ -650,7 +650,7 @@ export default function VenueRegsPage() {
                 }
               }}
             >
-              🔓 一鍵開門
+              🔓 開門
             </button>
           )}
         </div>

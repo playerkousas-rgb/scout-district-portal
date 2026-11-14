@@ -72,7 +72,6 @@ export default function CardItem({
       <div className="ico">{card.icon}</div>
       {card.source === 'plugin' && <span className="plugin-tag">🧩 外掛</span>}
       <h3>{card.title}</h3>
-      <div className="desc">{card.description}</div>
       <div className="card-foot">
         <span className={`access ${isView ? 'view' : 'edit'}`}>
           {card.cardId === 'visit' ? (isView ? '👁 可看 · ＋ 可新增' : '✏️ 可改／刪 · ＋ 可新增') : isView ? '👁 可看' : '✏️ 可管理'}{card.embed && card.type !== 'builtin' ? ' · 無感' : ''}
