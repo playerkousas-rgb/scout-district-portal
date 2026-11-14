@@ -73,18 +73,9 @@ export default function CardItem({
       {card.source === 'plugin' && <span className="plugin-tag">🧩 外掛</span>}
       <h3>{card.title}</h3>
       <div className="card-foot">
-        <span className={`access ${isView ? 'view' : 'edit'}`}>
-          {card.cardId === 'visit' ? (isView ? '👁 可看 · ＋ 可新增' : '✏️ 可改／刪 · ＋ 可新增') : isView ? '👁 可看' : '✏️ 可管理'}{card.embed && card.type !== 'builtin' ? ' · 無感' : ''}
+        <span className={`access ${isView ? 'view' : 'edit'}`} title={isView ? '可查看' : '可管理'}>
+          {card.cardId === 'visit' ? (isView ? '👁 ＋' : '✏️ ＋') : isView ? '👁' : '✏️'}
         </span>
-        {canReorder && (
-          <span className="card-move" onClick={(e) => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
-            {total && <select value={position} aria-label={`${card.title} 的排列位置`} onChange={e => onMoveTo?.(Number(e.target.value))}>
-              {Array.from({ length: total }, (_, i) => <option key={i} value={i}>第 {i + 1} 位</option>)}
-            </select>}
-            <button type="button" className="move-btn" disabled={first} aria-label="上移" title="上移" onClick={onMoveUp}>▲</button>
-            <button type="button" className="move-btn" disabled={last} aria-label="下移" title="下移" onClick={onMoveDown}>▼</button>
-          </span>
-        )}
       </div>
       {hidden && <span className="hidden-tag">🙈 已隱藏</span>}
       {canToggle && (
