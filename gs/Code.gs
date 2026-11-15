@@ -1,5 +1,5 @@
 /**
- * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.37.0
+ * 童軍區統一後台 — 管理系統 + 成員系統 共用 Code.gs  v4.37.1
  * ================================================================
  * 一張 Google Sheet + 一份 Code.gs + 一個 /exec + 一個 API Key。
  *
@@ -386,7 +386,7 @@ function doGet(e) {
   if (action === 'getHealthCheck') {
     return json(ok({
       ok: true,
-      version: '4.37.0',
+      version: '4.37.1',
       feedbackReady: feedbackReady_(),
       dcFeedbackReady: dcFeedbackReady_(),
       troopContactsReady: troopContactsReady_(),
@@ -518,6 +518,7 @@ function doPost(e) {
       case 'setStockBatchStatus':   return json(setStockBatchStatus_(b.token, b.batchRef, b.status));
       case 'confirmVenueBooking':   return json(confirmVenueBooking_(b.token, b.id));
       case 'approveVenueBooking':   return json(approveVenueBooking_(b.token, b.id, b));
+      case 'resendVenueApprovalEmail': return json(resendVenueApprovalEmail_(b.token, b.id));
       case 'rejectVenueBooking':    return json(rejectVenueBooking_(b.token, b.id));
       case 'updateVenueBooking':    return json(updateVenueBooking_(b.token, b.id, b.patch || b));
       case 'getLockList':           return json(getLockList_(b.token));
@@ -1763,6 +1764,9 @@ function submitVenueRequest_(b) {
 
   ensureSheetColumn_(sh, 'activityName');
   ensureSheetColumn_(sh, 'attendeeCount');
+  if (colIdxByHeader_(sh, 'email') <= 0 && colIdxByHeader_(sh, 'Email') <= 0) {
+    ensureSheetColumn_(sh, 'email');
+  }
   appendRowObj_(sh, {
     id: rid, districtCode: districtCode_(), refCode: ref,
     submittedAt: now, createdAt: now,
@@ -1780,12 +1784,61 @@ function submitVenueRequest_(b) {
     setTextCellByHeader_(sh, newRowIdx, 'phone', req.phone);
     setTextCellByHeader_(sh, newRowIdx, 'startDate', req.startDate);
     setTextCellByHeader_(sh, newRowIdx, 'endDate', req.endDate);
+    if (req.email) {
+      if (colIdxByHeader_(sh, 'email') <= 0 && colIdxByHeader_(sh, 'Email') > 0) {
+        setTextCellByHeader_(sh, newRowIdx, 'Email', req.email);
+      } else {
+        setTextCellByHeader_(sh, newRowIdx, 'email', req.email);
+      }
+    }
     if (teamupEventId) setTextCellByHeader_(sh, newRowIdx, 'teamupEventId', teamupEventId);
   }
   appendRecord_('venue', rid, ref, '🏛 借場：' + (venue.name || req.venueId), req.name, req.phone, req.troop || '', 'pending',
     req.startDate + ' → ' + req.endDate);
-  notifyStaff_('🏛 新借場申請', '場地：' + (venue.name || req.venueId) + '\n申請人：' + req.name + '（' + req.phone + '）\n' + req.startDate + ' → ' + req.endDate);
-  return okSubmit_({ refCode: ref, id: rid, teamupEventId: teamupEventId });
+  var mailWarns = [];
+  var applicantMailSent = false;
+  var applicantMailTo = '';
+  if (String(req.email || '').trim()) {
+    try {
+      var confirmMail = sendVenueSubmissionEmail_({
+        email: req.email,
+        name: req.name,
+        venueName: venue.name || req.venueId,
+        venueId: String(venue.venueId).trim(),
+        activityName: req.activityName,
+        attendeeCount: req.attendeeCount,
+        purpose: req.purpose || '',
+        startDate: req.startDate,
+        endDate: req.endDate,
+        refCode: ref,
+      });
+      applicantMailSent = !!confirmMail.sent;
+      applicantMailTo = confirmMail.to || '';
+      if (confirmMail.warn) mailWarns.push(confirmMail.warn);
+    } catch (e) {
+      var confirmErr = '申請確認電郵發送失敗：' + String((e && e.message) || e);
+      console.error(confirmErr);
+      mailWarns.push(confirmErr);
+    }
+  }
+  var staffNotify = notifyStaff_(
+    '🏛 新借場申請（' + ref + '）',
+    '場地：' + (venue.name || req.venueId)
+    + '\n活動：' + req.activityName + '（' + req.attendeeCount + ' 人）'
+    + '\n申請人：' + req.name + '（' + req.phone + (req.email ? '／' + req.email : '') + '）'
+    + (req.troop ? '\n旅團：' + req.troop : '')
+    + '\n時段：' + req.startDate + ' → ' + req.endDate
+    + '\n申請編號：' + ref
+  );
+  if (staffNotify && staffNotify.warn) mailWarns.push(staffNotify.warn);
+  return okSubmit_({
+    refCode: ref,
+    id: rid,
+    teamupEventId: teamupEventId,
+    emailSent: applicantMailSent,
+    emailTo: applicantMailTo,
+    warn: mailWarns.length ? mailWarns.join('；') : undefined,
+  });
 }
 
 // ===================== 借場：查閱／批核 =====================
@@ -1804,6 +1857,7 @@ function normalizeVenueBookingRow_(r) {
   out.startDate = formatVenueDateField_(r.startDate);
   out.endDate = formatVenueDateField_(r.endDate);
   out.phone = r.phone === undefined || r.phone === null ? '' : String(r.phone);
+  out.email = String(pick_(r, ['email', 'Email', 'mail', '電郵'])).trim();
   out.pwdRef = r.pwdRef === undefined || r.pwdRef === null ? '' : String(r.pwdRef).trim();
   out.teamupEventId = r.teamupEventId === undefined || r.teamupEventId === null ? '' : String(r.teamupEventId).trim();
   var rawPwd = r.passcode;
@@ -1961,7 +2015,8 @@ function approveVenueBooking_(token, id, opts) {
   if (finalEventId) booking.teamupEventId = finalEventId;
 
   // 3) 電郵密碼俾申請人
-  var emailTo = String(booking.email || '').trim();
+  var parsedMail = normalizeEmailList_(booking.email);
+  var emailTo = parsedMail.joined;
   var emailSent = false;
   var mailMsg = '';
   if (emailTo) {
@@ -1970,7 +2025,10 @@ function approveVenueBooking_(token, id, opts) {
       emailSent = true;
     } catch (e) {
       mailMsg = '電郵發送失敗：' + String((e && e.message) || e);
+      console.error('借場批准電郵發送失敗（' + (booking.refCode || id) + '）：' + mailMsg);
     }
+  } else if (String(booking.email || '').trim()) {
+    mailMsg = '申請人電郵格式不正確（' + String(booking.email).trim() + '），請先更正或改用 WhatsApp／手動通知密碼';
   } else {
     mailMsg = '申請人未填電郵，請用頁面 WhatsApp／手動通知密碼';
   }
@@ -2036,7 +2094,7 @@ function getVenueLockConfig_(token) {
     return !!String(v.scienerLockId || '').trim();
   });
   return ok({
-    version: '4.37.0',
+    version: '4.37.1',
     clientId: c.clientId || '',
     clientIdSet: !!c.clientId,
     clientSecretSet: !!c.clientSecret,
@@ -2147,6 +2205,43 @@ function rejectVenueBooking_(token, id) {
   return setVenueBookingStatus_(token, id, 'rejected');
 }
 
+/** 對已批准並已設密碼嘅借場申請重寄「入場密碼電郵」（唔重製門鎖密碼） */
+function resendVenueApprovalEmail_(token, id) {
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
+  if (!sh) return err('找不到 VenueBookings 工作表');
+  var rawBooking = readSheet_(SHEET.VENUE_REQ).filter(function (x) { return String(x.id) === String(id); })[0];
+  if (!rawBooking) return err('找不到申請');
+  var booking = normalizeVenueBookingRow_(rawBooking);
+  var status = String(booking.status || '').toLowerCase();
+  if (status !== 'approved' && status !== 'confirmed') {
+    return err('此申請尚未批核，請先批核後再寄出電郵');
+  }
+  var passcode = String(booking.passcode || '').trim();
+  if (!passcode) return err('此申請尚未設有入場密碼（請改用「補發電子鎖匙」）');
+  var parsed = normalizeEmailList_(booking.email);
+  if (!parsed.joined) {
+    return err(String(booking.email || '').trim() ? '申請人電郵格式不正確，請先編輯修正' : '申請人未填電郵，請先編輯補填電郵');
+  }
+  var validFrom = null, validTo = null;
+  try {
+    var startMs = parseVenueDateMs_(booking.startDate, false);
+    var endMs = parseVenueDateMs_(booking.endDate || booking.startDate, true);
+    if (isFinite(startMs) && isFinite(endMs) && endMs >= startMs) {
+      validFrom = new Date(startMs - 15 * 60 * 1000);
+      validTo = new Date(endMs + 15 * 60 * 1000);
+    }
+  } catch (ignore) {}
+  try {
+    sendVenueApprovalEmail_(booking, passcode, validFrom, validTo);
+    return ok({ sent: true, id: String(booking.id), emailTo: parsed.joined });
+  } catch (e) {
+    var msg = '電郵發送失敗：' + String((e && e.message) || e);
+    console.error('重寄借場密碼電郵失敗（' + (booking.refCode || id) + '）：' + msg);
+    return err(msg);
+  }
+}
+
 /** 職員改申請內容（唔改 status） */
 function updateVenueBooking_(token, id, patch) {
   var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
@@ -2165,6 +2260,13 @@ function updateVenueBooking_(token, id, patch) {
     }
     patch.attendeeCount = attendeeCount;
   }
+  if (patch.email !== undefined) {
+    var trimmedEmail = String(patch.email || '').trim();
+    if (trimmedEmail && !normalizeEmailList_(trimmedEmail).joined) {
+      return err('電郵格式不正確');
+    }
+    patch.email = trimmedEmail;
+  }
   if (patch.venueId) {
     var venue = readSheet_(SHEET.VENUES).filter(function (v) {
       return String(v.venueId).trim() === String(patch.venueId).trim()
@@ -2175,7 +2277,7 @@ function updateVenueBooking_(token, id, patch) {
       patch.venueName = venue.name || patch.venueName;
     }
   }
-  var textCols = { startDate: true, endDate: true, phone: true, activityName: true };
+  var textCols = { startDate: true, endDate: true, phone: true, email: true, activityName: true };
   allow.forEach(function (k) {
     if (patch[k] !== undefined && patch[k] !== null) {
       if (textCols[k]) setTextCellByHeader_(sh, idx, k, patch[k]);
@@ -7689,21 +7791,108 @@ function venueMailConfig_() {
   var fromName = getConfigValue_('notifyFrom') || (districtName + ' 管理系統');
   return { districtName: districtName, fromName: fromName };
 }
+function isValidEmailAddress_(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+}
+function normalizeEmailList_(raw) {
+  var seen = {};
+  var valid = [];
+  var invalid = [];
+  String(raw || '').split(/[,，;；\s\r\n]+/).forEach(function (part) {
+    var s = String(part || '').trim();
+    if (!s) return;
+    var key = s.toLowerCase();
+    if (!isValidEmailAddress_(s)) {
+      invalid.push(s);
+      return;
+    }
+    if (!seen[key]) {
+      seen[key] = true;
+      valid.push(s);
+    }
+  });
+  return { valid: valid, invalid: invalid, joined: valid.join(',') };
+}
 /** HTML 轉義，避免申請人名字含特殊字元破壞電郵樣式 */
 function esc_(v) {
   return String(v == null ? '' : v)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
-/** 批准 → 寄「已批准 + 入場密碼」俾申請人 */
-function sendVenueApprovalEmail_(req, passcode, validFrom, validTo) {
-  var email = String(req.email || '').trim();
-  if (!email) { console.log('無申請人電郵，跳過批准通知。'); return; }
+/** 遞交申請 → 寄「已收到申請」確認電郵俾申請人 */
+function sendVenueSubmissionEmail_(req) {
+  var parsed = normalizeEmailList_(req && req.email);
+  if (!parsed.joined) {
+    return { sent: false, to: '', warn: String((req && req.email) || '').trim() ? '申請人電郵格式不正確，未能寄出申請確認電郵' : '' };
+  }
   var cfg = venueMailConfig_();
   var name = req.name || '申請人';
-  var validLine = (validFrom && validTo)
-    ? ('<div style="font-size:12px;color:#166534;margin-top:6px;">密碼生效時段：' + esc_(formatHkDateTime_(validFrom)) + ' → ' + esc_(formatHkDateTime_(validTo)) + '（已含前後 15 分鐘緩衝）</div>')
+  var venueLabel = req.venueName || req.venueId || '區總部';
+  var period = (req.startDate || '') + (req.endDate ? ' → ' + req.endDate : '');
+  var textBody =
+    '你好 ' + name + '，\n\n'
+    + '已收到你所提交嘅場地借用申請（目前狀態：待批核）：\n'
+    + '・申請編號：' + (req.refCode || '—') + '\n'
+    + '・場地：' + venueLabel + '\n'
+    + (req.activityName ? '・活動名稱：' + req.activityName + (req.attendeeCount ? '（' + req.attendeeCount + ' 人）' : '') + '\n' : '')
+    + '・時段：' + period + '\n'
+    + '・用途：' + (req.purpose || '—') + '\n\n'
+    + '區會職員批核並設定電子門鎖密碼後，入場密碼會另行寄到此電郵地址。\n'
+    + '如有查詢，請提供申請編號與區職員聯絡。\n\n'
+    + cfg.districtName + ' 敬啟';
+  var html =
+    '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:20px;border:1px solid #e1e4e8;border-radius:8px;">'
+    + '<h2 style="color:#1d4ed8;text-align:center;border-bottom:2px solid #bfdbfe;padding-bottom:10px;">🏛 已收到場地借用申請</h2>'
+    + '<p>你好 ' + esc_(name) + '，已收到你提交的場地借用申請（待區會職員審批）：</p>'
+    + '<div style="background:#f6f8fa;border-left:4px solid #2563eb;padding:14px 18px;margin:16px 0;font-size:14px;color:#444;line-height:1.8;">'
+    + '<b>申請編號：</b>' + esc_(req.refCode || '—') + '<br/>'
+    + '<b>場地：</b>' + esc_(venueLabel) + '<br/>'
+    + (req.activityName ? '<b>活動名稱：</b>' + esc_(req.activityName) + (req.attendeeCount ? '（' + esc_(req.attendeeCount) + ' 人）' : '') + '<br/>' : '')
+    + '<b>時段：</b>' + esc_(period) + '<br/>'
+    + '<b>用途：</b>' + esc_(req.purpose || '—')
+    + '</div>'
+    + '<p style="font-size:14px;color:#374151;line-height:1.7;">區職員批核並完成電子門鎖設定後，將會再寄出「批核結果及入場密碼」到此電郵地址（請同時留意垃圾郵件箱）。</p>'
+    + '<p style="font-size:13px;color:#666;text-align:center;margin-top:26px;">' + esc_(cfg.districtName) + ' 敬啟</p>'
+    + '</div>';
+  MailApp.sendEmail({
+    to: parsed.joined,
+    subject: '[' + cfg.districtName + '] 已收到場地借用申請（' + (req.refCode || '') + '）',
+    body: textBody,
+    htmlBody: html,
+    name: cfg.fromName,
+  });
+  return { sent: true, to: parsed.joined, warn: '' };
+}
+/** 批准 → 寄「已批准 + 入場密碼」俾申請人 */
+function sendVenueApprovalEmail_(req, passcode, validFrom, validTo) {
+  var parsed = normalizeEmailList_(req && req.email);
+  if (!parsed.joined) {
+    if (String((req && req.email) || '').trim()) {
+      throw new Error('申請人電郵格式無效（' + String(req.email).trim() + '）');
+    }
+    console.log('無申請人電郵，跳過批准通知。');
+    return;
+  }
+  var email = parsed.joined;
+  var cfg = venueMailConfig_();
+  var name = req.name || '申請人';
+  var validText = (validFrom && validTo)
+    ? (formatHkDateTime_(validFrom) + ' → ' + formatHkDateTime_(validTo) + '（已含前後 15 分鐘緩衝）')
     : '';
+  var validLine = validText
+    ? ('<div style="font-size:12px;color:#166534;margin-top:6px;">密碼生效時段：' + esc_(validText) + '</div>')
+    : '';
+  var textBody =
+    '你好 ' + name + '，你所申請的場地借用已獲批准：\n\n'
+    + '・場地：' + (req.venueName || req.venueId) + '\n'
+    + '・日期：' + (req.startDate || '') + (req.endDate ? ' → ' + req.endDate : '') + '\n'
+    + '・申請編號：' + (req.refCode || '') + '\n'
+    + '・用途：' + (req.purpose || '—') + '\n\n'
+    + '🔑 電子門鎖入場密碼：' + passcode + '#\n'
+    + '請於借用時段在門鎖鍵盤輸入 ' + passcode + ' 後按 # 開鎖。\n'
+    + (validText ? '密碼生效時段：' + validText + '\n' : '')
+    + '\n使用守則：使用完畢後請關閉所有電源、清走垃圾並鎖好場地。如有問題請聯絡區職員。\n\n'
+    + cfg.districtName + ' 敬啟';
   var html =
     '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:20px;border:1px solid #e1e4e8;border-radius:8px;">'
     + '<h2 style="color:#15803d;text-align:center;border-bottom:2px solid #bbf7d0;padding-bottom:10px;">✅ 場地借用已獲批准</h2>'
@@ -7725,15 +7914,22 @@ function sendVenueApprovalEmail_(req, passcode, validFrom, validTo) {
     + '</div>'
     + '<p style="font-size:13px;color:#666;text-align:center;margin-top:26px;">' + esc_(cfg.districtName) + ' 敬啟</p>'
     + '</div>';
-  MailApp.sendEmail({ to: email, subject: '[' + cfg.districtName + '] 場地借用已獲批准 - 入場密碼 ' + passcode, htmlBody: html, name: cfg.fromName });
+  MailApp.sendEmail({ to: email, subject: '[' + cfg.districtName + '] 場地借用已獲批准 - 入場密碼 ' + passcode, body: textBody, htmlBody: html, name: cfg.fromName });
 }
 /** 拒絕 / 取消 → 電郵通知申請人 */
 function sendVenueRejectionEmail_(req, status) {
-  var email = String(req.email || '').trim();
-  if (!email) { console.log('無申請人電郵，跳過拒絕通知。'); return; }
+  var parsed = normalizeEmailList_(req && req.email);
+  if (!parsed.joined) { console.log('無有效申請人電郵，跳過拒絕／取消通知。'); return; }
+  var email = parsed.joined;
   var cfg = venueMailConfig_();
   var name = req.name || '申請人';
   var title = status === 'cancelled' ? '已取消' : '未獲批准';
+  var textBody =
+    '你好 ' + name + '，你所申請的場地借用已' + title + '：\n\n'
+    + '・場地：' + (req.venueName || req.venueId) + '\n'
+    + '・日期：' + (req.startDate || '') + (req.endDate ? ' → ' + req.endDate : '') + '\n'
+    + (req.refCode ? '・申請編號：' + req.refCode + '\n' : '')
+    + '\n如有疑問，請聯絡區職員查詢。\n\n' + cfg.districtName + ' 敬啟';
   var html =
     '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:20px;border:1px solid #e1e4e8;border-radius:8px;">'
     + '<h2 style="color:#dc2626;text-align:center;border-bottom:2px solid #fecaca;padding-bottom:10px;">❌ 場地借用' + title + '</h2>'
@@ -7745,12 +7941,39 @@ function sendVenueRejectionEmail_(req, status) {
     + '<p style="font-size:14px;color:#555;">如有疑問，請聯絡區職員查詢。</p>'
     + '<p style="font-size:13px;color:#666;text-align:center;margin-top:26px;">' + esc_(cfg.districtName) + ' 敬啟</p>'
     + '</div>';
-  MailApp.sendEmail({ to: email, subject: '[' + cfg.districtName + '] 場地借用' + title, htmlBody: html, name: cfg.fromName });
+  try {
+    MailApp.sendEmail({ to: email, subject: '[' + cfg.districtName + '] 場地借用' + title, body: textBody, htmlBody: html, name: cfg.fromName });
+  } catch (e) {
+    console.error('借場拒絕／取消電郵發送失敗：' + String((e && e.message) || e));
+  }
 }
 function notifyStaff_(subject, body) {
-  var to = getConfigValue_('NOTIFY_STAFF_EMAIL');
-  if (!to) return;
-  try { MailApp.sendEmail(to, subject, body); } catch (e) {}
+  var rawTo = getConfigValue_('NOTIFY_STAFF_EMAIL');
+  if (!String(rawTo || '').trim()) return { sent: false, to: '', warn: '' };
+  var parsed = normalizeEmailList_(rawTo);
+  if (parsed.invalid.length) {
+    console.error('NOTIFY_STAFF_EMAIL 含有無效電郵格式：' + parsed.invalid.join(', '));
+  }
+  if (!parsed.joined) {
+    return { sent: false, to: '', warn: 'NOTIFY_STAFF_EMAIL 格式不正確，未能通知職員' };
+  }
+  try {
+    MailApp.sendEmail({
+      to: parsed.joined,
+      subject: subject,
+      body: body,
+      name: venueMailConfig_().fromName,
+    });
+    return {
+      sent: true,
+      to: parsed.joined,
+      warn: parsed.invalid.length ? ('NOTIFY_STAFF_EMAIL 部分電郵無效：' + parsed.invalid.join(', ')) : '',
+    };
+  } catch (e) {
+    var msg = '職員通知電郵發送失敗：' + String((e && e.message) || e);
+    console.error(msg);
+    return { sent: false, to: parsed.joined, warn: msg };
+  }
 }
 
 // ===================== 卡片（管理系統主控台） =====================
