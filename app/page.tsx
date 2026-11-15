@@ -30,6 +30,7 @@ export default function HomePage() {
   const [error, setError] = useState('');
   // v4.9.0：自行排列卡片次序（瀏覽器 localStorage，各用戶各自記住）
   const [cardOrder, setCardOrder] = useState<CardOrderMap>({});
+  const [reordering, setReordering] = useState(false);
   const dragFrom = useRef<number | null>(null);
 
   // 登入表單
@@ -488,6 +489,14 @@ export default function HomePage() {
       {!loading && !error && (
         <>
           <div className="card-order-bar">
+            <button
+              type="button"
+              className={`mini-btn${reordering ? ' primary' : ''}`}
+              onClick={() => setReordering(v => !v)}
+            >
+              {reordering ? '✅ 完成排位' : '🔀 自定排位'}
+            </button>
+            {reordering && <span className="muted" style={{ fontSize: 12 }}>按住卡片上下左右拖放即可調換位置</span>}
             <span className="muted" style={{ fontSize: 12 }}>
               ✋ 所有卡片均可拖拽、用 ▲▼ 或選「第幾位」排列；自動儲存於此瀏覽器，按區及帳戶分開記住
             </span>
