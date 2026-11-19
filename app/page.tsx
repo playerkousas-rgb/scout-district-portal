@@ -421,7 +421,7 @@ export default function HomePage() {
                     const res = await fetch('/api/proxy', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'venueUnlock', token: session.token }),
+                      body: JSON.stringify({ districtCode, action: 'venueUnlock', token: session.token }),
                     });
                     const data = await res.json();
                     if (data.ok) alert('🔓 已成功發送一鍵開門指令！');

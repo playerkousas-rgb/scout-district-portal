@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useRequireCard } from '@/lib/cardAccess';
+import { useDistrict } from '@/lib/useDistrict';
 import { canApproveHq } from '@/lib/accountRoles';
 import type {
   BackendHealthInfo,
@@ -78,6 +79,7 @@ function buildWhatsAppPasscodeUrl(b: VenueBooking): string {
 
 export default function VenueRegsPage() {
   const session = useRequireCard('venueReg');
+  const { districtCode } = useDistrict();
   const hq = canApproveHq(session);
 
   const [bookings, setBookings] = useState<VenueBooking[]>([]);
@@ -640,7 +642,7 @@ export default function VenueRegsPage() {
                   const res = await fetch('/api/proxy', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'venueUnlock', token: session.token }),
+                    body: JSON.stringify({ districtCode, action: 'venueUnlock', token: session.token }),
                   });
                   const data = await res.json();
                   if (data.ok) alert('🔓 已成功發送一鍵開門指令！');
