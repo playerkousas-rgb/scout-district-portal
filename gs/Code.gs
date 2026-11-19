@@ -522,6 +522,7 @@ function doPost(e) {
       case 'rejectVenueBooking':    return json(rejectVenueBooking_(b.token, b.id));
       case 'updateVenueBooking':    return json(updateVenueBooking_(b.token, b.id, b.patch || b));
       case 'getLockList':           return json(getLockList_(b.token));
+      case 'venueUnlock':           return json(venueUnlock_(b.token));
       case 'getVenueLockConfig':    return json(getVenueLockConfig_(b.token));
       case 'getDistrictCalendarSubcalendars': return json(getDistrictCalendarSubcalendars_(b.token));
       case 'saveDistrictCalendarSubcalendar': return json(saveDistrictCalendarSubcalendar_(b.token, b.subcalendarId));
@@ -7251,6 +7252,46 @@ function getLockList_(token) {
         };
       }),
     });
+  } catch (e) {
+    return err(String((e && e.message) || e));
+  }
+}
+
+/** 一鍵遠端開門：TTLock / Sciener 門鎖即時開鎖（不產生密碼，只發開門指令；管理系統職員可用） */
+function venueUnlock_(token) {
+  var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  if (ttlockDisabled_()) {
+    return ok({ ok: true, simulated: true, msg: '電子鎖設定為跳過寫鎖（模擬開門成功，未發出實體指令）' });
+  }
+  var c = lockCfg_();
+  var missing = [];
+  if (!c.clientId) missing.push('SCIENER_CLIENT_ID');
+  if (!c.clientSecret) missing.push('SCIENER_CLIENT_SECRET');
+  if (!c.username) missing.push('SCIENER_USERNAME');
+  if (!c.password) missing.push('SCIENER_PASSWORD');
+  if (!c.lockId) missing.push('SCIENER_LOCK_ID');
+  if (missing.length) return err('未設定電子鎖金鑰：缺少 ' + missing.join('、') + '（可喺場地借用審批頁「電子鎖連線設定」填寫）');
+  try {
+    var conn = ttlockConnect_({ fetchLocks: true, targetLockId: c.lockId });
+    var found = conn.locks.some(function (lk) { return String(lk.lockId) === String(c.lockId); });
+    if (!found) return err('找不到 Lock ID ' + c.lockId + '，請先喺「讀取鎖列表」綁定門鎖，確認網關在線');
+    var payload = {
+      clientId: conn.clientId,
+      accessToken: conn.accessToken,
+      lockId: String(c.lockId),
+      date: String(Date.now()),
+    };
+    var res = UrlFetchApp.fetch(conn.apiBase + '/v3/lock/unlock', {
+      method: 'post', payload: payload, muteHttpExceptions: true,
+    });
+    var data;
+    try { data = JSON.parse(res.getContentText()); } catch (e) { data = { errmsg: res.getContentText().slice(0, 160) }; }
+    var httpOk = res.getResponseCode() >= 200 && res.getResponseCode() < 300;
+    var apiOk = !data || data.errcode === undefined || Number(data.errcode) === 0;
+    if (httpOk && apiOk) {
+      return ok({ ok: true, apiBase: conn.apiBase, lockId: c.lockId });
+    }
+    return err('TTLock 開門失敗：' + explainTtlockError_(data));
   } catch (e) {
     return err(String((e && e.message) || e));
   }
