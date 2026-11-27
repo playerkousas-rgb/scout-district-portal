@@ -1941,6 +1941,17 @@ function confirmVenueBooking_(token, id) {
  */
 function approveVenueBooking_(token, id, opts) {
   var t = requirePerm_(token, 'canVenue'); if (t.error) return err(t.error);
+  // 同一 Apps Script 的批核／補發須序列化，避免兩筆申請同時選中一個空閒槽位。
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return err('另一筆申請正在處理電子鎖，請稍後重試');
+  try {
+    return approveVenueBookingLocked_(t, id, opts);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function approveVenueBookingLocked_(t, id, opts) {
   opts = opts || {};
   var isReissue = isTrue_(opts.reissue);
   var allowFallback = isTrue_(opts.allowFallback);
@@ -7326,8 +7337,12 @@ function listTtlockKeyboardPwds_(conn, lockId) {
     }
     rows = rows.concat(page);
     var total = Number(data.total || data.totalCount || 0);
-    if (page.length < pageSize || (total && rows.length >= total)) break;
-    if (pageNo === 20 && total && rows.length < total) throw new Error('TTLock 密碼清單超過安全查詢上限，停止新增避免漏判重複碼');
+    if (total && rows.length >= total) break;
+    if (page.length < pageSize) {
+      if (total && rows.length < total) throw new Error('TTLock 密碼清單不完整，停止寫鎖避免漏判重複碼');
+      break;
+    }
+    if (pageNo === 20) throw new Error('TTLock 密碼清單超過安全查詢上限，停止寫鎖避免漏判重複碼');
   }
   return rows;
 }
@@ -7340,8 +7355,8 @@ function ttlockPwdOverlaps_(record, startMs, endMs) {
   return oldEnd > Date.now();
 }
 
-/** 重用既有 keyboardPwdId，只更新密碼名稱及有效期，不另開一條 key。 */
-function changeTtlockPasscodePeriod_(conn, lockId, record, name, validFrom, validTo) {
+/** 重用既有 keyboardPwdId；指定新碼時連同有效期經網關寫鎖。 */
+function changeTtlockPasscodePeriod_(conn, lockId, record, name, validFrom, validTo, newPasscode) {
   var payload = {
     clientId: conn.clientId,
     accessToken: conn.accessToken,
@@ -7350,19 +7365,25 @@ function changeTtlockPasscodePeriod_(conn, lockId, record, name, validFrom, vali
     keyboardPwdName: String(name || '申請人').substring(0, 30),
     startDate: String(validFrom.getTime()),
     endDate: String(validTo.getTime()),
+    // 不指定時 TTLock 預設藍牙模式，只更新雲端；必須經網關修改實體鎖。
+    changeType: '2',
     date: String(Date.now()),
   };
+  if (newPasscode !== undefined && newPasscode !== null) payload.newKeyboardPwd = String(newPasscode);
   var res = UrlFetchApp.fetch(conn.apiBase + '/v3/keyboardPwd/change', {
     method: 'post', payload: payload, muteHttpExceptions: true,
   });
   var data;
   try { data = JSON.parse(res.getContentText()); }
-  catch (e) { data = { errmsg: res.getContentText().slice(0, 160) }; }
+  catch (e) { data = { errmsg: 'TTLock 回應格式不正確，無法確認實體鎖已更新' }; }
   if (res.getResponseCode() >= 200 && res.getResponseCode() < 300
-    && (!data || data.errcode === undefined || Number(data.errcode) === 0)) {
-    return { ok: true, data: data || {} };
+    && data && (data.errcode === 0 || data.errcode === '0')) {
+    return { ok: true, data: data };
   }
-  return { ok: false, data: data || {} };
+  if (!data || typeof data !== 'object' || data.errcode === undefined) {
+    data = { errmsg: 'TTLock 回應缺少成功狀態，無法確認實體鎖已更新' };
+  }
+  return { ok: false, data: data };
 }
 
 /** 只把明確的重複鍵碼錯誤當作撞碼；其他 API 失敗不可誤跳到 +1。 */
@@ -7371,6 +7392,35 @@ function isTtlockPwdCollision_(data) {
   if (code === -3007 || code === 3007) return true;
   var message = String((data && (data.errmsg || data.description || data.message)) || '').toLowerCase();
   return /duplicate|already exists|already used|password exists|keyboard.?pwd exists|重複|已存在|已使用/.test(message);
+}
+
+/** 只把事先指定、名稱完全一致的「限時1」至「限時30」當作共用槽位。 */
+function isDesignatedTtlockSlot_(row) {
+  return /^限時(?:[1-9]|[12][0-9]|30)$/.test(String((row && row.keyboardPwdName) || '').trim());
+}
+
+/** 已過期且沒有尚未結束的本系統預約，才可改寫指定槽位。資料不明則保留。 */
+function availableDesignatedTtlockSlots_(rows, lockId) {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET.VENUE_REQ);
+  if (!sh) throw new Error('找不到 VenueBookings，無法安全檢查密碼槽位預約');
+  var bookings = readSheet_(SHEET.VENUE_REQ);
+  var now = Date.now();
+  return rows.filter(function (row) {
+    var name = String(row.keyboardPwdName || '').trim();
+    var id = String(row.keyboardPwdId || '').trim();
+    var end = Number(row.endDate);
+    if (!isDesignatedTtlockSlot_(row) || !id || String(row.isCustom) !== '1'
+      || String(row.keyboardPwdType) !== '3' || !isFinite(end) || end <= 0 || end >= now
+      || (row.lockId != null && String(row.lockId) !== String(lockId))) return false;
+    // 重名或同一 ID 有多筆資料時，無法確定要修改的實體記錄。
+    if (rows.filter(function (other) { return String(other.keyboardPwdName || '').trim() === name; }).length !== 1
+      || rows.filter(function (other) { return String(other.keyboardPwdId || '').trim() === id; }).length !== 1) return false;
+    return !bookings.some(function (booking) {
+      if (String(booking.pwdRef || '').trim() !== id) return false;
+      var bookingEnd = parseVenueDateMs_(booking.endDate || booking.startDate, true);
+      return !isFinite(bookingEnd) || bookingEnd + 15 * 60 * 1000 >= now;
+    });
+  }).sort(function (a, b) { return Number(a.endDate) - Number(b.endDate); });
 }
 
 /** 建立或重用限時密碼；ttlockDisabled=TRUE 時返回模擬密碼。 */
@@ -7408,6 +7458,26 @@ function createTtlockPasscode_(phone, startDate, endDate, name, venueLockId) {
   var fatalCodes = [-2012, -3002, -3003, 30002, -4037, -2018, 20002, -1009, -3006, -2019, -3009, 10001, 10002, 10003, 10004];
   // 為免清單讀取失敗時又新增重複 key，先確認可讀取鎖上密碼清單；失敗即停止，不寫鎖。
   var existingPwds = listTtlockKeyboardPwds_(conn, lockId);
+  var availableSlots = availableDesignatedTtlockSlots_(existingPwds, lockId);
+  if (availableSlots.length) {
+    // 舊數字可能已被前使用者知道；選擇與清單中所有現有密碼不同的新碼。
+    var newSlotCode = candidates.filter(function (candidate) {
+      return !existingPwds.some(function (row) { return String(row.keyboardPwd || '').trim() === candidate; });
+    })[0];
+    if (newSlotCode) {
+      var slot = availableSlots[0];
+      var slotChange = changeTtlockPasscodePeriod_(conn, lockId, slot, slot.keyboardPwdName, validFrom, validTo, newSlotCode);
+      if (!slotChange.ok) {
+        // 失敗或結果不明時不要繼續新增／嘗試另一槽，避免重複發碼。
+        throw new Error('指定密碼槽位 ' + slot.keyboardPwdName + ' 更新失敗；未發出密碼：' + explainTtlockError_(slotChange.data));
+      }
+      return {
+        passcode: newSlotCode, pwdRef: String(slot.keyboardPwdId), simulated: false,
+        lockWritten: true, validFrom: validFrom, validTo: validTo,
+        apiBase: conn.apiBase, lockId: String(lockId), reused: true,
+      };
+    }
+  }
 
   for (var i = 0; i < candidates.length; i++) {
     var code = candidates[i];
@@ -7420,25 +7490,15 @@ function createTtlockPasscode_(phone, startDate, endDate, name, venueLockId) {
       continue;
     }
 
-    // 若同碼只存在於已過期／不重疊的舊記錄，優先更新該 keyboardPwdId。
+    // 指定槽位只可走上面的嚴格檢查及換碼流程；不可把舊數字重新啟用。
+    if (matching.some(isDesignatedTtlockSlot_)) {
+      lastErr = { errcode: -3007, errmsg: '候選碼屬指定槽位，已跳過' };
+      continue;
+    }
+    // 非指定舊密碼亦不可隨意修改或直接重新啟用（前使用者可能仍知道密碼）。
     if (matching.length) {
-      var reusable = matching.filter(function (row) { return !!row.keyboardPwdId; })[0];
-      if (!reusable) {
-        throw new Error('找到舊鍵盤碼 ' + code + '，但清單沒有 keyboardPwdId；為免新增重複 key，已停止寫鎖');
-      }
-      var changed = changeTtlockPasscodePeriod_(conn, lockId, reusable, name, validFrom, validTo);
-      if (changed.ok) {
-        reusable.startDate = validFrom.getTime();
-        reusable.endDate = validTo.getTime();
-        reusable.keyboardPwdName = String(name || '申請人').substring(0, 30);
-        return {
-          passcode: code, pwdRef: String(reusable.keyboardPwdId), simulated: false,
-          lockWritten: true, validFrom: validFrom, validTo: validTo,
-          apiBase: conn.apiBase, lockId: String(lockId), reused: true,
-        };
-      }
-      lastErr = changed.data;
-      throw new Error('找到同碼過期 key（ID ' + reusable.keyboardPwdId + '），但 TTLock 更新失敗；為免新增另一條 key，已停止寫鎖：' + explainTtlockError_(lastErr));
+      lastErr = { errcode: -3007, errmsg: '候選碼已存在，已跳過' };
+      continue;
     }
 
     var payload = {
