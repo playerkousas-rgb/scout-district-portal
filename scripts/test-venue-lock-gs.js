@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.31.0）
+ * 場地借用「一鍵批准＋製作電子鎖匙＋回傳」端到端整合測試（v4.37.1）
  *
  * 涵蓋：
  *  1. 跨區自動探測（api.sciener.com 10003 → 自動切換 euapi.ttlock.com + 852 電話帳號相容）
@@ -130,10 +130,12 @@ function mockDriveFile(id) {
   }
   return driveFiles[id];
 }
+let denyScriptLock = false;
 const ttlockState = {
   gatewayOffline: false,
   returnExistingPwdIdOnce: false,
   returnMissingPwdIdOnce: false,
+  returnUnconfirmedChangeOnce: false,
   rejectCodes: new Set(),
   addedPwds: [],
   existingPwds: [],
@@ -187,7 +189,7 @@ const ctx = {
     getActiveUser: () => ({ getEmail: () => 'hq@skwscout.org.hk' }),
     getEffectiveUser: () => ({ getEmail: () => 'sysadmin@skwscout.org.hk' }),
   },
-  LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
+  LockService: { getScriptLock: () => ({ tryLock: () => !denyScriptLock, releaseLock: () => {} }) },
   Utilities: {
     formatDate: (d, _tz, fmt) => {
       const iso = new Date(d.getTime() + 8 * 3600 * 1000).toISOString();
@@ -260,8 +262,22 @@ const ctx = {
       if (/\/v3\/keyboardPwd\/change$/.test(url)) {
         const p = parseFormPayload(opt.payload);
         assert.strictEqual(p.accessToken, 'tok-eu-valid');
+        assert.strictEqual(p.lockId, '170488');
+        assert.strictEqual(p.changeType, '2', '重用密碼時必須經網關寫入實體鎖，不能只更新雲端');
+        assert.ok(p.startDate && p.endDate, '修改有效期必須傳入起止時間');
+        if (ttlockState.gatewayOffline) return reply(200, { errcode: -2012, errmsg: 'lock is not connected to any gateway' });
+        if (ttlockState.returnUnconfirmedChangeOnce) {
+          ttlockState.returnUnconfirmedChangeOnce = false;
+          return reply(200, {});
+        }
         const found = ttlockState.existingPwds.find(x => String(x.keyboardPwdId) === String(p.keyboardPwdId));
         if (!found) return reply(200, { errcode: -3004, errmsg: 'keyboardPwdId does not exist' });
+        if (p.newKeyboardPwd !== undefined) {
+          if (ttlockState.existingPwds.some(x => String(x.keyboardPwdId) !== String(p.keyboardPwdId) && String(x.keyboardPwd) === String(p.newKeyboardPwd))) {
+            return reply(200, { errcode: -3007, errmsg: 'duplicate keyboardPwd' });
+          }
+          found.keyboardPwd = String(p.newKeyboardPwd);
+        }
         found.startDate = Number(p.startDate);
         found.endDate = Number(p.endDate);
         found.keyboardPwdName = p.keyboardPwdName;
@@ -274,6 +290,8 @@ const ctx = {
         assert.strictEqual(url, 'https://euapi.ttlock.com/v3/keyboardPwd/add');
         assert.strictEqual(p.accessToken, 'tok-eu-valid');
         assert.strictEqual(p.lockId, '170488');
+        assert.strictEqual(p.addType, '2', '新密碼必須經網關寫入');
+        assert.strictEqual(p.keyboardPwdType, '3', '新密碼必須是限時密碼');
         if (ttlockState.gatewayOffline) {
           return reply(200, { errcode: -2012, errmsg: 'lock is not connected to any gateway' });
         }
@@ -423,7 +441,7 @@ function callPost(action, body = {}) {
   return JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify({ action, apiKey, ...body }) } }));
 }
 
-console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (GS v4.36.0)');
+console.log('🔑 測試場地借用「一鍵批准＋製作電子鎖匙＋回傳」全流程 (GS v4.37.1)');
 
 // 1. 登入超管／DC 並檢查初始健康狀態
 const assertion = JSON.stringify({ email: 'sheep', exp: Date.now() + 30_000, nonce: crypto.randomBytes(16).toString('hex') });
@@ -436,12 +454,12 @@ const token = loginRes.data.token;
 
 const h0 = callGet('getHealthCheck');
 assert.strictEqual(h0.ok, true);
-assert.strictEqual(h0.data.version, '4.36.0');
+assert.strictEqual(h0.data.version, '4.37.1');
 assert.strictEqual(h0.data.ttlockConfigured, false);
 assert.strictEqual(h0.data.lockIdSet, false);
 assert.strictEqual(h0.data.feedbackReady, true, 'DistrictFeedback should be ready after setup');
 assert.strictEqual(h0.data.dcFeedbackReady, true, 'DCConfidential should be ready after setup');
-console.log('  ✓ getHealthCheck 回傳版本 4.36.0、意見箱就緒及電子鎖初始狀態');
+console.log('  ✓ getHealthCheck 回傳版本 4.37.1、意見箱就緒及電子鎖初始狀態');
 assert.strictEqual(h0.data.tokenSecretSet, true, 'setup should create a private token signing secret');
 assert.strictEqual(h0.data.masterProxyBridgeSet, true, 'setup should create the Vercel-to-Apps-Script bridge secret');
 assert.ok(props.PORTAL_TOKEN_SECRET && props.PORTAL_TOKEN_SECRET.length >= 32, 'token secret should be stored in Script Properties');
@@ -769,11 +787,12 @@ assert.deepStrictEqual(teamupEvents[secondPendingOverlap.data.teamupEventId].sub
 console.log('  ✓ 藍色申請中相撞仍可並存；紅色已批先由後台判斷');
 
 // 8. 模擬 Gateway 離線（-2012）：一鍵批准必須明確報錯，唔可以靜默假批核或寄假密碼
+const emailsBeforeApproval = sentEmails.length;
 ttlockState.gatewayOffline = true;
 const failApprove = callPost('approveVenueBooking', { token, id: booking1Id });
 assert.strictEqual(failApprove.ok, false, '網關離線時預設必須拒絕假批核');
 assert.ok(failApprove.error.includes('Gateway') || failApprove.error.includes('網關'), '錯誤訊息需清楚指出網關問題：' + failApprove.error);
-assert.strictEqual(sentEmails.length, 0, '寫鎖失敗時絕不可寄出無效密碼電郵');
+assert.strictEqual(sentEmails.length, emailsBeforeApproval, '寫鎖失敗時絕不可寄出無效密碼電郵');
 const afterFailList = callGet('getVenueBookings', { token });
 assert.strictEqual(afterFailList.data.find(x => x.id === booking1Id).status, 'pending', '失敗後狀態必須維持 pending 以便重試');
 console.log('  ✓ Gateway 離線時嚴格攔截，不吞錯、不假批核、不寄假密碼');
@@ -815,8 +834,8 @@ assert.deepStrictEqual(teamupEvents[approvedEvId].custom, {
   '1': '12',
 }, '批核事件需保留參加人數自訂欄位');
 assert.strictEqual(teamupEvents[approvedEvId].who, '陳大文領袖 團長', '批核事件需保留領袖姓名及職位');
-assert.strictEqual(sentEmails.length, 1);
-assert.ok(sentEmails[0].htmlBody.includes('0512#'), '電郵應包含入場密碼及 # 提示');
+assert.strictEqual(sentEmails.length, emailsBeforeApproval + 1);
+assert.ok(sentEmails.at(-1).htmlBody.includes('0512#'), '電郵應包含入場密碼及 # 提示');
 console.log('  ✓ 一鍵批准完整打通：香港時區準確、前導 0 密碼純文字寫回 Sheet、pwdRef／Teamup／電郵全部回傳');
 
 // 10. 驗證撞碼自動退避規則（頭4位 '0512' 被拒 → 先試電話尾4位 '9876'，尾4亦撞才 +1 得 '0513'）及 confirmOnly → reissue 補發流程
@@ -887,31 +906,53 @@ assert.strictEqual(approve3.data.passcode, '9365');
 assert.strictEqual(approve3.data.teamupSynced, true, '批核時 Teamup 亦應零錯誤同步');
 console.log('  ✓ .000Z／Date 時間自動正規化為香港 +08:00 無毫秒格式，徹底消除 Teamup HTTP 400');
 
-// 12. 有效頭4碼撞碼時改試電話尾4；過期同碼優先更新舊 keyboardPwdId，不新增另一條 key
+// 12. 指定已過期槽位優先換碼重用，不新增另一條 key
 const expiredPwdId = 909001;
 const oldStart = Date.now() - 30 * 24 * 60 * 60 * 1000;
 const oldEnd = Date.now() - 24 * 60 * 60 * 1000;
 ttlockState.existingPwds.push({
   keyboardPwdId: expiredPwdId, lockId: 170488, keyboardPwd: '6107',
-  startDate: oldStart, endDate: oldEnd, keyboardPwdName: '舊申請',
+  startDate: oldStart, endDate: oldEnd, keyboardPwdName: '限時1', isCustom: 1, keyboardPwdType: 3,
 });
 const addedBeforeReuse = ttlockState.addedPwds.length;
 const changedBeforeReuse = ttlockState.changedPwds.length;
+
+// 過期碼重用也必須真正透過網關；離線或回應不明時不得批核、寄信或改用新碼。
+const reuseSubmit = callPost('submitVenueRequest', {
+  venueId: 'HQ-1704', name: '重用失敗測試', phone: '61070452', email: 'reuse@example.com',
+  activityName: '重用失敗測試', attendeeCount: 3, agreeRules: true,
+  startDate: '2027-06-10T19:00', endDate: '2027-06-10T20:00',
+});
+assert.strictEqual(reuseSubmit.ok, true);
+const mailsBeforeReuseFailure = sentEmails.length;
+ttlockState.gatewayOffline = true;
+const offlineReuse = callPost('approveVenueBooking', { token, id: reuseSubmit.data.id });
+assert.strictEqual(offlineReuse.ok, false, '重用舊碼時網關離線不得假報成功');
+ttlockState.gatewayOffline = false;
+ttlockState.returnUnconfirmedChangeOnce = true;
+const unknownReuse = callPost('approveVenueBooking', { token, id: reuseSubmit.data.id });
+assert.strictEqual(unknownReuse.ok, false, '未有成功狀態的回應不得假報成功');
+assert.strictEqual(sentEmails.length, mailsBeforeReuseFailure, '未能確認寫鎖不得發出密碼電郵');
+const reuseRow = ctx.readSheet_('VenueBookings').find(x => String(x.id) === String(reuseSubmit.data.id));
+assert.strictEqual(reuseRow.status, 'pending', '寫鎖失敗不得批核');
+assert.strictEqual(ttlockState.addedPwds.length, addedBeforeReuse, '更新失敗不可轉為新增');
+assert.strictEqual(ttlockState.changedPwds.length, changedBeforeReuse);
+
 const reusedExpired = ctx.createTtlockPasscode_(
   '61070452', '2027-06-10T19:00', '2027-06-10T20:00', '重用過期碼測試', '170488'
 );
-assert.strictEqual(reusedExpired.passcode, '6107');
+assert.strictEqual(reusedExpired.passcode, '0452', '重用槽位時要換掉舊密碼');
 assert.strictEqual(reusedExpired.pwdRef, String(expiredPwdId));
 assert.strictEqual(reusedExpired.reused, true);
 assert.strictEqual(ttlockState.addedPwds.length, addedBeforeReuse, '重用過期碼不得呼叫 add 新增 key');
 assert.strictEqual(ttlockState.changedPwds.length, changedBeforeReuse + 1, '應呼叫 change 更新舊 key 時段');
 
-// 舊 key 的時段雖早於新申請，但它此刻尚未到期；不可改寫原 key，應改用尾4 0452。
-// 這覆蓋「前一位用戶下午時段仍有效，後一位申請晚些時段」的實際情況。
+// 此槽位尚未到期，另一筆申請不得改寫它；舊數字已不在鎖清單，可用另一條 key。
 const tailFirst = ctx.createTtlockPasscode_(
   '61070452', '2027-07-10T19:00', '2027-07-10T20:00', '尾4測試', '170488'
 );
-assert.strictEqual(tailFirst.passcode, '0452', '頭4撞碼必須先改用尾4；兩者都撞才可 +1');
+assert.strictEqual(tailFirst.passcode, '6107', '不可覆寫尚未到期的槽位');
+assert.notStrictEqual(tailFirst.pwdRef, String(expiredPwdId));
 
 // 12b. 活躍 10–12 的 6107 不可被 13–14 申請當作成功；新增 API 若錯回既有 ID，必須拒絕並試下一候選。
 const existingActiveId = 700001;
@@ -940,7 +981,64 @@ assert.throws(
 assert.strictEqual(ttlockState.addedPwds.length, addedBeforeMissingIdCase, '無 ID 回應不得假裝成功新增');
 console.log('  ✓ TTLock 拒絕既有／缺失 keyboardPwdId 假成功；13–14 不會誤報 6107 已設定');
 
-console.log('  ✓ TTLock 過期鍵碼更新原 key；有效頭4撞碼改用尾4 0452');
+console.log('  ✓ 指定過期槽換碼更新原 key；尚未到期的槽位不會被覆寫');
+
+// 12c. 「限時1–30」只可重用確認過期的自訂限時槽；新碼不可沿用舊碼。
+ttlockState.existingPwds.length = 0;
+const slot = { keyboardPwdId: 811001, lockId: 170488, keyboardPwd: '6107', keyboardPwdName: '限時1', isCustom: 1, keyboardPwdType: 3, startDate: oldStart, endDate: oldEnd };
+const reservedSlot = { keyboardPwdId: 811002, lockId: 170488, keyboardPwd: '3456', keyboardPwdName: '限時2', isCustom: 1, keyboardPwdType: 3, startDate: oldStart, endDate: oldEnd - 1000 };
+const futureSlot = { keyboardPwdId: 811003, lockId: 170488, keyboardPwd: '4567', keyboardPwdName: '限時3', isCustom: 1, keyboardPwdType: 3, startDate: oldStart, endDate: Date.now() + 86400000 };
+const permanentSlot = { keyboardPwdId: 811004, lockId: 170488, keyboardPwd: '5678', keyboardPwdName: '限時4', isCustom: 1, keyboardPwdType: 2, startDate: oldStart, endDate: oldEnd };
+const randomSlot = { keyboardPwdId: 811005, lockId: 170488, keyboardPwd: '6789', keyboardPwdName: '限時5', isCustom: 0, keyboardPwdType: 3, startDate: oldStart, endDate: oldEnd };
+const unknownSlot = { keyboardPwdId: 811006, lockId: 170488, keyboardPwd: '7890', keyboardPwdName: '限時6', keyboardPwdType: 3, startDate: oldStart, endDate: oldEnd };
+const otherName = { keyboardPwdId: 811007, lockId: 170488, keyboardPwd: '8901', keyboardPwdName: '其他', isCustom: 1, keyboardPwdType: 3, startDate: oldStart, endDate: oldEnd };
+ttlockState.existingPwds.push(slot, reservedSlot, futureSlot, permanentSlot, randomSlot, unknownSlot, otherName);
+const bookingHeader = sheets.VenueBookings._data[0];
+const reservationRow = bookingHeader.map(h => ({ id: 'reserved-slot-test', pwdRef: String(reservedSlot.keyboardPwdId), startDate: '2027-12-01T10:00', endDate: '2027-12-01T11:00', status: 'approved' })[h] || '');
+sheets.VenueBookings.appendRow(reservationRow);
+const candidatesForReuse = ctx.availableDesignatedTtlockSlots_(ttlockState.existingPwds, '170488');
+assert.deepStrictEqual(Array.from(candidatesForReuse, x => x.keyboardPwdId), [811001], '只可選有資料證明已過期及無預約的指定自訂限時槽');
+const addedBeforeSlot = ttlockState.addedPwds.length;
+const changedBeforeSlot = ttlockState.changedPwds.length;
+const emailsBeforeSlot = sentEmails.length;
+denyScriptLock = true;
+const busyApproval = callPost('approveVenueBooking', { token, id: reuseSubmit.data.id });
+denyScriptLock = false;
+assert.strictEqual(busyApproval.ok, false, '同一時間另一批核正進行時應拒絕');
+assert.strictEqual(ttlockState.changedPwds.length, changedBeforeSlot);
+ttlockState.gatewayOffline = true;
+const offlineSlot = callPost('approveVenueBooking', { token, id: reuseSubmit.data.id });
+ttlockState.gatewayOffline = false;
+assert.strictEqual(offlineSlot.ok, false, '指定槽更新失敗不可批核或改為新增');
+ttlockState.returnUnconfirmedChangeOnce = true;
+const unknownSlotResult = callPost('approveVenueBooking', { token, id: reuseSubmit.data.id });
+assert.strictEqual(unknownSlotResult.ok, false, '指定槽更新回應不明不可假報成功');
+assert.strictEqual(sentEmails.length, emailsBeforeSlot);
+assert.strictEqual(ttlockState.addedPwds.length, addedBeforeSlot);
+assert.strictEqual(slot.keyboardPwd, '6107');
+const slotApproval = callPost('approveVenueBooking', { token, id: reuseSubmit.data.id });
+assert.strictEqual(slotApproval.ok, true, JSON.stringify(slotApproval));
+assert.strictEqual(slotApproval.data.pwdRef, String(slot.keyboardPwdId));
+assert.strictEqual(slotApproval.data.passcode, '0452', '候選頭碼是槽位舊碼時要改用另一組新碼');
+assert.strictEqual(slot.keyboardPwd, '0452');
+assert.strictEqual(slot.keyboardPwdName, '限時1', '重用後必須保留指定名稱');
+assert.strictEqual(ttlockState.addedPwds.length, addedBeforeSlot, '重用槽位不得新增密碼');
+assert.strictEqual(ttlockState.changedPwds.length, changedBeforeSlot + 1);
+assert.strictEqual(sentEmails.length, emailsBeforeSlot + 1);
+assert.strictEqual(slot.startDate, Date.parse('2027-06-10T18:45:00+08:00'));
+assert.strictEqual(slot.endDate, Date.parse('2027-06-10T20:15:00+08:00'));
+assert.strictEqual(reservedSlot.keyboardPwd, '3456');
+assert.strictEqual(futureSlot.keyboardPwd, '4567');
+const changedBeforeOtherName = ttlockState.changedPwds.length;
+const fallbackNew = ctx.createTtlockPasscode_('89011234', '2027-06-11T19:00', '2027-06-11T20:00', '不改其他密碼', '170488');
+assert.strictEqual(fallbackNew.passcode, '1234', '非指定舊碼即使已過期也要跳過而非覆寫');
+assert.strictEqual(fallbackNew.reused, false);
+assert.strictEqual(ttlockState.changedPwds.length, changedBeforeOtherName);
+assert.strictEqual(otherName.keyboardPwd, '8901');
+// 移除人工測試資料，避免影響之後測試。
+sheets.VenueBookings._data.pop();
+ttlockState.existingPwds.length = 0;
+console.log('  ✓ 指定過期槽經網關換碼重用；保護未到期／未來預約／非自訂或資料不明記錄');
 
 // 13. Teamup 建紅色失敗保留藍色；刪除藍色失敗時回滾紅色，避免留下兩筆
 const submit4 = callPost('submitVenueRequest', {
